@@ -131,7 +131,7 @@ actor AgentServer {
         }
 
         router.get(RouterPath(AgentServerAPI.healthPath)) { _, _ in
-            HealthResponse(status: "ok")
+            SuccessResponse()
         }
 
         // For when iCloud syncing fails: the chats and their histories, read directly from this Mac.
@@ -167,7 +167,7 @@ actor AgentServer {
                 } catch let error as SendMessageError {
                     throw HTTPError(.notFound, message: error.localizedDescription)
                 }
-                return try HealthResponse(status: "ok").response(from: request, context: context)
+                return try SuccessResponse().response(from: request, context: context)
             case .prompt(let prompt, let target, let permissionModeOverride, let permissionTimeout):
                 events = sendMessage(
                     prompt,
@@ -234,7 +234,7 @@ actor AgentServer {
 
 }
 
-extension HealthResponse: ResponseEncodable {}
+extension SuccessResponse: ResponseEncodable {}
 extension XcodeProject: ResponseEncodable {}
 extension ChatEvent: ResponseEncodable {}
 

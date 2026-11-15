@@ -10,10 +10,10 @@ import Foundation
 nonisolated enum AgentServerAPI {
     static let defaultPort = 8765
 
-    /// `GET /health` → `HealthResponse`
+    /// `GET /health` → `SuccessResponse`
     static let healthPath = "health"
     /// `POST /message` with a `MessageRequest` body: `.prompt` → SSE stream of `ChatEvent`s (event name =
-    /// `ChatEvent.type`), or an `errorEvent` if the turn fails; `.permissionAnswer` → `HealthResponse`, or 404.
+    /// `ChatEvent.type`), or an `errorEvent` if the turn fails; `.permissionAnswer` → `SuccessResponse`, or 404.
     static let messagePath = "message"
     /// `GET /projects` → `[XcodeProject]`: every project with Xcode chats, with its chats (`XcodeChats.listProjects`).
     static let projectsPath = "projects"
@@ -37,9 +37,12 @@ nonisolated struct AuthHeader: Codable, Hashable, Sendable {
     var value: String
 }
 
-/// Response of `GET /health`.
-nonisolated struct HealthResponse: Codable, Sendable {
-    var status: String
+nonisolated struct SuccessResponse: Codable, Sendable {
+    let status: String
+    
+    init() {
+        self.status = "ok"
+    }
 }
 
 /// The JSON body of an error: `{"error": {"message": …}}` for a failed request (Hummingbird's format),

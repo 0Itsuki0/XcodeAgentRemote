@@ -34,14 +34,14 @@ nonisolated struct AgentServerClient: Sendable {
     }
 
     /// `GET /health`
-    func health() async throws -> HealthResponse {
+    func health() async throws -> SuccessResponse {
         let data = try await NetworkService.sendURLRequest(
             url: baseURL.appending(path: AgentServerAPI.healthPath),
             method: "GET",
             headers: Self.headers(["Accept": "application/json"]),
             body: nil
         )
-        return try NetworkService.decode(HealthResponse.self, from: data)
+        return try NetworkService.decode(SuccessResponse.self, from: data)
     }
 
     /// `GET /projects`: every project with Xcode chats on the Mac, with its chats (for when iCloud syncing fails).
