@@ -5,19 +5,31 @@
 //  Created by Itsuki on 2026/11/14.
 //
 
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @main
 struct XcodeAgentRemoteApp: App {
+    #if os(iOS)
+        @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #else
+        @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #endif
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            ItemModel.self
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let modelConfiguration = ModelConfiguration(
+            schema: schema,
+            cloudKitDatabase: .private(CloudManager.containerIdentifier)
+        )
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(
+                for: schema,
+                configurations: [modelConfiguration]
+            )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
