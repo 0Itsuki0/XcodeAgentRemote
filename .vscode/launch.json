@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:XcodeAgentRemote}/Tools/xcode-chat",
+            "name": "Debug xcode-chat (Tools/xcode-chat)",
+            "target": "xcode-chat",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug xcode-chat (Tools/xcode-chat)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:XcodeAgentRemote}/Tools/xcode-chat",
+            "name": "Release xcode-chat (Tools/xcode-chat)",
+            "target": "xcode-chat",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release xcode-chat (Tools/xcode-chat)"
+        }
+    ]
+}

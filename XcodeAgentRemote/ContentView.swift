@@ -12,6 +12,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var items: [ItemModel]
+    @State private var sendMessageOutput: [String] = []
 
     var body: some View {
         //        NavigationViewWrapper {
@@ -66,11 +67,46 @@ struct ContentView: View {
                 Button("PUSH") {
                     addItem()
                 }
+                #if os(macOS)
+                    Button("Send test message") {
+                        sendTestMessage()
+                    }
+                    ScrollView {
+                        Text(sendMessageOutput.joined(separator: "\n"))
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                #endif
             }
             .navigationTitle("Push Without Server")
         }
 
     }
+
+    #if os(macOS)
+        /// Sends a test prompt to an existing chat of this project and lists the streamed events.
+        private func sendTestMessage() {
+            sendMessageOutput = []
+            let project = URL(
+                filePath: "/Users/itsuki/Desktop/XcodeAgentRemote/XcodeAgentRemote.xcodeproj"
+            )
+            let target = MessageTarget.conversation(
+                id: "D868CB20-1251-4ECC-9047-041C449419CB",
+                project: project
+            )
+            Task {
+                do {
+                    for try await event in sendMessage("Reply with only the word pong.", to: target) {
+                        sendMessageOutput.append(String(describing: event))
+                    }
+                    print(sendMessageOutput.joined())
+                } catch {
+                    sendMessageOutput.append("error: \(error.localizedDescription)")
+                }
+            }
+        }
+    #endif
 
     private func addItem() {
         let newItem = ItemModel(timestamp: Date())
