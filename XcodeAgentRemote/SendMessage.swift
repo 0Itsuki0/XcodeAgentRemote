@@ -10,7 +10,7 @@
 
 import Foundation
 
-/// Why a permission answer could not be delivered.
+/// Why the user's answer to a request could not be delivered.
 nonisolated enum SendMessageError: LocalizedError {
     /// No running turn is waiting for an answer to this tool use (unknown id, already answered, or timed out).
     case noWaitingRequest(toolUseID: String)
@@ -18,7 +18,7 @@ nonisolated enum SendMessageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noWaitingRequest(let toolUseID):
-            "No turn is waiting for a permission answer to tool use \(toolUseID)"
+            "No turn is waiting for an answer to tool use \(toolUseID)"
         }
     }
 }
@@ -28,8 +28,9 @@ nonisolated enum SendMessageError: LocalizedError {
 /// Runs one turn and streams its events as they happen: the prompt (`.userMessage`), then `.intermediate`,
 /// `.assistantMessage`, `.toolUse` and `.toolResult` events. The turn is recorded in Xcode's chat store when it ends.
 ///
-/// When the agent asks for permission to use a tool, that tool use has no result yet (`waitingForPermission`) and the
-/// turn waits for `answerPermissionRequest(_:)`; with no answer within `permissionTimeout` seconds (nil: 600) it is
+/// When the agent asks the user (permission to use a tool, questions, a plan: `UserRequest`), that tool use has no
+/// result yet (`waitingForUser`) and the turn waits for `answerUserRequest(_:)`; with no answer within
+/// `permissionTimeout` seconds (nil: 600) it is
 /// denied. Then its tool result follows and the turn continues.
 ///
 /// Cancelling (the caller stops iterating) stops the agent; the turn is then not recorded.
@@ -52,19 +53,19 @@ nonisolated func sendMessage(
                     switch event {
                     case .toolUse(let toolUse):
                         waiting.insert(toolUse.id)
-                        await PermissionRequests.shared.register(toolUse.id)
+                        await PendingUserRequests.shared.register(toolUse.id)
                     case .toolResult(let result):
                         waiting.remove(result.toolUseID)
-                        await PermissionRequests.shared.unregister(result.toolUseID)
+                        await PendingUserRequests.shared.unregister(result.toolUseID)
                     default:
                         break
                     }
                     continuation.yield(event)
                 }
-                await PermissionRequests.shared.unregister(waiting)
+                await PendingUserRequests.shared.unregister(waiting)
                 continuation.finish()
             } catch {
-                await PermissionRequests.shared.unregister(waiting)
+                await PendingUserRequests.shared.unregister(waiting)
                 continuation.finish(throwing: error)
             }
         }
@@ -72,10 +73,16 @@ nonisolated func sendMessage(
     }
 }
 
-// MARK: - Answer a permission request
+// MARK: - Answer a request to the user
 
-/// Answers a running turn's tool use that waits for permission (`waitingForPermission`); the turn then continues.
-/// Throws `SendMessageError.noWaitingRequest` if no running turn has that tool use without a result.
-nonisolated func answerPermissionRequest(_ answer: PermissionAnswer) async throws {
-    try await PermissionRequests.shared.answer(answer)
+/// Runs `handler` once a running turn waits for the user's answer to this tool use (a permission, questions, a plan;
+/// right away if it already waits); never if the agent doesn't ask the user (e.g. a tool that runs without asking).
+nonisolated func whenWaitingForUser(toolUseID: String, _ handler: @escaping @Sendable () async -> Void) async {
+    await PendingUserRequests.shared.whenWaiting(for: toolUseID, handler)
+}
+
+/// Answers a request a running turn waits for (`waitingForUser`): a permission, questions or a plan. The turn then
+/// continues. Throws `SendMessageError.noWaitingRequest` if no running turn has that tool use without a result.
+nonisolated func answerUserRequest(_ answer: UserAnswer) async throws {
+    try await PendingUserRequests.shared.answer(answer)
 }

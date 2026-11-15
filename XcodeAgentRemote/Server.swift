@@ -22,17 +22,20 @@ import ServiceLifecycle
 /// - `GET /projects` → `[XcodeProject]` (`XcodeChats.listProjects`)
 /// - `GET /history/<Xcode chat UUID>` → `[ChatEvent]` (`XcodeChats.history`); 404 no such chat, 501 not implemented
 /// - `POST /message` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
-///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), closed when the turn ends:
+///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
+///     (the stream ends with that tool use, which has no result yet) or the turn ends:
 ///     ```
 ///     {"prompt": {"prompt": "…", "target": {"conversation": {"id": "<Xcode chat UUID>", "project": "file:///…"}},
 ///                 "permissionModeOverride": "manual", "permissionTimeout": 600}}
 ///     ```
 ///     Each `ChatEvent` is sent as `event: <its type>` + `data: <its JSON>`. If the turn fails, an `event: error`
-///     with `{"message": …}` is sent. A tool use waiting for permission waits for its answer.
-///   - `.permissionAnswer` → the answer goes to the turn waiting for it, whose stream then continues;
-///     responds `{"status": "ok"}`, or 404 if no turn is waiting for that request:
+///     with `{"message": …}` is sent.
+///   - `.answer` → the user's answer (`UserAnswer`: permission, questions, plan) goes to the turn waiting for it,
+///     and the response continues that turn's stream from where the previous response ended, again until the next
+///     request to the user or the end;
+///     404 if no turn is waiting for that tool use:
 ///     ```
-///     {"permissionAnswer": {"answer": {"tool_use_id": "…", "behavior": "allow" | "deny"}}}
+///     {"answer": {"_0": {"permission": {"toolUseID": "…", "allow": true}}}}
 ///     ```
 ///   The turn does not depend on the client: if the connection closes, the turn still runs to completion and is saved.
 ///
@@ -158,68 +161,67 @@ actor AgentServer {
                 as: MessageRequest.self,
                 context: context
             )
-            let events: AsyncThrowingStream<ChatEvent, Error>
             switch body {
-            case .permissionAnswer(let answer):
-                // The answer goes to the turn waiting for it; that turn's own stream continues.
-                do {
-                    try await answerPermissionRequest(answer)
-                } catch let error as SendMessageError {
-                    throw HTTPError(.notFound, message: error.localizedDescription)
+            case .answer(let answer):
+                // The turn saved when it started waiting for this answer: deliver the answer, then continue its stream.
+                guard let turn = await SavedTurns.shared.take(waitingFor: answer.toolUseID) else {
+                    throw HTTPError(
+                        .notFound, message: SendMessageError.noWaitingRequest(toolUseID: answer.toolUseID).localizedDescription)
                 }
-                return try SuccessResponse().response(from: request, context: context)
+                // If the wait timed out, the turn went on without this answer; its stream still continues from here.
+                try? await answerUserRequest(answer)
+                return streamResponse(turn)
+
             case .prompt(let prompt, let target, let permissionModeOverride, let permissionTimeout):
-                events = sendMessage(
+                let events = sendMessage(
                     prompt,
                     to: target,
                     permissionModeOverride: permissionModeOverride,
                     permissionTimeout: permissionTimeout
                 )
-            }
-
-            let stream = ResponseBody { writer in
-                let (output, outputContinuation) = AsyncStream<ByteBuffer>
-                    .makeStream()
-                // The turn runs to completion (and is saved) on its own, whether or not the client stays connected:
-                // an unstructured task, not tied to this response.
+                let turn = SavedTurn()
+                // The turn runs to completion (and is saved) on its own, whatever the responses do: an unstructured
+                // task, not tied to a response. Its events go into `turn`, which the responses stream from.
                 Task {
                     do {
                         for try await event in events {
-                            outputContinuation.yield(
-                                serverSentEvent(
-                                    event.type,
-                                    try JSONEncoder().encode(event)
-                                )
-                            )
+                            await turn.push(.chunk(serverSentEvent(event.type, try JSONEncoder().encode(event))))
+                            if case .toolUse(let toolUse) = event {
+                                await whenWaitingForUser(toolUseID: toolUse.id) {
+                                    await SavedTurns.shared.save(turn, waitingFor: toolUse.id)
+                                    await turn.push(.waiting)
+                                }
+                            }
                         }
                     } catch {
                         let message =
-                            (try? JSONEncoder().encode(
-                                ErrorResponse.Body(message: error.localizedDescription)
-                            )) ?? Data("{}".utf8)
-                        outputContinuation.yield(
-                            serverSentEvent(AgentServerAPI.errorEvent, message)
-                        )
+                            (try? JSONEncoder().encode(ErrorResponse.Body(message: error.localizedDescription)))
+                            ?? Data("{}".utf8)
+                        await turn.push(.chunk(serverSentEvent(AgentServerAPI.errorEvent, message)))
                     }
-                    outputContinuation.finish()
+                    await turn.end()
                 }
-                // If the client disconnects, writing throws and only this response ends.
-                for await chunk in output {
-                    try await writer.write(chunk)
-                }
-                try await writer.finish(nil)
+                return streamResponse(turn)
             }
-            return Response(
-                status: .ok,
-                headers: [
-                    .contentType: "text/event-stream",
-                    .cacheControl: "no-cache",
-                ],
-                body: stream
-            )
         }
 
         return router
+    }
+
+    /// An SSE response streaming a saved turn's events until the turn waits for the user's answer (the answer's
+    /// response continues from there) or the turn ends.
+    private static func streamResponse(_ turn: SavedTurn) -> Response {
+        let body = ResponseBody { writer in
+            while case .chunk(let chunk)? = await turn.next() {
+                try await writer.write(chunk)
+            }
+            try await writer.finish(nil)
+        }
+        return Response(
+            status: .ok,
+            headers: [.contentType: "text/event-stream", .cacheControl: "no-cache"],
+            body: body
+        )
     }
 
     /// One SSE message: `event: <type>` + `data: <json>` + blank line.
@@ -232,6 +234,64 @@ actor AgentServer {
         return buffer
     }
 
+}
+
+/// A running turn's events, saved so a chain of responses streams them in order: the message's response until the
+/// turn waits for the user's answer, the answer's response from there until the next one, and so on to the end.
+/// The turn is saved per conversation: one running turn per chat, waiting for at most one answer at a time.
+private actor SavedTurn {
+    /// One SSE message, or the point where the turn waits for the user's answer (a response ends there).
+    enum Item: Sendable {
+        case chunk(ByteBuffer)
+        case waiting
+    }
+
+    private var items: [Item] = []
+    private var reader: CheckedContinuation<Item?, Never>?
+    private var ended = false
+
+    /// Adds the turn's next item, for the response streaming it (now, or the next one).
+    func push(_ item: Item) {
+        if let reader {
+            self.reader = nil
+            reader.resume(returning: item)
+        } else {
+            items.append(item)
+        }
+    }
+
+    /// The turn ended: nothing comes after the items saved so far.
+    func end() {
+        ended = true
+        if let reader {
+            self.reader = nil
+            reader.resume(returning: nil)
+        }
+    }
+
+    /// The next item, waiting for it if the turn hasn't produced it yet; nil once the turn ended and all was read.
+    func next() async -> Item? {
+        if !items.isEmpty { return items.removeFirst() }
+        if ended { return nil }
+        return await withCheckedContinuation { reader = $0 }
+    }
+}
+
+/// The saved turns waiting for the user's answer, by the tool use they wait for (what an answer names).
+private actor SavedTurns {
+    static let shared = SavedTurns()
+
+    private var byToolUseID: [String: SavedTurn] = [:]
+
+    /// Saves a turn that waits for the answer to this tool use.
+    func save(_ turn: SavedTurn, waitingFor toolUseID: String) {
+        byToolUseID[toolUseID] = turn
+    }
+
+    /// The turn waiting for the answer to this tool use, removed (an answer continues it once).
+    func take(waitingFor toolUseID: String) -> SavedTurn? {
+        byToolUseID.removeValue(forKey: toolUseID)
+    }
 }
 
 extension SuccessResponse: ResponseEncodable {}

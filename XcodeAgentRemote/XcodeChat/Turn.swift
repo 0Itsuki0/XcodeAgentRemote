@@ -16,7 +16,7 @@ nonisolated struct TurnRequest: Sendable {
     var resume: Bool
     var prompt: String
     var permissionMode: XcodeAgentConfiguration.PermissionMode
-    /// Seconds a permission request waits for its answer (`answerPermissionRequest`) before it is denied.
+    /// Seconds a request to the user waits for its answer (`answerUserRequest`) before it is denied.
     var permissionTimeout: TimeInterval
     /// Where the provider records what the events don't carry about its tool uses, for their cards.
     var records: ToolUseRecords
@@ -33,7 +33,7 @@ actor ToolUseRecords {
         var fileBefore: String?
         /// The file's content after the tool use ran.
         var fileAfter: String?
-        /// The permission request for it was denied (or not answered in time).
+        /// The user denied it, declined its questions or rejected its plan (or did not answer in time).
         var denied = false
     }
 

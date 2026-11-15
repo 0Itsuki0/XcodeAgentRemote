@@ -13,7 +13,7 @@ nonisolated enum AgentServerAPI {
     /// `GET /health` → `SuccessResponse`
     static let healthPath = "health"
     /// `POST /message` with a `MessageRequest` body: `.prompt` → SSE stream of `ChatEvent`s (event name =
-    /// `ChatEvent.type`), or an `errorEvent` if the turn fails; `.permissionAnswer` → `SuccessResponse`, or 404.
+    /// `ChatEvent.type`), or an `errorEvent` if the turn fails; `.answer` → the same turn's events, continued, or 404.
     static let messagePath = "message"
     /// `GET /projects` → `[XcodeProject]`: every project with Xcode chats, with its chats (`XcodeChats.listProjects`).
     static let projectsPath = "projects"

@@ -37,7 +37,7 @@ struct SendMessageTests {
         #expect(events.first == .userMessage("Reply with only the word pong."))
         let reply = events.compactMap { if case .assistantMessage(let text) = $0 { text } else { nil } }.joined()
         #expect(reply.lowercased().contains("pong"))
-        #expect(waitingForPermission(events).isEmpty)
+        #expect(waitingForUser(events).isEmpty)
     }
 
     @Test func deniedPermissionRequestInManualMode() async throws {
@@ -52,9 +52,9 @@ struct SendMessageTests {
             permissionModeOverride: .manual
         ) {
             events.append(event)
-            for toolUse in waitingForPermission(events) where toolUse.name == "Bash" && !answered.contains(toolUse.id) {
+            for case .permission(let toolUse) in waitingForUser(events) where toolUse.name == "Bash" && !answered.contains(toolUse.id) {
                 answered.insert(toolUse.id)
-                try await answerPermissionRequest(PermissionAnswer(toolUseID: toolUse.id, behavior: .deny))
+                try await answerUserRequest(.permission(toolUseID: toolUse.id, allow: false))
             }
         }
 
@@ -63,7 +63,7 @@ struct SendMessageTests {
             if case .toolResult(let result) = event { answered.contains(result.toolUseID) && result.isError } else { false }
         }
         #expect(denied)
-        #expect(waitingForPermission(events).isEmpty)
+        #expect(waitingForUser(events).isEmpty)
         #expect(!FileManager.default.fileExists(atPath: file.path), "the command ran although it was denied")
     }
 

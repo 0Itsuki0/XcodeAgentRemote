@@ -110,51 +110,107 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
     }
 }
 
-/// The tool uses that have no tool result yet: the turn is waiting for the permission answer to each
-/// (`PermissionAnswer.toolUseID`).
-nonisolated func waitingForPermission(_ events: [ChatEvent]) -> [ChatEvent.ToolUse] {
-    let answered = Set(events.compactMap { event -> String? in
-        if case .toolResult(let result) = event { result.toolUseID } else { nil }
-    })
-    return events.compactMap { event -> ChatEvent.ToolUse? in
-        if case .toolUse(let toolUse) = event, !answered.contains(toolUse.id) { toolUse } else { nil }
+// MARK: - Requests to the user
+
+/// What a turn waits for from the user: permission for a tool use, answers to questions, or approval of a plan.
+/// The agent asks each of them with a tool use that has no result until the user answers (`UserAnswer`).
+/// For Claude: `AskUserQuestion` asks questions, `ExitPlanMode` presents a plan, any other tool asks for permission.
+nonisolated enum UserRequest: Sendable {
+    /// Allow or deny this tool use.
+    case permission(ChatEvent.ToolUse)
+    /// Choose among each question's options.
+    case questions(toolUseID: String, [Question])
+    /// Approve the plan, or reject it with feedback.
+    case planApproval(toolUseID: String, plan: String)
+
+    /// One question with its options (`AskUserQuestion`'s input).
+    struct Question: Codable, Hashable, Sendable {
+        /// One option of a question.
+        struct Option: Codable, Hashable, Sendable {
+            var label: String
+            var description: String?
+        }
+
+        /// The question's text; its answers are keyed by it (`UserAnswer.questions`).
+        var question: String
+        /// A short title for the question.
+        var header: String?
+        var options: [Option]
+        /// Several options can be chosen.
+        var multiSelect: Bool?
+    }
+
+    /// The request a tool use makes: questions for `AskUserQuestion`, a plan for `ExitPlanMode`, else a permission.
+    init(_ toolUse: ChatEvent.ToolUse) {
+        switch toolUse.name {
+        case "AskUserQuestion":
+            let questions = (try? JSONEncoder().encode(toolUse.input["questions"]))
+                .flatMap { try? JSONDecoder().decode([Question].self, from: $0) }
+            self = questions.map { .questions(toolUseID: toolUse.id, $0) } ?? .permission(toolUse)
+        case "ExitPlanMode":
+            if case .string(let plan)? = toolUse.input["plan"] {
+                self = .planApproval(toolUseID: toolUse.id, plan: plan)
+            } else {
+                self = .permission(toolUse)
+            }
+        default:
+            self = .permission(toolUse)
+        }
+    }
+
+    /// The tool use the request is (`UserAnswer`'s `toolUseID`).
+    var toolUseID: String {
+        switch self {
+        case .permission(let toolUse): toolUse.id
+        case .questions(let toolUseID, _), .planApproval(let toolUseID, _): toolUseID
+        }
     }
 }
 
-// MARK: - Permission answers
-
-nonisolated enum PermissionBehavior: String, Codable, Sendable {
-    case allow, deny
+/// The requests a turn's events end waiting for: its tool uses that have no result yet.
+/// (A tool use that is still running has no result yet either; a stream from the server ends only at a request.)
+nonisolated func waitingForUser(_ events: [ChatEvent]) -> [UserRequest] {
+    let answered = Set(events.compactMap { event -> String? in
+        if case .toolResult(let result) = event { result.toolUseID } else { nil }
+    })
+    return events.compactMap { event -> UserRequest? in
+        if case .toolUse(let toolUse) = event, !answered.contains(toolUse.id) { UserRequest(toolUse) } else { nil }
+    }
 }
 
-/// The answer to a tool use waiting for permission (`waitingForPermission`).
-nonisolated struct PermissionAnswer: Codable, Sendable {
-    /// The waiting tool use's id (`ChatEvent.ToolUse.id`).
-    var toolUseID: String
-    var behavior: PermissionBehavior
-    /// Allow only, optional: the tool input to use instead, e.g. `AskUserQuestion`'s input with its "answers" filled in.
-    var updatedInput: [String: JSONValue]?
-    /// Deny only, optional: why, shown to the agent.
-    var message: String?
+/// The user's answer to a request a turn waits for (`UserRequest`), by its tool use id.
+nonisolated enum UserAnswer: Codable, Sendable {
+    /// Allow or deny a tool use; `message`: deny only, why (shown to the agent).
+    case permission(toolUseID: String, allow: Bool, message: String? = nil)
+    /// The chosen option labels of each question, by the question's text: several for a multi-select question,
+    /// or any text of the user's own.
+    case questions(toolUseID: String, answers: [String: [String]])
+    /// Decline to answer the questions; `message`: why (shown to the agent).
+    case declineQuestions(toolUseID: String, message: String? = nil)
+    /// Approve the plan, or reject it; `feedback`: reject only, what to change (shown to the agent).
+    case planApproval(toolUseID: String, approve: Bool, feedback: String? = nil)
 
-    enum CodingKeys: String, CodingKey {
-        case behavior, message
-        case toolUseID = "tool_use_id"
-        case updatedInput = "updated_input"
+    /// The tool use the answer is for.
+    var toolUseID: String {
+        switch self {
+        case .permission(let toolUseID, _, _), .questions(let toolUseID, _), .declineQuestions(let toolUseID, _),
+            .planApproval(let toolUseID, _, _):
+            toolUseID
+        }
     }
 }
 
 // MARK: - Request body
 
 /// The JSON body of `POST /message`: a new message (the parameters of `sendMessage`),
-/// or the answer to a running turn's permission request (`answerPermissionRequest`).
+/// or the user's answer to a request the running turn waits for (`answerUserRequest`).
 nonisolated enum MessageRequest: Codable, Sendable {
-    /// Seconds a permission request waits for its answer before it is denied; nil: 600.
+    /// Seconds a request to the user (permission, questions, plan) waits for its answer before it is denied; nil: 600.
     case prompt(
         prompt: String,
         target: MessageTarget,
         permissionModeOverride: PermissionMode? = nil,
         permissionTimeout: TimeInterval? = nil
     )
-    case permissionAnswer(answer: PermissionAnswer)
+    case answer(UserAnswer)
 }

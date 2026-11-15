@@ -201,23 +201,35 @@ nonisolated extension ClaudeProvider {
         }
     }
 
-    /// Waits for the answer to the tool use the agent asks permission for, and builds the agent's decision.
-    /// Forms (AskUserQuestion) and plan approval (ExitPlanMode) come as permission requests too: their answer is
-    /// "allow" with `updatedInput` (e.g. the form's "answers"). No answer within `timeout` seconds: deny.
+    /// Waits for the user's answer to the tool use the agent asks about, and builds Claude's decision.
+    /// Claude asks for permission, questions (AskUserQuestion) and plan approval (ExitPlanMode) the same way:
+    /// - permission: "allow" with the tool's input, or "deny" with why;
+    /// - questions: "allow" with the input plus `answers` (`{"<question>": "<label>, <label>"}`), or "deny" to decline;
+    /// - plan: "allow" to approve, or "deny" with the feedback.
+    /// No answer within `timeout` seconds: deny.
     private static func permissionDecision(for request: ToolPermissionRequest, timeout: TimeInterval) async -> PermissionDecision {
-        let answer: PermissionAnswer? =
+        let answer: UserAnswer? =
             if let toolUseID = request.toolUseID {
-                await PermissionRequests.shared.waitForAnswer(toolUseID: toolUseID, timeout: timeout)
+                await PendingUserRequests.shared.waitForAnswer(toolUseID: toolUseID, timeout: timeout)
             } else {
                 nil
             }
-        switch answer?.behavior {
-        case .allow:
-            return PermissionDecision(behavior: "allow", updatedInput: answer?.updatedInput ?? request.input ?? [:])
-        case .deny:
-            return PermissionDecision(behavior: "deny", message: answer?.message ?? "The user denied this tool use.")
+        let input = request.input ?? [:]
+        switch answer {
+        case .permission(_, true, _), .planApproval(_, true, _):
+            return PermissionDecision(behavior: "allow", updatedInput: input)
+        case .permission(_, false, let message):
+            return PermissionDecision(behavior: "deny", message: message ?? "The user denied this tool use.")
+        case .questions(_, let answers):
+            var answered = input
+            answered["answers"] = .object(answers.mapValues { .string($0.joined(separator: ", ")) })
+            return PermissionDecision(behavior: "allow", updatedInput: answered)
+        case .declineQuestions(_, let message):
+            return PermissionDecision(behavior: "deny", message: message ?? "The user declined to answer.")
+        case .planApproval(_, false, let feedback):
+            return PermissionDecision(behavior: "deny", message: feedback ?? "The user rejected the plan.")
         case nil:
-            return PermissionDecision(behavior: "deny", message: "No answer to this permission request within \(Int(timeout)) seconds.")
+            return PermissionDecision(behavior: "deny", message: "No answer to this request within \(Int(timeout)) seconds.")
         }
     }
 

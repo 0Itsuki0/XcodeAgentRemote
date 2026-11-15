@@ -70,8 +70,8 @@ nonisolated struct AgentServerClient: Sendable {
     /// `POST /message` (`.prompt`): sends one message, the same parameters as the macOS app's `sendMessage`, and
     /// streams the turn's events as they arrive (the prompt, then intermediate output, assistant messages, tool uses
     /// and tool results).
-    /// A tool use waiting for permission (`waitingForPermission`) waits for `answer(_:)` (or `permissionTimeout`
-    /// seconds, then it is denied); its tool result follows and the stream continues.
+    /// The stream ends when the turn ends, or when it waits for the user's answer (a permission, questions, a plan):
+    /// then its last tool use has no result (`waitingForUser`), and `answer(_:)` continues the turn's stream.
     /// Throws `ServerRequestError.turnFailed` if the server reports the turn failed, `NetworkError` for HTTP or
     /// connection errors. Cancelling (or dropping) the stream only closes this connection: the turn keeps running
     /// on the Mac until it finishes.
@@ -81,12 +81,24 @@ nonisolated struct AgentServerClient: Sendable {
         permissionModeOverride: PermissionMode? = nil,
         permissionTimeout: TimeInterval? = nil
     ) -> AsyncThrowingStream<ChatEvent, Error> {
-        let request = MessageRequest.prompt(
+        events(for: .prompt(
             prompt: prompt,
             target: target,
             permissionModeOverride: permissionModeOverride,
             permissionTimeout: permissionTimeout
-        )
+        ))
+    }
+
+    /// `POST /message` (`.answer`): answers the request the turn waits for (`waitingForUser`), and continues the
+    /// turn's stream from where the previous one (`sendMessage`, or the previous `answer`) ended: until the next
+    /// request to the user or the end of the turn, like `sendMessage`.
+    /// Throws `NetworkError.badResponse` with code 404 if no turn is waiting for tool use `answer.toolUseID`.
+    func answer(_ answer: UserAnswer) -> AsyncThrowingStream<ChatEvent, Error> {
+        events(for: .answer(answer))
+    }
+
+    /// Sends a `POST /message` and streams the turn's events from its SSE response.
+    private func events(for request: MessageRequest) -> AsyncThrowingStream<ChatEvent, Error> {
         let url = baseURL.appending(path: AgentServerAPI.messagePath)
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -119,18 +131,6 @@ nonisolated struct AgentServerClient: Sendable {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
-    }
-
-    /// `POST /message` (`.permissionAnswer`): answers a running turn's permission request; the turn's stream
-    /// (from `sendMessage`) then continues. Throws `NetworkError.badResponse` with code 404 if no turn is waiting
-    /// with tool use `answer.toolUseID` (unknown, already answered, or timed out).
-    func answer(_ answer: PermissionAnswer) async throws {
-        _ = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: AgentServerAPI.messagePath),
-            method: "POST",
-            headers: Self.headers(["Content-Type": "application/json", "Accept": "application/json"]),
-            body: try NetworkService.encode(MessageRequest.permissionAnswer(answer: answer))
-        )
     }
 
     /// The request's headers, plus `AgentServerAPI.authHeader` if it is set.

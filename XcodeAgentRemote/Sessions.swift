@@ -54,8 +54,8 @@ nonisolated protocol AgentProvider: SendableMetatype {
     /// A session id for a new chat.
     static func newSessionID() -> String
     /// Runs one turn of the agent in `request.workingDirectory` and streams its events (not the prompt).
-    /// If the agent asks for permission to use a tool, waits for the answer to that tool use
-    /// (`PermissionRequests.waitForAnswer`); no answer is a deny. Records the file content around its
+    /// If the agent asks the user (permission to use a tool, questions, a plan), waits for the answer to that tool use
+    /// (`PendingUserRequests.waitForAnswer`); no answer is a deny. Records the file content around its
     /// file-changing tool uses, and the ones it denied, in `request.records`.
     /// Throws `XcodeChatError.agentFailed` (after all events) if the agent reports an error.
     /// Cancelling (stopping the iteration) stops the agent.

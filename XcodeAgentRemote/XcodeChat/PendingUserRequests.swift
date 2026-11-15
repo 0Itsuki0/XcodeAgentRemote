@@ -1,25 +1,27 @@
 //
-//  PermissionRequests.swift
+//  PendingUserRequests.swift
 //  XcodeAgentRemote
 //
 
 import Foundation
 
-/// Tool uses without a result in running turns, and the answers to them.
+/// The requests to the user in running turns (permission, questions, a plan: `UserRequest`), and their answers.
 /// A tool use is answerable from when it is streamed until its result (`register` / `unregister`, by `sendMessage`); the answer
 /// may arrive before the agent asks for it (it is kept until the provider waits for it) and is taken once.
-actor PermissionRequests {
+actor PendingUserRequests {
     /// One for the app: answers come from the server, waits from the running turns.
-    static let shared = PermissionRequests()
+    static let shared = PendingUserRequests()
 
     /// Where a tool use is: answerable, answered before the agent asked, or the agent waiting for the answer.
     private enum State {
         case registered
-        case answered(PermissionAnswer)
-        case waiting(CheckedContinuation<PermissionAnswer?, Never>)
+        case answered(UserAnswer)
+        case waiting(CheckedContinuation<UserAnswer?, Never>)
     }
 
     private var requests: [String: State] = [:]
+    /// What to do when the agent starts waiting for a tool use's answer (`whenWaiting`), by tool use id.
+    private var waitingHandlers: [String: @Sendable () async -> Void] = [:]
 
     /// Makes a tool use answerable (when it is streamed).
     func register(_ toolUseID: String) {
@@ -28,6 +30,7 @@ actor PermissionRequests {
 
     /// No longer answerable; a provider waiting for it gets no answer.
     func unregister(_ toolUseID: String) {
+        waitingHandlers[toolUseID] = nil
         if case .waiting(let continuation)? = requests.removeValue(forKey: toolUseID) {
             continuation.resume(returning: nil)
         }
@@ -40,7 +43,7 @@ actor PermissionRequests {
 
     /// Takes the answer to a tool use: hands it to the waiting provider, or keeps it until the provider asks.
     /// Throws `noWaitingRequest` if the tool use is not answerable or was already answered.
-    func answer(_ answer: PermissionAnswer) throws(SendMessageError) {
+    func answer(_ answer: UserAnswer) throws(SendMessageError) {
         let toolUseID = answer.toolUseID
         switch requests[toolUseID] {
         case .registered:
@@ -53,9 +56,19 @@ actor PermissionRequests {
         }
     }
 
-    /// For providers: the answer to the tool use the agent asks permission for; nil if none arrives within
+    /// Runs `handler` once the agent waits for the answer to this tool use (right away if it already waits);
+    /// never if the agent doesn't ask for it.
+    func whenWaiting(for toolUseID: String, _ handler: @escaping @Sendable () async -> Void) {
+        if case .waiting? = requests[toolUseID] {
+            Task { await handler() }
+        } else {
+            waitingHandlers[toolUseID] = handler
+        }
+    }
+
+    /// For providers: the user's answer to the tool use the agent waits for; nil if none arrives within
     /// `timeout` seconds, the tool use is closed, or the task is cancelled.
-    func waitForAnswer(toolUseID: String, timeout: TimeInterval) async -> PermissionAnswer? {
+    func waitForAnswer(toolUseID: String, timeout: TimeInterval) async -> UserAnswer? {
         if case .answered(let answer)? = requests[toolUseID] {
             requests[toolUseID] = nil
             return answer
@@ -63,6 +76,9 @@ actor PermissionRequests {
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 requests[toolUseID] = .waiting(continuation)
+                if let handler = waitingHandlers.removeValue(forKey: toolUseID) {
+                    Task { await handler() }
+                }
                 Task {
                     try? await Task.sleep(for: .seconds(timeout))
                     self.unregister(toolUseID)
