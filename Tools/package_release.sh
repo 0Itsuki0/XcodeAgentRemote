@@ -1,8 +1,7 @@
 #!/bin/bash
 #
 # package_release.sh — Build, sign, notarize, and package a new
-# XcodeAgentRemote release: a DMG with the GUI app. The xcode-chat CLI is inside the app
-# (Contents/MacOS/xcode-chat), for the app's own use only. Output goes to ~/Desktop/XcodeAgentRemote_<version>.dmg.
+# XcodeAgentRemote release: a DMG with the GUI app. Output goes to ~/Desktop/XcodeAgentRemote_<version>.dmg.
 #
 # Prerequisites:
 # Run the following command to add /update A "Developer ID Application" certificate in the keychain.
@@ -23,13 +22,11 @@ set -euo pipefail
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
 
 GUI_SCHEME="XcodeAgentRemote"
-CLI_NAME="xcode-chat"                    # embedded at Contents/MacOS/xcode-chat
 NOTARYTOOL_PROFILE="notarytool-profile"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT="$PROJECT_DIR/XcodeAgentRemote.xcodeproj"
-CLI_DIR="$SCRIPT_DIR/xcode-chat"         # Python sources; build.sh bundles them into one executable
 ARCHIVE_PATH="/tmp/XcodeAgentRemote.xcarchive"
 EXPORT_PATH="/tmp/XcodeAgentRemoteExport"
 STAGING_DIR="/tmp/XcodeAgentRemoteDMG"
@@ -42,12 +39,7 @@ log() { echo "▶ $*"; }
 TEAM_ID=$(grep -m1 -o '"DEVELOPMENT_TEAM"[[:space:]]*:[[:space:]]*"[^"]*"' "$PROJECT/project.xcproj" \
   | sed -E 's/.*"([^"]*)"$/\1/')
 
-# ── 1. Build the CLI first: the app embeds Tools/xcode-chat/dist/xcode-chat ────
-# (Build Phases → Copy Files → Executables, Code Sign On Copy), so the archive must copy the latest build.
-log "Building $CLI_NAME..."
-"$CLI_DIR/build.sh"
-
-# ── 2. Archive & export the GUI (Developer ID) ────────────────────────────────
+# ── 1. Archive & export the GUI (Developer ID) ────────────────────────────────
 log "Archiving $GUI_SCHEME..."
 rm -rf "$ARCHIVE_PATH" "$EXPORT_PATH"
 xcodebuild archive \
@@ -83,14 +75,7 @@ VERSION=$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleShortVersionStri
 BUILD=$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleVersion)
 log "Version: $VERSION ($BUILD)"
 
-CLI_IN_APP="$APP_PATH/Contents/MacOS/$CLI_NAME"
-if [ ! -x "$CLI_IN_APP" ]; then
-  echo "error: $CLI_IN_APP missing; check the app's Copy Files build phase" >&2
-  exit 1
-fi
-"$CLI_IN_APP" --help > /dev/null   # the embedded CLI starts under the app's signature
-
-# ── 3. Notarize & staple the app (the embedded CLI is notarized with it) ─────
+# ── 2. Notarize & staple the app ─────────────────────────────────────────────
 log "Notarizing app..."
 APP_ZIP="/tmp/XcodeAgentRemote-notarize.zip"
 ditto -c -k --keepParent "$APP_PATH" "$APP_ZIP"
@@ -101,13 +86,13 @@ log "Stapling ticket..."
 xcrun stapler staple "$APP_PATH"
 rm -f "$APP_ZIP"
 
-# ── 4. Assemble the DMG staging folder (app only) ─────────────────────────────
+# ── 3. Assemble the DMG staging folder (app only) ─────────────────────────────
 log "Staging DMG contents..."
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 cp -R "$APP_PATH" "$STAGING_DIR/$GUI_SCHEME.app"
 
-# ── 5. Build the DMG (built-in hdiutil, no styling) ──────────────────────────
+# ── 4. Build the DMG (built-in hdiutil, no styling) ──────────────────────────
 DMG_NAME="XcodeAgentRemote_${VERSION}.dmg"
 DMG_PATH="/tmp/$DMG_NAME"
 log "Building $DMG_NAME..."
@@ -118,12 +103,12 @@ hdiutil create \
   -ov -format UDZO \
   "$DMG_PATH"
 
-# ── 6. Place the DMG on the Desktop ──────────────────────────────────────────
+# ── 5. Place the DMG on the Desktop ──────────────────────────────────────────
 DMG_DEST="$HOME/Desktop/$DMG_NAME"
 log "Writing $DMG_DEST..."
 mv "$DMG_PATH" "$DMG_DEST"
 
-# ── 7. Cleanup ────────────────────────────────────────────────────────────────
+# ── 6. Cleanup ────────────────────────────────────────────────────────────────
 rm -rf "$STAGING_DIR" "$ARCHIVE_PATH" "$EXPORT_PATH"
 
 log "Done. Packaged v${VERSION} (${BUILD}) → $DMG_DEST"

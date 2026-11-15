@@ -44,21 +44,49 @@ nonisolated struct AgentServerClient: Sendable {
         return try NetworkService.decode(HealthResponse.self, from: data)
     }
 
-    /// `POST /message`: sends one message, the same parameters as the macOS app's `sendMessage`, and streams the
-    /// turn's events as they arrive, ending with `.result`.
+    /// `GET /projects`: every project with Xcode chats on the Mac, with its chats (for when iCloud syncing fails).
+    func projects() async throws -> [XcodeProject] {
+        let data = try await NetworkService.sendURLRequest(
+            url: baseURL.appending(path: AgentServerAPI.projectsPath),
+            method: "GET",
+            headers: Self.headers(["Accept": "application/json"]),
+            body: nil
+        )
+        return try NetworkService.decode([XcodeProject].self, from: data)
+    }
+
+    /// `GET /history/<Xcode chat UUID>`: a chat's history (for when iCloud syncing fails).
+    /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
+    func history(conversationID: String) async throws -> [ChatEvent] {
+        let data = try await NetworkService.sendURLRequest(
+            url: baseURL.appending(path: AgentServerAPI.historyPath).appending(path: conversationID),
+            method: "GET",
+            headers: Self.headers(["Accept": "application/json"]),
+            body: nil
+        )
+        return try NetworkService.decode([ChatEvent].self, from: data)
+    }
+
+    /// `POST /message` (`.prompt`): sends one message, the same parameters as the macOS app's `sendMessage`, and
+    /// streams the turn's events as they arrive (the prompt, then intermediate output, assistant messages, tool uses
+    /// and tool results).
+    /// A tool use waiting for permission (`waitingForPermission`) waits for `answer(_:)` (or `permissionTimeout`
+    /// seconds, then it is denied); its tool result follows and the stream continues.
     /// Throws `ServerRequestError.turnFailed` if the server reports the turn failed, `NetworkError` for HTTP or
     /// connection errors. Cancelling (or dropping) the stream only closes this connection: the turn keeps running
     /// on the Mac until it finishes.
     func sendMessage(
         _ prompt: String,
         to target: MessageTarget,
-        permissionModeOverride: PermissionMode? = nil
+        permissionModeOverride: PermissionMode? = nil,
+        permissionTimeout: TimeInterval? = nil
     ) -> AsyncThrowingStream<ChatEvent, Error> {
-        sendMessage(MessageRequest(prompt: prompt, target: target, permissionModeOverride: permissionModeOverride))
-    }
-
-    /// `POST /message` with a prepared `MessageRequest`.
-    func sendMessage(_ request: MessageRequest) -> AsyncThrowingStream<ChatEvent, Error> {
+        let request = MessageRequest.prompt(
+            prompt: prompt,
+            target: target,
+            permissionModeOverride: permissionModeOverride,
+            permissionTimeout: permissionTimeout
+        )
         let url = baseURL.appending(path: AgentServerAPI.messagePath)
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -91,6 +119,18 @@ nonisolated struct AgentServerClient: Sendable {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// `POST /message` (`.permissionAnswer`): answers a running turn's permission request; the turn's stream
+    /// (from `sendMessage`) then continues. Throws `NetworkError.badResponse` with code 404 if no turn is waiting
+    /// with tool use `answer.toolUseID` (unknown, already answered, or timed out).
+    func answer(_ answer: PermissionAnswer) async throws {
+        _ = try await NetworkService.sendURLRequest(
+            url: baseURL.appending(path: AgentServerAPI.messagePath),
+            method: "POST",
+            headers: Self.headers(["Content-Type": "application/json", "Accept": "application/json"]),
+            body: try NetworkService.encode(MessageRequest.permissionAnswer(answer: answer))
+        )
     }
 
     /// The request's headers, plus `AgentServerAPI.authHeader` if it is set.

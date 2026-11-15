@@ -5,103 +5,77 @@
 //  Created by Itsuki on 2026/11/15.
 //
 
-/// Invoke python script to send a message.
+/// Invoke XcodeChat (`XcodeChat/`) to send a message.
 /// Input: new conversation / conversationId / project (whatever is required by the script)
 
 import Foundation
 
+/// Why a permission answer could not be delivered.
 nonisolated enum SendMessageError: LocalizedError {
-    case executableNotFound
-    case failed(exitCode: Int32, message: String)
+    /// No running turn is waiting for an answer to this tool use (unknown id, already answered, or timed out).
+    case noWaitingRequest(toolUseID: String)
 
     var errorDescription: String? {
         switch self {
-        case .executableNotFound:
-            "xcode-chat is missing from the app bundle (Contents/MacOS/xcode-chat)"
-        case .failed(let exitCode, let message):
-            "xcode-chat exited with code \(exitCode): \(message)"
+        case .noWaitingRequest(let toolUseID):
+            "No turn is waiting for a permission answer to tool use \(toolUseID)"
         }
     }
 }
 
 // MARK: - Send
 
-/// Runs one turn with the `xcode-chat` executable embedded in the app (`Contents/MacOS/xcode-chat`)
-/// and streams its events as they happen, ending with `.result`.
-/// Throws `SendMessageError.failed` when `xcode-chat` exits with a non-zero code (after the events it printed),
-/// or a `DecodingError` for a line that is not a known event.
+/// Runs one turn and streams its events as they happen: the prompt (`.userMessage`), then `.intermediate`,
+/// `.assistantMessage`, `.toolUse` and `.toolResult` events. The turn is recorded in Xcode's chat store when it ends.
+///
+/// When the agent asks for permission to use a tool, that tool use has no result yet (`waitingForPermission`) and the
+/// turn waits for `answerPermissionRequest(_:)`; with no answer within `permissionTimeout` seconds (nil: 600) it is
+/// denied. Then its tool result follows and the turn continues.
+///
+/// Cancelling (the caller stops iterating) stops the agent; the turn is then not recorded.
+/// Throws `XcodeChatError`; `.agentFailed` comes after the turn's events, the turn recorded.
 nonisolated func sendMessage(
     _ prompt: String,
     to target: MessageTarget,
-    permissionModeOverride: PermissionMode? = nil
+    permissionModeOverride: PermissionMode? = nil,
+    permissionTimeout: TimeInterval? = nil
 ) -> AsyncThrowingStream<ChatEvent, Error> {
-    var arguments: [String]
-    switch target {
-    case .newConversation(let project, let name):
-        arguments = ["--project", project.path]
-        if let name { arguments += ["--name", name] }
-    case .conversation(let id, let project):
-        arguments = ["--project", project.path, "--conversation", id]
-    case .conversationInStore(let id, let store):
-        arguments = ["--store", store, "--conversation", id]
-    }
-    if let permissionModeOverride {
-        arguments += ["--permission-mode", permissionModeOverride.rawValue]
-    }
-    arguments.append(prompt)
-
-    return AsyncThrowingStream { continuation in
-        guard
-            let executable = Bundle.main.url(
-                forAuxiliaryExecutable: "xcode-chat"
-            )
-        else {
-            continuation.finish(throwing: SendMessageError.executableNotFound)
-            return
-        }
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.standardInput = FileHandle.nullDevice
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
+    AsyncThrowingStream { continuation in
         let task = Task {
+            // Tool uses of this turn without a result yet: answerable by their id.
+            var waiting = Set<String>()
             do {
-                try process.run()
-                let decoder = JSONDecoder()
-                for try await line in stdout.fileHandleForReading.bytes.lines {
-                    continuation.yield(
-                        try decoder.decode(
-                            ChatEvent.self,
-                            from: Data(line.utf8)
-                        )
-                    )
+                for try await event in XcodeChat.runTurn(
+                    prompt, to: target, permissionModeOverride: permissionModeOverride,
+                    permissionTimeout: permissionTimeout ?? 600)
+                {
+                    switch event {
+                    case .toolUse(let toolUse):
+                        waiting.insert(toolUse.id)
+                        await PermissionRequests.shared.register(toolUse.id)
+                    case .toolResult(let result):
+                        waiting.remove(result.toolUseID)
+                        await PermissionRequests.shared.unregister(result.toolUseID)
+                    default:
+                        break
+                    }
+                    continuation.yield(event)
                 }
-                process.waitUntilExit()
-                if process.terminationStatus != 0 {
-                    let message = String(
-                        decoding: stderr.fileHandleForReading
-                            .readDataToEndOfFile(),
-                        as: UTF8.self
-                    )
-                    throw SendMessageError.failed(
-                        exitCode: process.terminationStatus,
-                        message: message.trimmingCharacters(
-                            in: .whitespacesAndNewlines
-                        )
-                    )
-                }
+                await PermissionRequests.shared.unregister(waiting)
                 continuation.finish()
             } catch {
+                await PermissionRequests.shared.unregister(waiting)
                 continuation.finish(throwing: error)
             }
         }
-        continuation.onTermination = { _ in
-            task.cancel()
-            if process.isRunning { process.terminate() }
-        }
+        continuation.onTermination = { _ in task.cancel() }
     }
+}
+
+// MARK: - Answer a permission request
+
+/// Answers a running turn's tool use that waits for permission (`waitingForPermission`); the turn then continues.
+/// Throws `SendMessageError.noWaitingRequest` if no running turn has that tool use without a result.
+nonisolated func answerPermissionRequest(_ answer: PermissionAnswer) async throws {
+    try await PermissionRequests.shared.answer(answer)
 }

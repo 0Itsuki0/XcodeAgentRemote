@@ -29,68 +29,79 @@
 ///  - provider's session id
 ///  - folder / group
 ///  - provider (claude opus 5.5, claude haiku, codex ...)
-///  - session history (loaded from each provider instead of the xcode chat data). For not implemented providers, "NOT IMPLEMENTED"
+///  - session history (loaded from each provider instead of the xcode chat data, `XcodeChats.history`). For not implemented providers, "NOT IMPLEMENTED"
 ///  - any other metadata available
 
 import AppKit
 import CryptoKit
 import Foundation
 
-/// A project that has Xcode chats: one chat store folder `<ProjectName>-<hash>`.
-nonisolated struct XcodeProject: Identifiable, Sendable {
-    /// `<ProjectName>` of the store folder (the project file's name without extension).
-    var name: String
-    /// The `.xcodeproj` / `.xcworkspace`, or nil if it could not be found (moved, deleted, ...).
-    var projectFile: URL?
-    /// The chat store folder: `~/Library/Developer/Xcode/UserData/CodingAssistant/<ProjectName>-<hash>`.
-    var store: URL
-    /// Most recent first.
-    var sessions: [XcodeChatSession]
+/// One agent Xcode can run (Claude, Codex, ...): where its sessions live and how to read them.
+/// Implemented per provider in `Providers/`.
+nonisolated protocol AgentProvider: SendableMetatype {
+    /// The key Xcode stores for the agent under `chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`,
+    /// e.g. "claude".
+    static var name: String { get }
+    /// A session's events, from the agent's own session storage.
+    static func history(sessionID: String) throws -> [ChatEvent]
+    /// The folder the agent ran a session in, if the session records it.
+    static func workingDirectory(sessionID: String) -> URL?
 
-    var id: String { store.lastPathComponent }
+    // MARK: Running a turn (XcodeChat/XcodeChat.swift)
+
+    /// `chatModelDefinitionIdentifier.modelIdentifier` of the agent's chats, e.g. "claude-code".
+    static var modelIdentifier: String { get }
+    /// A session id for a new chat.
+    static func newSessionID() -> String
+    /// Runs one turn of the agent in `request.workingDirectory` and streams its events (not the prompt).
+    /// If the agent asks for permission to use a tool, waits for the answer to that tool use
+    /// (`PermissionRequests.waitForAnswer`); no answer is a deny. Records the file content around its
+    /// file-changing tool uses, and the ones it denied, in `request.records`.
+    /// Throws `XcodeChatError.agentFailed` (after all events) if the agent reports an error.
+    /// Cancelling (stopping the iteration) stops the agent.
+    static func runTurn(_ request: TurnRequest) -> AsyncThrowingStream<ChatEvent, Error>
+    /// The card Xcode shows for one of the agent's tool uses; nil if it never finished (no result).
+    static func card(
+        for toolUse: ChatEvent.ToolUse, result: ChatEvent.ToolResult?, record: ToolUseRecords.Record?
+    ) -> ChatCards.Card?
 }
 
-/// One Xcode chat (one chat == one agent session).
-nonisolated struct XcodeChatSession: Identifiable, Sendable {
-    /// Xcode's chat UUID (the chat's folder name in the store).
-    var id: String
-    var name: String
-    /// The agent, e.g. "claude" (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`).
-    var provider: String?
-    /// Xcode's model identifier for the agent, e.g. "claude-code".
-    var modelIdentifier: String?
-    /// The model of the latest reply, e.g. "claude-opus-5-5" (from the agent's session). nil if unknown.
-    var model: String?
-    /// The agent's own session id (`conversation.plist` → `assistantConfiguration`).
-    var providerSessionID: String?
-    /// The navigator group (folder) the chat is in, if any.
-    var group: String?
-    var isArchived: Bool
-    var isUnread: Bool
-    /// The line under the chat's name in Xcode's navigator, e.g. "Editing README.md".
-    var subtitle: String?
-    var startDate: Date?
-    var lastActivityDate: Date?
+/// The providers implemented so far.
+nonisolated enum AgentProviders {
+    static let all: [any AgentProvider.Type] = [ClaudeProvider.self]
+
+    static func named(_ name: String) -> (any AgentProvider.Type)? {
+        all.first { $0.name == name }
+    }
 }
 
-/// A chat's history, loaded from the agent's own session (not from Xcode's chat files).
-/// See `XcodeChats.history(conversationID:)`.
-nonisolated enum ChatHistory: Sendable {
-    case claude([ClaudeProvider.SessionMessage])
-    /// NOT IMPLEMENTED for this provider.
+nonisolated enum ChatHistoryError: LocalizedError {
+    /// No chat store has a chat with this id.
+    case chatNotFound(conversationID: String)
+    /// The chat's agent could not be read from its metadata.
+    case unknownProvider(conversationID: String)
+    /// Loading history is not implemented for this agent (e.g. Codex).
     case notImplemented(provider: String)
-    /// The session could not be loaded, e.g. its transcript is missing.
-    case unavailable(reason: String)
+    /// The chat has no agent session id.
+    case sessionMissing(conversationID: String)
+    /// The agent's session file is gone.
+    case transcriptMissing(sessionID: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .chatNotFound(let id): "No Xcode chat \(id)"
+        case .unknownProvider(let id): "Unknown agent for Xcode chat \(id)"
+        case .notImplemented(let provider): "History is not implemented for agent \(provider)"
+        case .sessionMissing(let id): "Xcode chat \(id) has no agent session"
+        case .transcriptMissing(let sessionID): "No session file for agent session \(sessionID)"
+        }
+    }
 }
 
 nonisolated enum XcodeChats {
 
     static let storeRoot = FileManager.default.homeDirectoryForCurrentUser
         .appending(path: "Library/Developer/Xcode/UserData/CodingAssistant")
-    static let claudeConfig = FileManager.default.homeDirectoryForCurrentUser
-        .appending(
-            path: "Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig"
-        )
 
     /// Every project with Xcode chats, with its chats.
     static func listProjects() -> [XcodeProject] {
@@ -117,7 +128,10 @@ nonisolated enum XcodeChats {
                 [ManifestEntry].self,
                 from: store.appending(path: "CodingAssistantManifest.plist")
             ) ?? []
-        let navigator = Navigator(store: store)
+        let navigator = decode(
+            Navigator.self,
+            from: store.appending(path: "CodingAssistantNavigator.plist")
+        )
 
         let sessions = manifest.map { entry -> XcodeChatSession in
             let provider = entry.chatModelDefinitionIdentifier?
@@ -126,20 +140,18 @@ nonisolated enum XcodeChats {
                 store: store,
                 conversationID: entry.id
             )
-            let state = navigator.conversations[entry.id]
+            let state = navigator?.conversations[entry.id]
             return XcodeChatSession(
                 id: entry.id,
                 name: entry.name ?? "",
                 provider: provider,
                 modelIdentifier: entry.chatModelDefinitionIdentifier?
                     .modelIdentifier,
-                model: provider == "claude"
-                    ? sessionID.flatMap(latestClaudeModel) : nil,
                 providerSessionID: sessionID,
-                group: navigator.groupName(of: entry.id),
-                isArchived: state?["isArchived"] as? Bool ?? false,
-                isUnread: state?["isUnread"] as? Bool ?? false,
-                subtitle: state?["subtitle"] as? String,
+                group: navigator?.group(of: entry.id)?.name,
+                isArchived: state?.isArchived ?? false,
+                isUnread: state?.isUnread ?? false,
+                subtitle: state?.subtitle,
                 startDate: entry.startDate,
                 lastActivityDate: entry.lastActivityDate
             )
@@ -156,8 +168,11 @@ nonisolated enum XcodeChats {
             ).dropLast().joined(separator: "-")
         )
         let folders =
-            sessions.compactMap {
-                $0.providerSessionID.flatMap(claudeSessionCWD)
+            sessions.compactMap { session -> URL? in
+                guard let provider = session.provider.flatMap(AgentProviders.named),
+                    let sessionID = session.providerSessionID
+                else { return nil }
+                return provider.workingDirectory(sessionID: sessionID)
             } + snapshotRoots(store: store)
         return XcodeProject(
             name: name,
@@ -169,9 +184,9 @@ nonisolated enum XcodeChats {
 
     // MARK: History
 
-    /// The history of an Xcode chat, given Xcode's chat UUID (the chat's folder name in its store).
-    /// Loaded from the agent's own session; `nil` if no store has a chat with that id.
-    static func history(conversationID: String) -> ChatHistory? {
+    /// The history of an Xcode chat, given Xcode's chat UUID (the chat's folder name in its store),
+    /// loaded from the agent's own session: the same events a live turn streams (`sendMessage`).
+    static func history(conversationID: String) throws -> [ChatEvent] {
         let id = conversationID.uppercased()
         let stores =
             (try? FileManager.default.contentsOfDirectory(
@@ -184,34 +199,23 @@ nonisolated enum XcodeChats {
                     atPath: $0.appending(path: "\(id)/conversation.plist").path
                 )
             })
-        else { return nil }
+        else { throw ChatHistoryError.chatNotFound(conversationID: id) }
 
         let metadata = decode(
             ManifestEntry.self,
             from: store.appending(path: "\(id)/metadata.plist")
         )
         guard
-            let provider = metadata?.chatModelDefinitionIdentifier?
+            let providerName = metadata?.chatModelDefinitionIdentifier?
                 .providerIdentifier?.builtIn?._0.keys.first
-        else {
-            return .unavailable(reason: "unknown provider")
+        else { throw ChatHistoryError.unknownProvider(conversationID: id) }
+        guard let provider = AgentProviders.named(providerName) else {
+            throw ChatHistoryError.notImplemented(provider: providerName)
         }
-        guard provider == "claude" else {
-            return .notImplemented(provider: provider)
+        guard let sessionID = providerSessionID(store: store, conversationID: id) else {
+            throw ChatHistoryError.sessionMissing(conversationID: id)
         }
-        guard
-            let sessionID = providerSessionID(store: store, conversationID: id),
-            let transcript = claudeTranscript(sessionID: sessionID)
-        else {
-            return .unavailable(reason: "no session transcript for chat \(id)")
-        }
-        do {
-            return .claude(
-                try ClaudeProvider.SessionHistory.load(contentsOf: transcript)
-            )
-        } catch {
-            return .unavailable(reason: error.localizedDescription)
-        }
+        return try provider.history(sessionID: sessionID)
     }
 
     /// The agent's session id of a chat: `conversation.plist` → `assistantConfiguration`.
@@ -227,55 +231,7 @@ nonisolated enum XcodeChats {
             }?.agent._0.sessionID
     }
 
-    /// `<ClaudeAgentConfig>/projects/<project-dir>/<sessionID>.jsonl`
-    static func claudeTranscript(sessionID: String) -> URL? {
-        let projects = claudeConfig.appending(path: "projects")
-        let folders =
-            (try? FileManager.default.contentsOfDirectory(
-                at: projects,
-                includingPropertiesForKeys: nil
-            )) ?? []
-        return
-            folders
-            .map { $0.appending(path: "\(sessionID).jsonl") }
-            .first { FileManager.default.fileExists(atPath: $0.path) }
-    }
-
-    /// The model of the latest assistant entry in a Claude session's transcript, read without loading the history.
-    static func latestClaudeModel(sessionID: String) -> String? {
-        guard let transcript = claudeTranscript(sessionID: sessionID),
-            let data = try? Data(contentsOf: transcript)
-        else { return nil }
-        for line in data.split(separator: UInt8(ascii: "\n")).reversed() {
-            if let entry = try? JSONDecoder().decode(
-                TranscriptModel.self,
-                from: Data(line)
-            ),
-                entry.type == "assistant", let model = entry.message?.model
-            {
-                return model
-            }
-        }
-        return nil
-    }
-
     // MARK: Finding the project file
-
-    /// The `cwd` recorded in a Claude session's transcript: the folder the agent ran in.
-    static func claudeSessionCWD(sessionID: String) -> URL? {
-        guard let transcript = claudeTranscript(sessionID: sessionID),
-            let data = try? Data(contentsOf: transcript)
-        else { return nil }
-        for line in data.split(separator: UInt8(ascii: "\n")) {
-            if let cwd =
-                (try? JSONDecoder().decode(TranscriptCWD.self, from: Data(line)))?
-                .cwd
-            {
-                return URL(filePath: cwd, directoryHint: .isDirectory)
-            }
-        }
-        return nil
-    }
 
     /// The git repository roots recorded in the store's snapshots (`"relative": "file:///…/"`).
     static func snapshotRoots(store: URL) -> [URL] {
@@ -364,8 +320,8 @@ nonisolated enum XcodeChats {
 
     /// An entry of `CodingAssistantManifest.plist` (same as each chat's `metadata.plist`).
     struct ManifestEntry: Decodable {
-        struct ModelDefinition: Decodable {
-            struct ProviderIdentifier: Decodable {
+        struct AgentModel: Decodable {
+            struct Provider: Decodable {
                 struct BuiltIn: Decodable {
                     struct Empty: Decodable {}
                     var _0: [String: Empty]  // {"<provider name>": {}}
@@ -373,13 +329,13 @@ nonisolated enum XcodeChats {
                 var builtIn: BuiltIn?
             }
             var modelIdentifier: String?
-            var providerIdentifier: ProviderIdentifier?
+            var providerIdentifier: Provider?
         }
         var id: String
         var name: String?
         var startDate: Date?
         var lastActivityDate: Date?
-        var chatModelDefinitionIdentifier: ModelDefinition?
+        var chatModelDefinitionIdentifier: AgentModel?
     }
 
     /// The part of `conversation.plist` read here.
@@ -388,64 +344,59 @@ nonisolated enum XcodeChats {
     }
 
     /// `assistantConfiguration` (JSON): Swift `.agent(AgentConfiguration(sessionID:))`.
-    struct AssistantConfiguration: Decodable {
-        struct Box: Decodable {
-            struct Configuration: Decodable { var sessionID: String }
+    struct AssistantConfiguration: Codable {
+        struct Box: Codable {
+            struct Configuration: Codable { var sessionID: String }
             var _0: Configuration
         }
         var agent: Box
     }
 
-    struct TranscriptCWD: Decodable {
-        var cwd: String?
-    }
+    /// `CodingAssistantNavigator.plist`: the navigator's groups (folders), per-chat state and order.
+    struct Navigator: Decodable {
+        struct Group: Decodable {
+            var id: String
+            var name: String
+            var createdDate: Date?
+            var isExpanded: Bool?
+            var memberConversationIDs: [String]
+        }
 
-    /// `type` and `message.model` of a transcript line.
-    struct TranscriptModel: Decodable {
-        struct Message: Decodable { var model: String? }
-        var type: String?
-        var message: Message?
-    }
+        struct ConversationState: Decodable {
+            var isArchived: Bool?
+            var isUnread: Bool?
+            /// The line under the chat's name, e.g. "Editing README.md".
+            var subtitle: String?
+        }
 
-    /// `CodingAssistantNavigator.plist`: the navigator's per-chat state and groups.
-    /// `navigatorConversations` is Swift's `[UUID: State]`, written as a flat `[key, value, ...]` list.
-    /// Group entries are read loosely: their exact shape was not observed (no groups in the files seen so far).
-    struct Navigator {
-        var conversations: [String: [String: Any]] = [:]
-        var groups: [[String: Any]] = []
+        var groups: [Group]
+        /// Chat UUID → its state.
+        var conversations: [String: ConversationState]
+        /// Top-level order: group ids and ids of chats not in a group.
+        var rootNodeOrder: [String]
 
-        init(store: URL) {
-            guard
-                let data = try? Data(
-                    contentsOf: store.appending(
-                        path: "CodingAssistantNavigator.plist"
-                    )
-                ),
-                let plist = try? PropertyListSerialization.propertyList(
-                    from: data,
-                    format: nil
-                ) as? [String: Any]
-            else { return }
-            let flat = plist["navigatorConversations"] as? [Any] ?? []
-            for index in stride(from: 0, to: flat.count - 1, by: 2) {
-                if let id = flat[index] as? String,
-                    let state = flat[index + 1] as? [String: Any]
-                {
-                    conversations[id] = state
+        private enum CodingKeys: String, CodingKey {
+            case groups, navigatorConversations, rootNodeOrder
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            groups = try container.decodeIfPresent([Group].self, forKey: .groups) ?? []
+            rootNodeOrder = try container.decodeIfPresent([String].self, forKey: .rootNodeOrder) ?? []
+            // Swift's `[UUID: State]` is written as a flat `[id, state, id, state, ...]` list.
+            conversations = [:]
+            if container.contains(.navigatorConversations) {
+                var flat = try container.nestedUnkeyedContainer(forKey: .navigatorConversations)
+                while !flat.isAtEnd {
+                    let id = try flat.decode(String.self)
+                    conversations[id] = try flat.decode(ConversationState.self)
                 }
-            }
-            groups = (plist["groups"] as? [Any] ?? []).compactMap {
-                $0 as? [String: Any]
             }
         }
 
-        func groupName(of conversationID: String) -> String? {
-            let group = groups.first {
-                ($0["memberConversationIDs"] as? [String])?.contains(
-                    conversationID
-                ) == true
-            }
-            return group?["name"] as? String ?? group?["title"] as? String
+        /// The group a chat is in, if any.
+        func group(of conversationID: String) -> Group? {
+            groups.first { $0.memberConversationIDs.contains(conversationID) }
         }
     }
 }

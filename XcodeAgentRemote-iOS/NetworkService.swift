@@ -156,10 +156,13 @@ nonisolated public final class NetworkService {
         }
     }
 
-    /// Decodes JSON. Keys are used as they are: the shared types declare their own coding keys.
+    /// Decodes JSON. Keys are used as they are (the shared types declare their own coding keys); dates are
+    /// ISO 8601 strings, as the server (Hummingbird) writes them.
     public static func decode<T>(_ type: T.Type, from data: Data) throws -> T
     where T: Decodable {
-        try JSONDecoder().decode(T.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(T.self, from: data)
     }
 
     public static func decode<T>(_ type: T.Type, from string: String) throws -> T
@@ -167,7 +170,10 @@ nonisolated public final class NetworkService {
         try decode(type, from: Data(string.utf8))
     }
 
+    /// Encodes JSON, dates as ISO 8601 strings (as the server expects).
     public static func encode<T>(_ value: T) throws -> Data where T: Encodable {
-        try JSONEncoder().encode(value)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(value)
     }
 }

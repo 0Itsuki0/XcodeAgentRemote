@@ -19,18 +19,21 @@ import ServiceLifecycle
 /// `POST /message` runs an agent that can use tools on this Mac, so it is not exposed to the network.
 ///
 /// - `GET /health` → `{"status": "ok"}`
-/// - `POST /message` → SSE stream of the turn's events (`sendMessage`), closed after the `result` event.
-///   Body: `MessageRequest`, the same parameters as `sendMessage`, as JSON (`MessageTarget` in Swift's Codable form;
-///   `project` is a file URL):
-///   ```
-///   {"prompt": "…", "target": {"newConversation": {"project": "file:///…/App.xcodeproj", "name": "…"}}}
-///   {"prompt": "…", "target": {"conversation": {"id": "<Xcode chat UUID>", "project": "file:///…/App.xcodeproj"}}}
-///   {"prompt": "…", "target": {"conversationInStore": {"id": "<Xcode chat UUID>", "store": "App-<hash>"}}}
-///   ```
-///   plus optional `"permissionModeOverride": "manual" | "auto"` (omit to use Xcode's setting).
-///
-///   Each event is sent as `event: <type>` + `data: <the event's JSON>`. If the turn fails, an `event: error`
-///   with `{"message": …}` is sent.
+/// - `GET /projects` → `[XcodeProject]` (`XcodeChats.listProjects`)
+/// - `GET /history/<Xcode chat UUID>` → `[ChatEvent]` (`XcodeChats.history`); 404 no such chat, 501 not implemented
+/// - `POST /message` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
+///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), closed when the turn ends:
+///     ```
+///     {"prompt": {"prompt": "…", "target": {"conversation": {"id": "<Xcode chat UUID>", "project": "file:///…"}},
+///                 "permissionModeOverride": "manual", "permissionTimeout": 600}}
+///     ```
+///     Each `ChatEvent` is sent as `event: <its type>` + `data: <its JSON>`. If the turn fails, an `event: error`
+///     with `{"message": …}` is sent. A tool use waiting for permission waits for its answer.
+///   - `.permissionAnswer` → the answer goes to the turn waiting for it, whose stream then continues;
+///     responds `{"status": "ok"}`, or 404 if no turn is waiting for that request:
+///     ```
+///     {"permissionAnswer": {"answer": {"tool_use_id": "…", "behavior": "allow" | "deny"}}}
+///     ```
 ///   The turn does not depend on the client: if the connection closes, the turn still runs to completion and is saved.
 ///
 /// If `AgentServerAPI.authHeader` is set, every request must carry that header with that exact value, or it is
@@ -131,16 +134,48 @@ actor AgentServer {
             HealthResponse(status: "ok")
         }
 
+        // For when iCloud syncing fails: the chats and their histories, read directly from this Mac.
+        router.get(RouterPath(AgentServerAPI.projectsPath)) { _, _ in
+            XcodeChats.listProjects()
+        }
+
+        router.get(RouterPath("\(AgentServerAPI.historyPath)/:conversation")) { _, context -> [ChatEvent] in
+            let conversationID = try context.parameters.require("conversation")
+            do {
+                return try XcodeChats.history(conversationID: conversationID)
+            } catch let error as ChatHistoryError {
+                switch error {
+                case .notImplemented:
+                    throw HTTPError(.notImplemented, message: error.localizedDescription)
+                case .chatNotFound, .unknownProvider, .sessionMissing, .transcriptMissing:
+                    throw HTTPError(.notFound, message: error.localizedDescription)
+                }
+            }
+        }
+
         router.post(RouterPath(AgentServerAPI.messagePath)) { request, context -> Response in
             let body = try await request.decode(
                 as: MessageRequest.self,
                 context: context
             )
-            let events = sendMessage(
-                body.prompt,
-                to: body.target,
-                permissionModeOverride: body.permissionModeOverride
-            )
+            let events: AsyncThrowingStream<ChatEvent, Error>
+            switch body {
+            case .permissionAnswer(let answer):
+                // The answer goes to the turn waiting for it; that turn's own stream continues.
+                do {
+                    try await answerPermissionRequest(answer)
+                } catch let error as SendMessageError {
+                    throw HTTPError(.notFound, message: error.localizedDescription)
+                }
+                return try HealthResponse(status: "ok").response(from: request, context: context)
+            case .prompt(let prompt, let target, let permissionModeOverride, let permissionTimeout):
+                events = sendMessage(
+                    prompt,
+                    to: target,
+                    permissionModeOverride: permissionModeOverride,
+                    permissionTimeout: permissionTimeout
+                )
+            }
 
             let stream = ResponseBody { writer in
                 let (output, outputContinuation) = AsyncStream<ByteBuffer>
@@ -200,6 +235,8 @@ actor AgentServer {
 }
 
 extension HealthResponse: ResponseEncodable {}
+extension XcodeProject: ResponseEncodable {}
+extension ChatEvent: ResponseEncodable {}
 
 
 /// Rejects (401) every request that does not carry `AgentServerAPI.authHeader` with its exact value.

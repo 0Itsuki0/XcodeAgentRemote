@@ -798,3 +798,87 @@ nonisolated extension ClaudeProvider {
     }
 
 }
+
+// MARK: - Provider
+
+nonisolated extension ClaudeProvider: AgentProvider {
+    static let name = "claude"
+
+    /// Xcode's config folder for its Claude agent (`CLAUDE_CONFIG_DIR`).
+    static let configDirectory = FileManager.default.homeDirectoryForCurrentUser
+        .appending(path: "Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig")
+
+    /// `<config>/projects/<project-dir>/<sessionID>.jsonl`
+    static func transcript(sessionID: String) -> URL? {
+        let projects = configDirectory.appending(path: "projects")
+        let folders = (try? FileManager.default.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil)) ?? []
+        return folders
+            .map { $0.appending(path: "\(sessionID).jsonl") }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    static func history(sessionID: String) throws -> [ChatEvent] {
+        guard let transcript = transcript(sessionID: sessionID) else {
+            throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
+        }
+        return try SessionHistory.load(contentsOf: transcript).flatMap(\.chatEvents)
+    }
+
+    /// The `cwd` recorded in the session's transcript.
+    static func workingDirectory(sessionID: String) -> URL? {
+        guard let transcript = transcript(sessionID: sessionID),
+              let data = try? Data(contentsOf: transcript)
+        else { return nil }
+        for line in data.split(separator: UInt8(ascii: "\n")) {
+            if let cwd = (try? JSONDecoder().decode(TranscriptCWD.self, from: Data(line)))?.cwd {
+                return URL(filePath: cwd, directoryHint: .isDirectory)
+            }
+        }
+        return nil
+    }
+
+    private struct TranscriptCWD: Decodable {
+        var cwd: String?
+    }
+}
+
+// MARK: - Conversion to the shared events
+
+nonisolated extension ClaudeProvider.SessionMessage {
+    /// This transcript message as `ChatEvent`s: user text → `.userMessage`, assistant text → `.assistantMessage`,
+    /// thinking → `.intermediate`, tool use / tool result → `.toolUse` / `.toolResult`
+    /// (images and redacted thinking are left out).
+    var chatEvents: [ChatEvent] {
+        guard let message else { return [] }
+        return message.content.compactMap { block -> ChatEvent? in
+            switch (message.role, block) {
+            case (.user, .text(let text)):
+                return .userMessage(text.text)
+            case (.assistant, .text(let text)):
+                return .assistantMessage(text.text)
+            case (_, .thinking(let thinking)):
+                return .intermediate(thinking.thinking)
+            case (_, .toolUse(let toolUse)):
+                guard case .object(let input) = toolUse.input else {
+                    return .toolUse(ChatEvent.ToolUse(id: toolUse.id, name: toolUse.name, input: [:]))
+                }
+                return .toolUse(ChatEvent.ToolUse(id: toolUse.id, name: toolUse.name, input: input))
+            case (_, .toolResult(let result)):
+                return .toolResult(ChatEvent.ToolResult(
+                    toolUseID: result.toolUseID,
+                    output: Self.text(of: result.content ?? []),
+                    isError: result.isError ?? false
+                ))
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// The text of a tool result's content blocks (as a live turn reports it).
+    static func text(of blocks: [ClaudeProvider.ContentBlock]) -> String {
+        blocks.compactMap { block -> String? in
+            if case .text(let text) = block { text.text } else { nil }
+        }.joined()
+    }
+}

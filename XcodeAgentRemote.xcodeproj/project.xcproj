@@ -21,7 +21,6 @@
   ],
   "files": [
     { "kind": "folder", "path": "Shared", "target-membership": [ "XcodeAgentRemote", "XcodeAgentRemote-iOS" ] },
-    { "path": "Tools/xcode-chat/dist/xcode-chat", "target-membership": [ { "build-phase": "XcodeAgentRemote/copy/Copy Files", "platforms": [ "macos" ], "code-sign-on-copy": true } ] },
     { "path": "README.md", "target-membership": [ "XcodeAgentRemote/resources" ] },
     {
       "kind": "folder",
@@ -80,11 +79,6 @@
         "compile-sources",
         "frameworks",
         "resources",
-        {
-          "kind": "copy",
-          "name": "Copy Files",
-          "bundle-base-path": "executables-directory",
-        },
       ],
       "package-product-members": [
         {

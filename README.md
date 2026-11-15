@@ -8,7 +8,7 @@ hello world
 
 ### Current Approach
 
-Do what Xcode does, outside of Xcode: `Tools/xcode-chat`.
+Do what Xcode does, outside of Xcode: `XcodeAgentRemote/XcodeChat/` (shared by all agents) and `XcodeAgentRemote/Providers/` (per agent).
 
 - run the agent the same way Xcode does
     - `xcrun mcpbridge run-agent claude`: Xcode's bundled binary, config dir, Xcode MCP tools
@@ -19,11 +19,33 @@ Do what Xcode does, outside of Xcode: `Tools/xcode-chat`.
     - tool calls are written as Xcode's cards (file card, terminal card), checked against what Xcode itself writes
     - tools without a known card format use the terminal card with the tool name as title
 - permission mode follows Xcode's Manual / Auto setting (`IDEChatAgentPermissionMode` in Xcode's preferences: `standard` = Manual, `auto` = Auto), can be overridden per message
-- single turn only. if the agent asks for permission, the turn stops there and reports what it wanted to do
+- single turn only. if the agent asks for permission, the turn wait 
 - output is streamed as typed events, ending with a result
-- built into one executable (Python bundled), embedded in the app at `Contents/MacOS/xcode-chat`, for the app only
+- part of the app itself, no separate executable
 - the app calls it through `sendMessage` and gets typed events back
 - the agent's history is the Claude session `.jsonl`, shared with Xcode. Xcode's chat files are only what Xcode displays
+
+#### Permission: Hook vs agent build in.
+
+- Xcode: a `PreToolUse` hook. a denied tool comes back to the agent as `PreToolUse:Bash hook error: User selected: Don’t Allow`
+    - not in Xcode's plugin (`--plugin-dir` has skills and `.mcp.json`, no hooks)
+    - only some tools asked: Bash and Write. Edit failed before asking (file missing), WebFetch went through
+- here: Claude's built in permission prompt (`--permission-prompt-tool stdio`, `can_use_tool` requests)
+    - a denied tool comes back as `The user denied this tool use.`, no answer in time as `No answer to this permission request within N seconds.`
+    - asked for Bash, Write and Edit
+- what the user does / sees is the same: asked, allowed runs, denied doesn't, the agent is told it was denied
+    - only the denial text differs (it ends up in the denied card's output, and the agent may word its reply differently)
+    - which tools ask may differ
+- the card is the same either way: a denied tool keeps its card with `status: cancelled` (the "!")
+
+
+#### Current Testing State
+
+**Confirmed**
+
+
+
+**Not Confirmed**
 
 
 ### Rejected
