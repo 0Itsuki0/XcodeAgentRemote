@@ -4,6 +4,65 @@
 hello world
 
 
+## Run Xcode Agent Programmatically
+
+### Current Approach
+
+Do what Xcode does, outside of Xcode: `Tools/xcode-chat`.
+
+- run the agent the same way Xcode does
+    - `xcrun mcpbridge run-agent claude`: Xcode's bundled binary, config dir, Xcode MCP tools
+    - plus the flags Xcode adds: stream-json, Xcode's system prompt (from its template inside Xcode), Xcode's skills plugin, allowed tools
+    - new chat: new session. existing chat: resume the session id stored in `conversation.plist`
+- write the turn into Xcode's chat files, in Xcode's own format
+    - `conversation.plist`, `metadata.plist`, `CodingAssistantManifest.plist`, `Snapshots/`
+    - tool calls are written as Xcode's cards (file card, terminal card), checked against what Xcode itself writes
+    - tools without a known card format use the terminal card with the tool name as title
+- permission mode follows Xcode's Manual / Auto setting (`IDEChatAgentPermissionMode` in Xcode's preferences: `standard` = Manual, `auto` = Auto), can be overridden per message
+- single turn only. if the agent asks for permission, the turn stops there and reports what it wanted to do
+- output is streamed as typed events, ending with a result
+- built into one executable (Python bundled), embedded in the app at `Contents/MacOS/xcode-chat`, for the app only
+- the app calls it through `sendMessage` and gets typed events back
+- the agent's history is the Claude session `.jsonl`, shared with Xcode. Xcode's chat files are only what Xcode displays
+
+
+### Rejected
+
+- resume the chat with the CLI (`xcrun agent claude --resume <sessionID>`)
+    - only the Claude session `.jsonl` gets the turn. Xcode's chat never shows it
+    - `/resume` in the CLI doesn't even list Xcode chats
+- drive Xcode's chat UI with Accessibility
+    - the message box and the send button can't be focused or typed into from outside
+- call into Xcode itself (the private method that sends a message)
+    - needs SIP or library validation turned off. not something every Mac can do
+- `MCP_XCODE_SESSION_ID`, `xcrun mcpbridge` tools
+    - these are for the agent calling Xcode (build, run, read files…), not for sending a message to a chat
+- make Xcode reload the chat while it is open
+    - nothing watches the chat files, no refresh button, switching tabs does nothing
+- a Python script / `.pyz` that needs `python3` installed
+    - not a single executable
+
+
+### Xcode In memory cache for chat?
+
+evidence:
+- send a message from script
+    - `conversation.plist`: 15 turns, the last one is the script's
+- send a new message from xcode UI without reopen xcode
+    - the agent still knew the script's message (it reads the Claude session `.jsonl`)
+- conversation.plist
+    - still 15 turns: the script's turn is gone, replaced by the one from Xcode
+    - Xcode saved what it had in memory, without reading the file first
+- the chat's text exists only in `conversation.plist` and the Claude session `.jsonl`. Nowhere else in Xcode's folders
+- `Snapshots/` only hold git diffs, not the chat
+
+
+what that means:
+- reopen the project after using the script
+- don't send from Xcode in that chat before reopening, or the script's turns are lost from Xcode's chat (the agent still remembers them)
+
+
+
 
 ## Xcode Agent Notes
 

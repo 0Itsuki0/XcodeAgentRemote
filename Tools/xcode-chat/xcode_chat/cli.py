@@ -6,10 +6,47 @@ usage:
   xcode-chat --store App-<hash> --conversation UUID PROMPT                   # continue, by chat store folder
   ... --permission-mode manual|auto                                          # override Xcode's setting
 
-Runs a single turn without asking anything and streams its output on stdout as JSON lines (see events.py),
-ending with a "result" event. If the agent asks for permission to use a tool, the turn stops there
-("permission_request" event, result status "permission_required"); what ran so far is saved.
-Exit code 0, or 1 when the turn ended in an error.
+Parameters:
+  PROMPT
+      The message to send. Everything after the options, joined with spaces.
+
+  --project PATH
+      The project the chat belongs to: the .xcodeproj or .xcworkspace file Xcode has open.
+      Used for two things:
+      - Xcode's chat store for it: ~/Library/Developer/Xcode/UserData/CodingAssistant/<ProjectName>-<hash>/
+        (<hash> is computed from this exact path, so pass the same file Xcode opened).
+      - The folder the agent runs in: the folder that contains the project file.
+      Either --project or --store is required, not both.
+
+  --store NAME_OR_PATH
+      Instead of --project: the chat store folder itself, <ProjectName>-<hash>, as a folder name
+      (looked up under ~/Library/Developer/Xcode/UserData/CodingAssistant/) or a full path.
+      The project file is found from the chat's agent session and its snapshots.
+      Only for an existing chat, so it needs --conversation.
+
+  --conversation UUID
+      The Xcode chat to continue: Xcode's chat UUID (the chat's folder name in the store,
+      e.g. D868CB20-1251-4ECC-9047-041C449419CB), NOT the agent's session id.
+      The agent session to resume is read from that chat's conversation.plist (assistantConfiguration).
+      The chat's agent (provider) is also read from there; only "claude" is supported.
+      Omit it to start a new chat (Claude) in the project.
+
+  --name TITLE
+      The chat's title as shown in Xcode. New chat: defaults to the first 40 characters of the prompt.
+      Existing chat: renames it. Omit to keep the current title.
+
+  --permission-mode manual|auto
+      Overrides Xcode's Manual / Auto setting (Xcode's preferences, IDEChatAgentPermissionMode) for this turn.
+      Omit to use Xcode's current setting.
+      - manual: the agent asks before tools that change something; the turn stops at that request.
+      - auto: the agent decides by itself.
+
+Output:
+  Runs a single turn without asking anything and streams its output on stdout as JSON lines (see events.py),
+  ending with a "result" event. If the agent asks for permission to use a tool, the turn stops there
+  ("permission_request" event, result status "permission_required"); what ran so far is saved.
+  Errors before the turn starts (bad project, unknown chat, ...) go to stderr.
+  Exit code 0, or 1 when the turn ended in an error or could not start.
 """
 
 from __future__ import annotations
@@ -38,15 +75,30 @@ class Options:
 
 
 def parse_args() -> Options:
-    parser = argparse.ArgumentParser(prog="xcode-chat", description="Run one Xcode coding-assistant turn.")
+    parser = argparse.ArgumentParser(
+        prog="xcode-chat",
+        description="Run one Xcode coding-assistant turn and record it in Xcode's chat store. "
+                    "Streams the turn as JSON lines on stdout, ending with a \"result\" event.")
     target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--project", help="path to the .xcodeproj or .xcworkspace")
-    target.add_argument("--store", help="Xcode chat store folder, <ProjectName>-<hash> (name or path); needs --conversation")
-    parser.add_argument("--conversation", help="UUID of an existing chat to continue")
-    parser.add_argument("--name", help="chat title")
-    parser.add_argument("--permission-mode", choices=list(settings.OVERRIDE_MODES),
-                        help="override Xcode's Manual / Auto setting")
-    parser.add_argument("prompt", nargs="+")
+    target.add_argument(
+        "--project", metavar="PATH",
+        help="the .xcodeproj / .xcworkspace Xcode has open. Picks Xcode's chat store for it "
+             "(<ProjectName>-<hash of this path>) and runs the agent in the folder containing it")
+    target.add_argument(
+        "--store", metavar="NAME_OR_PATH",
+        help="instead of --project: the chat store folder <ProjectName>-<hash> (folder name or full path). "
+             "The project is found from the chat's session and snapshots. Needs --conversation")
+    parser.add_argument(
+        "--conversation", metavar="UUID",
+        help="Xcode's chat UUID to continue (the chat's folder name in the store), not the agent's session id. "
+             "Omit to start a new chat")
+    parser.add_argument(
+        "--name", metavar="TITLE",
+        help="chat title shown in Xcode. New chat: defaults to the start of the prompt. Existing chat: renames it")
+    parser.add_argument(
+        "--permission-mode", choices=list(settings.OVERRIDE_MODES),
+        help="override Xcode's Manual / Auto setting for this turn (default: Xcode's current setting)")
+    parser.add_argument("prompt", nargs="+", metavar="PROMPT", help="the message to send")
     args = parser.parse_args()
     if args.store and not args.conversation:
         parser.error("--store needs --conversation")

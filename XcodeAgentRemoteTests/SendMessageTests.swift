@@ -21,9 +21,9 @@ struct SendMessageTests {
     static let conversationID = "D868CB20-1251-4ECC-9047-041C449419CB"
 
     static func events(_ prompt: String, to target: MessageTarget,
-                       permissionMode: PermissionModeOverride? = nil) async throws -> [ChatEvent] {
+                       permissionModeOverride: PermissionMode? = nil) async throws -> [ChatEvent] {
         var events: [ChatEvent] = []
-        for try await event in sendMessage(prompt, to: target, permissionMode: permissionMode) {
+        for try await event in sendMessage(prompt, to: target, permissionModeOverride: permissionModeOverride) {
             events.append(event)
         }
         return events
@@ -57,7 +57,7 @@ struct SendMessageTests {
         let events = try await Self.events(
             "Use the Bash tool to run: touch \(file.path)",
             to: .conversation(id: Self.conversationID, project: Self.project),
-            permissionMode: .manual)
+            permissionModeOverride: .manual)
 
         let request = events.lazy.compactMap { event -> ChatEvent.PermissionRequest? in
             if case .permissionRequest(let request) = event { request } else { nil }

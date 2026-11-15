@@ -1,0 +1,44 @@
+//
+//  XcodeAgentRemote_iOSApp.swift
+//  XcodeAgentRemote-iOS
+//
+//  Created by Itsuki on 2026/11/15.
+//
+
+import SwiftData
+import SwiftUI
+
+@main
+struct XcodeAgentRemote_iOSApp: App {
+    #if os(iOS)
+        @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #else
+        @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #endif
+
+    var sharedModelContainer: ModelContainer = {
+        let schema = Schema([
+            ItemModel.self
+        ])
+        let modelConfiguration = ModelConfiguration(
+            schema: schema,
+            cloudKitDatabase: .private(CloudManager.containerIdentifier)
+        )
+
+        do {
+            return try ModelContainer(
+                for: schema,
+                configurations: [modelConfiguration]
+            )
+        } catch {
+            fatalError("Could not create ModelContainer: \(error)")
+        }
+    }()
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+        .modelContainer(sharedModelContainer)
+    }
+}

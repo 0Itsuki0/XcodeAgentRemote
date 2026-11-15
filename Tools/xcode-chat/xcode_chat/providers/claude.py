@@ -10,8 +10,10 @@ import glob
 import json
 import os
 import re
+import signal
 import subprocess
 import uuid
+from types import FrameType
 from typing import IO, Any, Literal, TypedDict, Union, cast
 
 from .. import cards
@@ -192,6 +194,14 @@ class ClaudeProvider(Provider):
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
         stdin = cast(IO[str], agent.stdin)
         stdout = cast(IO[str], agent.stdout)
+
+        # If xcode-chat is stopped (e.g. the app cancels the turn), stop the agent too instead of leaving it running.
+        def stop(signum: int, frame: FrameType | None) -> None:
+            agent.terminate()
+            raise SystemExit(128 + signum)
+
+        for stop_signal in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(stop_signal, stop)
 
         def send(message: AgentInput) -> None:
             try:
