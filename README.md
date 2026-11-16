@@ -68,7 +68,7 @@ Current State:
 - so for Xcode's chats, no permission request is recognized, waiting or answered: they all look like regular tool uses
 
 
-General Approach 
+General Approach
 
 - every turn the app runs (`sendMessage`, and resuming a chat to answer a request) first closes the project in Xcode (`XcodeAutomation.closeProject`): once the user answers through the app, Xcode can no longer answer it, and its agent stops
 - a tool use of Xcode's chat is a request when it is the last message with no result, no mark (Xcode's agent never sets one), and
@@ -161,13 +161,29 @@ EXAMPLES:
     xcrun agent plugin path --plugin-format <name>
 ```
 
-### Data locations
-- Configuration:  `~/Library/Developer/Xcode/CodingAssistant/`
-- Chat data (xcode copy): `~/Library/Developer/Xcode/UserData/CodingAssistant`
+### Important locations
+- Agent Configuration:  `~/Library/Developer/Xcode/CodingAssistant/`
+    - Xcode's agent binary (what `xcrun mcpbridge run-agent claude` runs): `Agents/XcodeVersions/<Xcode build>/claude/claude`
+    - per agent process, temporary: `$TMPDIR/mcp-config-<UUID>.json` (`--mcp-config`), `$TMPDIR/com.apple.dt.IDEIntelligenceAgents/plugins/<Xcode build>/xcode-integration/` (`--plugin-dir`)
+- Chat data (xcode copy): `~/Library/Developer/Xcode/UserData/CodingAssistant`, one folder per project: `<Project>-<hash>/`
+    - `CodingAssistantManifest.plist`: the project's chats (a folder with it is a project's store)
+    - `CodingAssistantNavigator.plist`: the chat list Xcode shows
+    - `<chat UUID>/conversation.plist`: turns, their cards, `assistantConfiguration`
+    - `<chat UUID>/metadata.plist`: name, dates, provider
+    - `Snapshots/<UUID>.plist`: git state before / after each turn
 - chat data (provider bundled by xcode)
     - claude session history: `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/projects`
     - The link: `CodingAssistant/projectName/<conversation_id>/conversation.plist` has a binary field: `assistantConfiguration`. Decoded, it contains: `{"agent":{"_0":{"sessionID":"2a561bc4-7ab8-4561-a88f-69e6a53ca073"}}}` where the `sessionID` is that under provider session history's `projects/projectName/sessionId`.
     - `conversation_id` is xcode's own id. has nothing to do with `sessionId`.
+- Xcode's system prompt addition (template): `$(xcode-select -p)/../PlugIns/IDEIntelligenceChat.framework/Resources/AgentSystemPromptAddition.idechatprompttemplate`
+- Xcode's permission settings (global, Settings → Intelligence; read by `XcodeChat/Permission.swift` on every check): `~/Library/Group Containers/group.com.apple.dt.Xcode.SecureSettingsContainer/CodingAssistant/AgentToolPermissionSettings/`
+    - `permissions.json`: `toolRules` (Allowed Tools), `shellCommandRules` (Allowed Commands), `pathRules` (files and folders), `grantCommonLocations`, `dangerouslyAllowAllShellCommands`, `automaticallyManageCommands`, `pathRulesApplyTo`, `removedDefaultCommands`, `removedDefaultPaths`
+    - `supervisor-settings.json`: `{"enabled": true}` = Control File & Folder Access on
+    - `toolPermissions.json`: older format, no longer updated by Xcode (not read)
+- Xcode's permission mode: defaults `com.apple.dt.Xcode`, key `IDEChatAgentPermissionMode` (`standard` = Manual, `auto`, `dontAsk`, `bypassPermissions`)
+- Xcode's file access supervisor (Endpoint Security client, asks / refuses when the agent opens a file): `/Applications/Xcode-beta.app/Contents/Developer/usr/libexec/agentfileaccesssupervisor`, preferences domain `com.apple.dt.CodeIntelligence.agentfileaccesssupervisor`
+- Xcode's permission decisions in the unified log (values `<private>`): process `Xcode`, subsystem `com.apple.IDEIntelligenceChat` (`AgentToolUseCallbackDelegate`: "approved" / "requesting permission", rule specificity), and process `agentfileaccesssupervisor` ("Authorization Request" / "Authorization resolved"). e.g. `log stream --level debug --style compact --predicate 'process == "Xcode" OR process == "agentfileaccesssupervisor"'`
+- the app's marks of waiting tool uses: the app's `UserDefaults`, key `WaitingForUserToolUseIDsByAgent` (`[agent: [tool use id]]`)
 
 
 #### Permission: Hook vs agent build in.
@@ -289,6 +305,26 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "PreToolUse:Bash hook error: User selected: Don’t Allow", "is_error": true, "tool_use_id": "toolu_01W7CY9HucWWtktDFRUwJJuw"}]}, "toolUseResult": "Error: PreToolUse:Bash hook error: User selected: Don’t Allow"}
 ```
 
+- the app quit (the agent's stdin closed) while the agent waited for the answer: the agent settles the request itself, as a deny
+
+```json
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "Tool permission request failed: AbortError: Tool permission stream closed before response received", "is_error": true, "tool_use_id": "toolu_01GQfvogsBJcmrikmsxe15EV"}]}, "toolUseResult": "Error: Tool permission request failed: AbortError: Tool permission stream closed before response received", "permissionDecision": {"decision": "reject", "source": "config", "reasonType": "other"}, "toolDenialKind": "permission-rule"}
+```
+
+#### Who decided: `permissionDecision`
+
+- on the result's line, next to `toolUseResult`. `"toolDenialKind": "permission-rule"` with a reject
+    - `user_temporary` / `user_reject`: the user, through the app (`can_use_tool`). what counts as a request the user answered (`ClaudeProvider.userRequest`)
+    - `hook`: Xcode's PreToolUse hook. the same whether Xcode asked the user or allowed it by its rules
+    - `config`: the agent itself, without asking (`--allowedTools`, its own rules), or settled by itself (the stream closed, above)
+
+```json
+{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_01XM4UtqUgebxvwvh7TqFB5G", "type": "tool_result", "content": "(Bash completed with no output)", "is_error": false}]}, "toolUseResult": {"stdout": "", "stderr": "", "interrupted": false, "isImage": false, "noOutputExpected": true}, "permissionDecision": {"decision": "accept", "source": "user_temporary"}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "The user denied this tool use.", "is_error": true, "tool_use_id": "toolu_0197KBua14T4ZmrjtkE4CBtp"}]}, "toolUseResult": "Error: The user denied this tool use.", "permissionDecision": {"decision": "reject", "source": "user_reject"}, "toolDenialKind": "permission-rule"}
+{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_01BpaaNc4vmBEKhkCj28gShv", "type": "tool_result", "content": "(Bash completed with no output)", "is_error": false}]}, "permissionDecision": {"decision": "accept", "source": "hook", "reasonType": "hook"}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Pj4HDDtk6THJGSfNcLNfvK", "content": [{"type": "tool_reference", "tool_name": "EnterPlanMode"}, {"type": "tool_reference", "tool_name": "ExitPlanMode"}]}]}, "toolUseResult": {"matches": ["EnterPlanMode", "ExitPlanMode"], "query": "select:EnterPlanMode,ExitPlanMode", "total_deferred_tools": 124}, "permissionDecision": {"decision": "accept", "source": "config", "reasonType": "rule"}}
+```
+
 #### User choice: AskUserQuestion
 
 - the question
@@ -325,6 +361,22 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "Run `echo second` instead.", "is_error": true, "tool_use_id": "toolu_01GvXVmcsLfYGcdv56xbLSo3"}]}, "toolUseResult": "Error: Run `echo second` instead."}
 ```
 
+#### Stopped while the tool ran (Xcode's chat, the project closed)
+
+- closed by the app (AppleScript): Xcode doesn't notice, the tool is killed: a plain error result
+    - the same result as a command that was killed for another reason; the app removes it only right after it closed the project for that tool use (`removeStoppedResult`)
+
+```json
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "Exit code 137", "is_error": true, "tool_use_id": "toolu_01RJvSxtJJVZB21SrHjYowaw"}]}, "toolUseResult": "Error: Exit code 137", "permissionDecision": {"decision": "accept", "source": "hook", "reasonType": "hook"}}
+```
+
+- closed by the user (the close button): Xcode notices: a "rejected" result, then the interrupted text
+
+```json
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", "is_error": true, "tool_use_id": "toolu_01AJGSJBsHVuSidRJ9vRyZiM"}]}, "toolUseResult": "User rejected tool use", "toolDenialKind": "user-rejected"}
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user for tool use]"}]}}
+```
+
 #### Interrupted
 
 - the agent stopped while a tool was running (or waiting for its permission). nothing is written then
@@ -334,9 +386,28 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]", "is_error": true, "tool_use_id": "toolu_018pckhASC7nCM9urwCcsrhm"}]}, "toolUseResult": "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]"}
 ```
 
+- and, before the new prompt, an assistant message it didn't get from the model
+
+```json
+{"type": "assistant", "message": {"role": "assistant", "model": "<synthetic>", "content": [{"type": "text", "text": "No response requested."}]}}
+```
+
 #### Permission request / response (stream-json, not in the file)
 
-- agent → us (stdout), for a permission, a question or a plan alike
+- us → agent (stdin), first: `initialize`, registering the pass-through PreToolUse hook (the agent answers with a `control_response` for `"request_id": "initialize"`: its commands, models, …)
+
+```json
+{"type": "control_request", "request_id": "initialize", "request": {"subtype": "initialize", "hooks": {"PreToolUse": [{"matcher": null, "hookCallbackIds": ["pre_tool_use"]}]}}}
+```
+
+- agent → us (stdout), before every tool use: the hook. we answer no decision (`{}`), so the agent's own permission check decides (next)
+
+```json
+{"type": "control_request", "request_id": "b135a5b2-b7f6-45cc-b6b7-e8084ef396ae", "request": {"subtype": "hook_callback", "callback_id": "pre_tool_use", "input": {"session_id": "62cf1b6e-f502-40b4-8cdb-9acd80ad723b", "transcript_path": "…/ClaudeAgentConfig/projects/<project>/62cf1b6e-f502-40b4-8cdb-9acd80ad723b.jsonl", "cwd": "…", "prompt_id": "bbbda525-97fd-4cfd-9d29-f0ae279b73c0", "permission_mode": "default", "effort": {"level": "medium"}, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "touch /tmp/hookcap-test", "description": "Create empty test file"}, "tool_use_id": "toolu_01JdVv6wD5EitjiQ8BMNyDAR"}, "tool_use_id": "toolu_01JdVv6wD5EitjiQ8BMNyDAR"}}
+{"type": "control_response", "response": {"subtype": "success", "request_id": "b135a5b2-b7f6-45cc-b6b7-e8084ef396ae", "response": {}}}
+```
+
+- agent → us (stdout), when it asks the user: for a permission, a question or a plan alike
 
 ```json
 {"type": "control_request", "request_id": "15b24acf-5440-4596-933d-3465d5aaf634", "request": {"subtype": "can_use_tool", "tool_name": "Bash", "display_name": "Bash", "input": {"command": "touch /tmp/control-capture-test", "description": "Create empty test file in /tmp"}, "description": "Create empty test file in /tmp", "permission_suggestions": [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "touch /tmp/control-capture-test"}], "behavior": "allow", "destination": "localSettings"}, {"type": "addDirectories", "directories": ["/tmp"], "destination": "session"}, {"type": "setMode", "mode": "acceptEdits", "destination": "session"}], "blocked_path": "/tmp/control-capture-test", "tool_use_id": "toolu_01E8c6u8Qdr7aZDcqQoJwtfV"}}
@@ -349,6 +420,8 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 
 ```json
 {"type": "control_response", "response": {"subtype": "success", "request_id": "15b24acf-5440-4596-933d-3465d5aaf634", "response": {"behavior": "deny", "message": "The user denied this tool use."}}}
+{"type": "control_response", "response": {"subtype": "success", "request_id": "<request_id>", "response": {"behavior": "allow", "updatedInput": {"command": "touch /tmp/control-capture-test", "description": "Create empty test file in /tmp"}}}}
+{"type": "control_response", "response": {"subtype": "success", "request_id": "<request_id>", "response": {"behavior": "allow", "updatedInput": {"questions": [{"question": "Which colors do you like?", "header": "Colors", "multiSelect": true, "options": […]}], "answers": {"Which colors do you like?": "Red, Blue"}}}}}
 ```
 
 
