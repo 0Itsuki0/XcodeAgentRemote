@@ -146,9 +146,9 @@ nonisolated enum ChatStore {
         private var modelIdentifier: String
         private var providerIdentifier: Provider
 
-        init(modelIdentifier: String, provider: String) {
+        init(modelIdentifier: String, agent: Agent) {
             self.modelIdentifier = modelIdentifier
-            self.providerIdentifier = .builtIn([provider: Empty()])
+            self.providerIdentifier = .builtIn([agent.rawValue: Empty()])
         }
     }
 
@@ -223,12 +223,13 @@ nonisolated enum ChatStore {
             return Chat(store: store, id: id, plist: plist)
         }
 
-        /// The agent this chat uses: the key under `chatModelDefinitionId.providerIdentifier.builtIn._0`.
-        var providerName: String? {
+        /// The agent this chat uses: the key under `chatModelDefinitionId.providerIdentifier.builtIn._0`; nil if it is
+        /// missing or not one of the agents Xcode can run.
+        var agent: Agent? {
             let model = plist["chatModelDefinitionId"] as? [String: Any]
             let provider = model?["providerIdentifier"] as? [String: Any]
             let builtIn = (provider?["builtIn"] as? [String: Any])?["_0"] as? [String: Any]
-            return builtIn?.keys.first
+            return builtIn?.keys.first.flatMap(Agent.init(rawValue:))
         }
 
         /// The agent session id stored in `assistantConfiguration`.

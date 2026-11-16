@@ -50,6 +50,9 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
     case toolUse(ToolUse)
     /// `"type": "tool_result"`
     case toolResult(ToolResult)
+    /// The agent asks the user about a tool use it made (permission, questions, a plan); it waits for the answer
+    /// (`UserAnswer`) until the tool use has a result. `"type": "user_request"`, `"request": {...}`
+    case userRequest(UserRequest)
 
     struct ToolUse: Codable, Hashable, Sendable {
         var id: String
@@ -78,10 +81,11 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
         case .intermediate: "intermediate"
         case .toolUse: "tool_use"
         case .toolResult: "tool_result"
+        case .userRequest: "user_request"
         }
     }
 
-    private enum Keys: String, CodingKey { case type, text }
+    private enum Keys: String, CodingKey { case type, text, request }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
@@ -91,6 +95,7 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
         case "intermediate": self = .intermediate(try container.decode(String.self, forKey: .text))
         case "tool_use": self = .toolUse(try ToolUse(from: decoder))
         case "tool_result": self = .toolResult(try ToolResult(from: decoder))
+        case "user_request": self = .userRequest(try container.decode(UserRequest.self, forKey: .request))
         case let type:
             throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "unknown event type \(type)")
         }
@@ -106,16 +111,19 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
             try toolUse.encode(to: encoder)
         case .toolResult(let toolResult):
             try toolResult.encode(to: encoder)
+        case .userRequest(let request):
+            try container.encode(request, forKey: .request)
         }
     }
 }
 
 // MARK: - Requests to the user
 
-/// What a turn waits for from the user: permission for a tool use, answers to questions, or approval of a plan.
-/// The agent asks each of them with a tool use that has no result until the user answers (`UserAnswer`).
-/// For Claude: `AskUserQuestion` asks questions, `ExitPlanMode` presents a plan, any other tool asks for permission.
-nonisolated enum UserRequest: Sendable {
+/// What the agent asks the user about one of its tool uses: permission for it, answers to questions, or approval of
+/// a plan (`ChatEvent.userRequest`). The tool use has no result until the user answers (`UserAnswer`).
+/// Which tool uses are requests is decided on the Mac, by the agent's provider (Claude: `ClaudeProvider.userRequest`);
+/// clients only read the `userRequest` events.
+nonisolated enum UserRequest: Codable, Hashable, Sendable {
     /// Allow or deny this tool use.
     case permission(ChatEvent.ToolUse)
     /// Choose among each question's options.
@@ -140,24 +148,6 @@ nonisolated enum UserRequest: Sendable {
         var multiSelect: Bool?
     }
 
-    /// The request a tool use makes: questions for `AskUserQuestion`, a plan for `ExitPlanMode`, else a permission.
-    init(_ toolUse: ChatEvent.ToolUse) {
-        switch toolUse.name {
-        case "AskUserQuestion":
-            let questions = (try? JSONEncoder().encode(toolUse.input["questions"]))
-                .flatMap { try? JSONDecoder().decode([Question].self, from: $0) }
-            self = questions.map { .questions(toolUseID: toolUse.id, $0) } ?? .permission(toolUse)
-        case "ExitPlanMode":
-            if case .string(let plan)? = toolUse.input["plan"] {
-                self = .planApproval(toolUseID: toolUse.id, plan: plan)
-            } else {
-                self = .permission(toolUse)
-            }
-        default:
-            self = .permission(toolUse)
-        }
-    }
-
     /// The tool use the request is (`UserAnswer`'s `toolUseID`).
     var toolUseID: String {
         switch self {
@@ -167,14 +157,13 @@ nonisolated enum UserRequest: Sendable {
     }
 }
 
-/// The requests a turn's events end waiting for: its tool uses that have no result yet.
-/// (A tool use that is still running has no result yet either; a stream from the server ends only at a request.)
+/// The requests the events end waiting for: `userRequest`s whose tool use has no result yet.
 nonisolated func waitingForUser(_ events: [ChatEvent]) -> [UserRequest] {
     let answered = Set(events.compactMap { event -> String? in
         if case .toolResult(let result) = event { result.toolUseID } else { nil }
     })
     return events.compactMap { event -> UserRequest? in
-        if case .toolUse(let toolUse) = event, !answered.contains(toolUse.id) { UserRequest(toolUse) } else { nil }
+        if case .userRequest(let request) = event, !answered.contains(request.toolUseID) { request } else { nil }
     }
 }
 

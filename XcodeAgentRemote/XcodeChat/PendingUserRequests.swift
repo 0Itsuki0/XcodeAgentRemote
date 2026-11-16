@@ -5,6 +5,37 @@
 
 import Foundation
 
+/// The tool uses the agent waits on the user for, by id, kept across launches (`UserDefaults`).
+/// The `.jsonl` shows a tool use with no result both while it runs and while it waits for the user; this mark tells
+/// them apart. Kept per agent, and only by the agent's provider: set when the agent asks the user, removed once the
+/// provider has the answer or the tool use has a result.
+/// A mark counts only while its tool use is the session's last message (`ClaudeProvider.userRequest`): if the
+/// agent was killed before it settled the request, the request can still be answered (`answerUserRequest`); if the app quit
+/// instead, the agent settles it itself (as failed) and goes on, and the mark left behind is stale.
+nonisolated enum WaitingMarks {
+    /// `[agent: [tool use id]]`: tool use ids are an agent's own, and only that agent's provider reads them.
+    private static let key = "WaitingForUserToolUseIDsByAgent"
+
+    private static var marks: [String: [String]] {
+        get { UserDefaults.standard.dictionary(forKey: key) as? [String: [String]] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+
+    static func contains(_ toolUseID: String, agent: Agent) -> Bool {
+        marks[agent.rawValue]?.contains(toolUseID) ?? false
+    }
+
+    static func add(_ toolUseID: String, agent: Agent) {
+        var ids = marks[agent.rawValue] ?? []
+        if !ids.contains(toolUseID) { ids.append(toolUseID) }
+        marks[agent.rawValue] = ids
+    }
+
+    static func remove(_ toolUseID: String, agent: Agent) {
+        marks[agent.rawValue] = (marks[agent.rawValue] ?? []).filter { $0 != toolUseID }
+    }
+}
+
 /// The requests to the user in running turns (permission, questions, a plan: `UserRequest`), and their answers.
 /// A tool use is answerable from when it is streamed until its result (`register` / `unregister`, by `sendMessage`); the answer
 /// may arrive before the agent asks for it (it is kept until the provider waits for it) and is taken once.

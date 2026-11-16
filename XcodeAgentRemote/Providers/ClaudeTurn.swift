@@ -54,7 +54,7 @@ nonisolated extension ClaudeProvider {
         -> [String]
     {
         var arguments = [
-            "mcpbridge", "run-agent", name,
+            "mcpbridge", "run-agent", agent.rawValue,
             "-p",
             "--input-format=stream-json",
             "--output-format=stream-json",
@@ -67,7 +67,7 @@ nonisolated extension ClaudeProvider {
         if let prompt = xcodeSystemPrompt() {
             arguments += ["--append-system-prompt", prompt]
         }
-        if let pluginDirectory = runCommand(["xcrun", "mcpbridge", "run-agent", "plugin", "path", "--plugin-format", name])?
+        if let pluginDirectory = runCommand(["xcrun", "mcpbridge", "run-agent", "plugin", "path", "--plugin-format", agent.rawValue])?
             .trimmingCharacters(in: .whitespacesAndNewlines), !pluginDirectory.isEmpty
         {
             arguments += ["--plugin-dir", pluginDirectory]
@@ -107,7 +107,15 @@ nonisolated extension ClaudeProvider {
         process.standardInput = input
         process.standardOutput = output
         let (exited, exitedContinuation) = AsyncStream<Void>.makeStream()
-        process.terminationHandler = { _ in exitedContinuation.finish() }
+        // The request the turn waits on: if the agent exits meanwhile (e.g. it is killed), nothing will come of it,
+        // so the wait ends right away (the request is left waiting in the transcript, still answerable).
+        let waitingOn = WaitingToolUse()
+        process.terminationHandler = { _ in
+            exitedContinuation.finish()
+            Task {
+                if let toolUseID = await waitingOn.toolUseID { await PendingUserRequests.shared.unregister(toolUseID) }
+            }
+        }
 
         let stdin = input.fileHandleForWriting
         // Writing after the agent exited fails instead of killing the app with SIGPIPE.
@@ -121,7 +129,13 @@ nonisolated extension ClaudeProvider {
 
         try process.run()
         try await withTaskCancellationHandler {
+            // A pass-through PreToolUse hook, like the one Xcode registers: with any PreToolUse hook, Claude writes a
+            // tool use to the session's transcript before it asks the user about it, so a waiting request is in the
+            // `.jsonl`. It answers no decision: Claude's own permission check still decides (`can_use_tool`).
+            sendToAgent(initializeRequest)
             sendToAgent(PromptMessage(prompt: request.prompt, sessionID: request.sessionID))
+            // The earlier answer to give again, once, when the agent repeats the tool use it was given for.
+            var repeatedAnswer = request.repeatedAnswer
 
             var toolUses: [String: ChatEvent.ToolUse] = [:]
             var agentError: String?
@@ -161,6 +175,7 @@ nonisolated extension ClaudeProvider {
                 case "user":
                     for case .toolResult(let result) in message.message?.content ?? [] {
                         guard let toolUse = toolUses[result.toolUseID] else { continue }
+                        WaitingMarks.remove(toolUse.id, agent: agent)
                         if fileChangingTools.contains(toolUse.name), let path = toolUse.stringInput("file_path") {
                             await request.records.setFileAfter(
                                 try? String(contentsOfFile: path, encoding: .utf8), toolUseID: toolUse.id)
@@ -173,14 +188,43 @@ nonisolated extension ClaudeProvider {
 
                 case "control_request":
                     let requestID = message.requestID ?? ""
-                    if let canUseTool = message.request, canUseTool.subtype == "can_use_tool" {
-                        let decision = await permissionDecision(for: canUseTool, timeout: request.permissionTimeout)
-                        if decision.behavior == "deny", let toolUseID = canUseTool.toolUseID {
+                    switch message.request?.subtype {
+                    case "can_use_tool":
+                        // The agent asks the user about a tool use: stream the request, then wait for the answer.
+                        guard let permissionRequest = message.request, let toolUseID = permissionRequest.toolUseID else {
+                            sendToAgent(ControlResponse<Empty>(response: .init(
+                                subtype: "error", requestID: requestID, error: "no tool use id")))
+                            break
+                        }
+                        let toolUse = toolUses[toolUseID] ?? ChatEvent.ToolUse(
+                            id: toolUseID, name: permissionRequest.toolName ?? "?", input: permissionRequest.input ?? [:])
+                        // The agent asked the user: mark it waiting, and stream the request it is (`userRequest`).
+                        WaitingMarks.add(toolUseID, agent: agent)
+                        if let userRequest = userRequest(for: toolUse, decidedByUser: nil, isLastMessage: true) {
+                            continuation.yield(.userRequest(userRequest))
+                        }
+                        let answer: UserAnswer?
+                        if let repeated = repeatedAnswer, !repeated.answer.isDeny, isSameCall(repeated.toolUse, toolUse) {
+                            repeatedAnswer = nil
+                            answer = repeated.answer.answering(toolUseID)
+                        } else {
+                            await waitingOn.set(toolUseID)
+                            answer = await PendingUserRequests.shared.waitForAnswer(
+                                toolUseID: toolUseID, timeout: request.permissionTimeout)
+                            await waitingOn.set(nil)
+                        }
+                        if answer != nil { WaitingMarks.remove(toolUseID, agent: agent) }
+                        let decision = permissionDecision(for: permissionRequest, answer: answer, timeout: request.permissionTimeout)
+                        if decision.behavior == "deny" {
                             await request.records.setDenied(toolUseID: toolUseID)
                         }
                         sendToAgent(ControlResponse(response: .init(subtype: "success", requestID: requestID, response: decision)))
-                    } else {
-                        sendToAgent(ControlResponse(response: .init(subtype: "error", requestID: requestID, error: "unsupported request")))
+                    case "hook_callback":
+                        // The pass-through PreToolUse hook: no decision.
+                        sendToAgent(ControlResponse(response: .init(subtype: "success", requestID: requestID, response: Empty())))
+                    default:
+                        sendToAgent(ControlResponse<Empty>(response: .init(
+                            subtype: "error", requestID: requestID, error: "unsupported request")))
                     }
 
                 case "result":
@@ -201,19 +245,15 @@ nonisolated extension ClaudeProvider {
         }
     }
 
-    /// Waits for the user's answer to the tool use the agent asks about, and builds Claude's decision.
+    /// Claude's decision from the user's answer to the tool use the agent asks about.
     /// Claude asks for permission, questions (AskUserQuestion) and plan approval (ExitPlanMode) the same way:
     /// - permission: "allow" with the tool's input, or "deny" with why;
     /// - questions: "allow" with the input plus `answers` (`{"<question>": "<label>, <label>"}`), or "deny" to decline;
     /// - plan: "allow" to approve, or "deny" with the feedback.
     /// No answer within `timeout` seconds: deny.
-    private static func permissionDecision(for request: ToolPermissionRequest, timeout: TimeInterval) async -> PermissionDecision {
-        let answer: UserAnswer? =
-            if let toolUseID = request.toolUseID {
-                await PendingUserRequests.shared.waitForAnswer(toolUseID: toolUseID, timeout: timeout)
-            } else {
-                nil
-            }
+    private static func permissionDecision(
+        for request: ToolPermissionRequest, answer: UserAnswer?, timeout: TimeInterval
+    ) -> PermissionDecision {
         let input = request.input ?? [:]
         switch answer {
         case .permission(_, true, _), .planApproval(_, true, _):
@@ -260,13 +300,13 @@ nonisolated extension ClaudeProvider {
         }
     }
 
-    /// Sent to the agent: the answer to a control request (a permission decision, or an error if unsupported).
-    private struct ControlResponse: Encodable {
-        /// The response to one control request: success with a decision, or an error.
+    /// Sent to the agent: the answer to a control request (a permission decision, a hook's output, or an error).
+    private struct ControlResponse<Response: Encodable>: Encodable {
+        /// The response to one control request: success with its response, or an error.
         struct Body: Encodable {
             var subtype: String
             var requestID: String
-            var response: PermissionDecision?
+            var response: Response?
             var error: String?
 
             enum CodingKeys: String, CodingKey {
@@ -285,14 +325,37 @@ nonisolated extension ClaudeProvider {
         var message: String?
     }
 
-    /// `can_use_tool`
+    /// The tool use a turn waits on for the user's answer, if any.
+    private actor WaitingToolUse {
+        private(set) var toolUseID: String?
+        func set(_ toolUseID: String?) { self.toolUseID = toolUseID }
+    }
+
+    /// `{}`: a hook's output with no decision.
+    private struct Empty: Encodable {}
+
+    /// The `initialize` control request: registers the pass-through PreToolUse hook (every tool, one callback).
+    private static let initializeRequest: JSONValue = .object([
+        "type": .string("control_request"),
+        "request_id": .string("initialize"),
+        "request": .object([
+            "subtype": .string("initialize"),
+            "hooks": .object([
+                "PreToolUse": .array([.object(["matcher": .null, "hookCallbackIds": .array([.string("pre_tool_use")])])])
+            ]),
+        ]),
+    ])
+
+    /// A control request from the agent: `can_use_tool` (ask the user about a tool use) or `hook_callback`.
     private struct ToolPermissionRequest: Decodable {
         var subtype: String?
+        var toolName: String?
         var input: [String: JSONValue]?
         var toolUseID: String?
 
         enum CodingKeys: String, CodingKey {
             case subtype, input
+            case toolName = "tool_name"
             case toolUseID = "tool_use_id"
         }
     }

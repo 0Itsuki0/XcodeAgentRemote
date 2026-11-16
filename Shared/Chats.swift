@@ -27,8 +27,9 @@ nonisolated struct XcodeChatSession: Codable, Identifiable, Sendable {
     /// Xcode's chat UUID (the chat's folder name in the store).
     var id: String
     var name: String
-    /// The agent, e.g. "claude" (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`).
-    var provider: String?
+    /// The agent (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`); nil if it is not one of the agents
+    /// Xcode can run (`Agent`).
+    var provider: Agent?
     /// Xcode's model identifier for the agent, e.g. "claude-code" (the chat's metadata).
     var modelIdentifier: String?
     /// The agent's own session id (`conversation.plist` → `assistantConfiguration`).

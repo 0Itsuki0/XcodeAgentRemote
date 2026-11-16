@@ -46,16 +46,17 @@ struct SendMessageTests {
 
         var events: [ChatEvent] = []
         var answered = Set<String>()
-        for try await event in sendMessage(
+        // Each stream ends where the turn waits for the user; the answer's stream continues the turn.
+        var stream = sendMessage(
             "Use the Bash tool to run: touch \(file.path). If it is denied, say DENIED and stop.",
             to: .conversation(id: Self.conversationID, project: Self.project),
             permissionModeOverride: .manual
-        ) {
-            events.append(event)
-            for case .permission(let toolUse) in waitingForUser(events) where toolUse.name == "Bash" && !answered.contains(toolUse.id) {
-                answered.insert(toolUse.id)
-                try await answerUserRequest(.permission(toolUseID: toolUse.id, allow: false))
-            }
+        )
+        while true {
+            for try await event in stream { events.append(event) }
+            guard let request = waitingForUser(events).last else { break }
+            answered.insert(request.toolUseID)
+            stream = answerUserRequest(.permission(toolUseID: request.toolUseID, allow: false))
         }
 
         #expect(!answered.isEmpty)

@@ -39,9 +39,8 @@ import Foundation
 /// One agent Xcode can run (Claude, Codex, ...): where its sessions live and how to read them.
 /// Implemented per provider in `Providers/`.
 nonisolated protocol AgentProvider: SendableMetatype {
-    /// The key Xcode stores for the agent under `chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`,
-    /// e.g. "claude".
-    static var name: String { get }
+    /// The agent: also the key Xcode stores for it under `chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`.
+    static var agent: Agent { get }
     /// A session's events, from the agent's own session storage.
     static func history(sessionID: String) throws -> [ChatEvent]
     /// The folder the agent ran a session in, if the session records it.
@@ -60,6 +59,14 @@ nonisolated protocol AgentProvider: SendableMetatype {
     /// Throws `XcodeChatError.agentFailed` (after all events) if the agent reports an error.
     /// Cancelling (stopping the iteration) stops the agent.
     static func runTurn(_ request: TurnRequest) -> AsyncThrowingStream<ChatEvent, Error>
+    /// The session's tool use that waits for the user's answer: its last tool use, if it has no result and is a
+    /// request (a question / plan, or marked waiting: `WaitingMarks`); nil if there is none.
+    static func pendingToolUse(sessionID: String) -> ChatEvent.ToolUse?
+    /// Removes a waiting tool use from the session's own transcript (before the session is resumed with its answer),
+    /// so the agent doesn't mark it interrupted.
+    static func removePendingToolUse(_ toolUseID: String, sessionID: String) throws
+    /// Whether two tool uses are the same call (the same tool, with the same input that matters).
+    static func isSameCall(_ toolUse: ChatEvent.ToolUse, _ other: ChatEvent.ToolUse) -> Bool
     /// The card Xcode shows for one of the agent's tool uses; nil if it never finished (no result).
     static func card(
         for toolUse: ChatEvent.ToolUse, result: ChatEvent.ToolResult?, record: ToolUseRecords.Record?
@@ -70,8 +77,8 @@ nonisolated protocol AgentProvider: SendableMetatype {
 nonisolated enum AgentProviders {
     static let all: [any AgentProvider.Type] = [ClaudeProvider.self]
 
-    static func named(_ name: String) -> (any AgentProvider.Type)? {
-        all.first { $0.name == name }
+    static func provider(for agent: Agent) -> (any AgentProvider.Type)? {
+        all.first { $0.agent == agent }
     }
 }
 
@@ -81,7 +88,7 @@ nonisolated enum ChatHistoryError: LocalizedError {
     /// The chat's agent could not be read from its metadata.
     case unknownProvider(conversationID: String)
     /// Loading history is not implemented for this agent (e.g. Codex).
-    case notImplemented(provider: String)
+    case notImplemented(agent: Agent)
     /// The chat has no agent session id.
     case sessionMissing(conversationID: String)
     /// The agent's session file is gone.
@@ -91,7 +98,7 @@ nonisolated enum ChatHistoryError: LocalizedError {
         switch self {
         case .chatNotFound(let id): "No Xcode chat \(id)"
         case .unknownProvider(let id): "Unknown agent for Xcode chat \(id)"
-        case .notImplemented(let provider): "History is not implemented for agent \(provider)"
+        case .notImplemented(let agent): "History is not implemented for agent \(agent.rawValue)"
         case .sessionMissing(let id): "Xcode chat \(id) has no agent session"
         case .transcriptMissing(let sessionID): "No session file for agent session \(sessionID)"
         }
@@ -135,7 +142,7 @@ nonisolated enum XcodeChats {
 
         let sessions = manifest.map { entry -> XcodeChatSession in
             let provider = entry.chatModelDefinitionIdentifier?
-                .providerIdentifier?.builtIn?._0.keys.first
+                .providerIdentifier?.builtIn?._0.keys.first.flatMap(Agent.init(rawValue:))
             let sessionID = providerSessionID(
                 store: store,
                 conversationID: entry.id
@@ -169,7 +176,7 @@ nonisolated enum XcodeChats {
         )
         let folders =
             sessions.compactMap { session -> URL? in
-                guard let provider = session.provider.flatMap(AgentProviders.named),
+                guard let provider = session.provider.flatMap(AgentProviders.provider(for:)),
                     let sessionID = session.providerSessionID
                 else { return nil }
                 return provider.workingDirectory(sessionID: sessionID)
@@ -206,11 +213,11 @@ nonisolated enum XcodeChats {
             from: store.appending(path: "\(id)/metadata.plist")
         )
         guard
-            let providerName = metadata?.chatModelDefinitionIdentifier?
-                .providerIdentifier?.builtIn?._0.keys.first
+            let agent = metadata?.chatModelDefinitionIdentifier?
+                .providerIdentifier?.builtIn?._0.keys.first.flatMap(Agent.init(rawValue:))
         else { throw ChatHistoryError.unknownProvider(conversationID: id) }
-        guard let provider = AgentProviders.named(providerName) else {
-            throw ChatHistoryError.notImplemented(provider: providerName)
+        guard let provider = AgentProviders.provider(for: agent) else {
+            throw ChatHistoryError.notImplemented(agent: agent)
         }
         guard let sessionID = providerSessionID(store: store, conversationID: id) else {
             throw ChatHistoryError.sessionMissing(conversationID: id)

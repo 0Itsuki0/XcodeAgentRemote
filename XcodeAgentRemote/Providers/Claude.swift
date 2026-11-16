@@ -802,7 +802,7 @@ nonisolated extension ClaudeProvider {
 // MARK: - Provider
 
 nonisolated extension ClaudeProvider: AgentProvider {
-    static let name = "claude"
+    static let agent = Agent.claude
 
     /// Xcode's config folder for its Claude agent (`CLAUDE_CONFIG_DIR`).
     static let configDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -817,11 +817,13 @@ nonisolated extension ClaudeProvider: AgentProvider {
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    /// A session's events, with the requests to the user (`ChatEvent.userRequest`) the transcript shows.
     static func history(sessionID: String) throws -> [ChatEvent] {
         guard let transcript = transcript(sessionID: sessionID) else {
             throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
         }
-        return try SessionHistory.load(contentsOf: transcript).flatMap(\.chatEvents)
+        let events = try SessionHistory.load(contentsOf: transcript).flatMap(\.chatEvents)
+        return addingUserRequests(to: events, transcript: try Data(contentsOf: transcript))
     }
 
     /// The `cwd` recorded in the session's transcript.

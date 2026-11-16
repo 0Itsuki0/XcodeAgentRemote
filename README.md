@@ -1,26 +1,114 @@
 #  Xcode Agent Remote
 
-
-hello world
-
-
 ## Run Xcode Agent Programmatically
 
-### Current Approach
-
-Do what Xcode does, outside of Xcode: `XcodeAgentRemote/XcodeChat/` (shared by all agents) and `XcodeAgentRemote/Providers/` (per agent).
-
-- run the agent the same way Xcode does
-    - `xcrun mcpbridge run-agent claude`: Xcode's bundled binary, config dir, Xcode MCP tools
-    - plus the flags Xcode adds: stream-json, Xcode's system prompt (from its template inside Xcode), Xcode's skills plugin, allowed tools
-    - new chat: new session. existing chat: resume the session id stored in `conversation.plist`
+Basic Idea:
+- use `xcrun mcpbridge run-agent <agent>`
+    - Xcode's bundled binary, config dir, Xcode MCP tools.
+    - `+` the flags Xcode adds: stream-json, Xcode's system prompt (from its template inside Xcode), Xcode's skills plugin, allowed tools
 - write the turn into Xcode's chat files, in Xcode's own format
     - `conversation.plist`, `metadata.plist`, `CodingAssistantManifest.plist`, `Snapshots/`
 - permission mode follows Xcode's Manual / Auto setting (`IDEChatAgentPermissionMode` in Xcode's preferences: `standard` = Manual, `auto` = Auto), can be overridden per message
-- single turn only. if the agent asks for permission, the turn wait 
-- part of the app itself, no separate executable
+- Each call to `xcrun mcpbridge run-agent` is single turn only. If the agent asks for user interaction (choices, permission requests), the turn wait (until timeout)
+
 - the app calls it through `sendMessage` and gets typed events back
 - the agent's history is the Claude session `.jsonl`, shared with Xcode. Xcode's chat files are only what Xcode displays
+
+
+## How to determine whether there is a pending user request
+
+**If initiated by send message**
+
+- the agent asks the user with Claude's built in permission prompt (`can_use_tool`), for a permission, questions (AskUserQuestion) and a plan (ExitPlanMode) alike
+- a pass through PreToolUse hook is registered (answers no decision, Claude still decides what to ask): with it, Claude writes the tool use to the `.jsonl` before the answer
+    - shortly after it asks, not at the same moment. killed within a second of the request, the tool use is lost
+    - without any PreToolUse hook, the tool use is only written after the answer
+- when the agent asks, the app marks the tool use waiting (`UserDefaults`, per agent: `[agent: [tool use id]]`). removed once the answer arrives or the tool use has a result
+- a tool use is a request when (one place decides: `ClaudeProvider.userRequest`)
+    - it has a result decided by the user: `permissionDecision.source` `user_temporary` (allowed / answered / approved) or `user_reject` (denied / declined / rejected)
+    - it has no result yet, and it is a question or a plan
+    - it has no result yet, it is marked, and it is the session's last message (else the mark is stale)
+- live, the request is a `user_request` event, and the stream ends there. history (`/history`) has the same event
+- the app quitting (or the turn being stopped) is not a pending request: the agent sees its stdin close, settles the request itself (`Tool permission request failed: … stream closed …`), finishes the turn
+- the agent killed while waiting is: the tool use stays without a result. answering it resumes the chat with the answer, the agent repeats the tool use, and it is answered with the same answer without asking
+
+**If initiated by xcode**
+Known facts:
+- Xcode asks with its own PreToolUse hook (a callback it registers when it starts the agent, not in any config file). not every tool asks (Bash, Write did; ToolSearch, WebFetch didn't)
+- the waiting tool use is in the `.jsonl`, with no result
+- a tool that is running looks the same: the `.jsonl` (tool use, no result), `conversation.plist` (turn without `finishedDate`, no card for it) and `Snapshots/` (only at the start and the end of a turn) don't tell them apart
+- Xcode's agent debug log (`--debug-file`) does: `tool_dispatch_start … toolUseId=<id>` once a tool runs, nothing for a tool use waiting for the user. undocumented format, temporary file per agent process
+- answering it by resuming the session doesn't run it: the agent gives it the `[Tool call interrupted …]` result, and makes the same tool use again (a new request)
+- the hook is a callback of Xcode's process: only Xcode can answer it
+
+
+- shared logic: `XcodeAgentRemote/XcodeChat/`
+- per agent provider: `XcodeAgentRemote/Providers/`
+
+### `xcrun` command
+
+- `xcrun mcpbridge run-agent claude`: Launch a coding agent
+    - Supported agents: `antigravity`, `claude`, `claude-ext`, `codex`, `copilot`, `mock-agent`
+    - or simply `xcrun agent claude`
+
+```bash
+itsuki@MacBook-Pro ~ % xcrun mcpbridge -h
+STDIO Bridge for Xcode MCP Tools
+
+USAGE: mcpbridge <command> [options]
+
+COMMANDS:
+  run-agent  Launch a coding agent with Xcode-provided configuration
+
+OPTIONS:
+  -h, --help  Show this help message
+
+DESCRIPTION:
+    Without a subcommand, acts as a STDIO bridge between MCP (Model Context
+    Protocol) clients and Xcode's MCP tool service. Reads JSON-RPC 2.0
+    messages from stdin and forwards responses to stdout.
+
+ENVIRONMENT VARIABLES:
+    MCP_XCODE_PID         Optional. The process ID of the Xcode to connect to.
+                          Overrides the default, which connects to the Xcode
+                          selected by xcode-select.
+
+    MCP_XCODE_SESSION_ID  Optional. A UUID identifying an Xcode tool session.
+
+EXAMPLES:
+    # Run as MCP bridge with auto-detected Xcode instance
+    xcrun mcpbridge
+
+    # Run with specific Xcode PID
+    MCP_XCODE_PID=12345 xcrun mcpbridge
+
+    # Launch Claude with Xcode config
+    xcrun mcpbridge run-agent claude
+
+    # Dry-run to see what would be executed
+    xcrun mcpbridge run-agent --dry-run claude
+
+    # Launch Claude with additional user args
+    xcrun mcpbridge run-agent claude --model opus -p "fix the bug"
+
+    # Export every available skill into ./xcode-skills
+    xcrun agent skills export
+
+    # Export to a chosen directory and overwrite anything already there
+    xcrun agent skills export --replace-existing ~/my-skills
+
+    # Print the path to Xcode's packaged plugins, materializing it if needed
+    xcrun agent plugin path --plugin-format <name>
+```
+
+### Data locations
+- Configuration:  `~/Library/Developer/Xcode/CodingAssistant/`
+- Chat data (xcode copy): `~/Library/Developer/Xcode/UserData/CodingAssistant`
+- chat data (provider bundled by xcode)
+    - claude session history: `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/projects`
+    - The link: `CodingAssistant/projectName/<conversation_id>/conversation.plist` has a binary field: `assistantConfiguration`. Decoded, it contains: `{"agent":{"_0":{"sessionID":"2a561bc4-7ab8-4561-a88f-69e6a53ca073"}}}` where the `sessionID` is that under provider session history's `projects/projectName/sessionId`.
+    - `conversation_id` is xcode's own id. has nothing to do with `sessionId`.
+
 
 #### Permission: Hook vs agent build in.
 
@@ -333,68 +421,7 @@ what that means:
 
 
 
-## Xcode Agent Notes
-
-- Configuration:  `~/Library/Developer/Xcode/CodingAssistant/`
-- Chat data: `~/Library/Developer/Xcode/UserData/CodingAssistant`
-    - claude session history: `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/projects`
-    - The link: CodingAssistant/projectName/D868CB20-…/conversation.plist has a binary field: `assistantConfiguration`. Decoded, it contains: `{"agent":{"_0":{"sessionID":"2a561bc4-7ab8-4561-a88f-69e6a53ca073"}}}` where the sessionID is that under projects/projectName/sessionId.
-
-### `xcrun` command
-
-- `xcrun mcpbridge run-agent claude`: Launch a coding agent
-    - Supported agents: `antigravity`, `claude`, `claude-ext`, `codex`, `copilot`, `mock-agent`
-    - or simply `xcrun agent claude`
-
-```bash
-itsuki@MacBook-Pro ~ % xcrun mcpbridge -h
-STDIO Bridge for Xcode MCP Tools
-
-USAGE: mcpbridge <command> [options]
-
-COMMANDS:
-  run-agent  Launch a coding agent with Xcode-provided configuration
-
-OPTIONS:
-  -h, --help  Show this help message
-
-DESCRIPTION:
-    Without a subcommand, acts as a STDIO bridge between MCP (Model Context
-    Protocol) clients and Xcode's MCP tool service. Reads JSON-RPC 2.0
-    messages from stdin and forwards responses to stdout.
-
-ENVIRONMENT VARIABLES:
-    MCP_XCODE_PID         Optional. The process ID of the Xcode to connect to.
-                          Overrides the default, which connects to the Xcode
-                          selected by xcode-select.
-
-    MCP_XCODE_SESSION_ID  Optional. A UUID identifying an Xcode tool session.
-
-EXAMPLES:
-    # Run as MCP bridge with auto-detected Xcode instance
-    xcrun mcpbridge
-
-    # Run with specific Xcode PID
-    MCP_XCODE_PID=12345 xcrun mcpbridge
-
-    # Launch Claude with Xcode config
-    xcrun mcpbridge run-agent claude
-
-    # Dry-run to see what would be executed
-    xcrun mcpbridge run-agent --dry-run claude
-
-    # Launch Claude with additional user args
-    xcrun mcpbridge run-agent claude --model opus -p "fix the bug"
-
-    # Export every available skill into ./xcode-skills
-    xcrun agent skills export
-
-    # Export to a chosen directory and overwrite anything already there
-    xcrun agent skills export --replace-existing ~/my-skills
-
-    # Print the path to Xcode's packaged plugins, materializing it if needed
-    xcrun agent plugin path --plugin-format <name>
-```
+## Additional Notes / Discussions
 
 ### Running From Terminal?
 

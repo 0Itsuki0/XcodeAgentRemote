@@ -191,7 +191,7 @@ extension TestScenarios {
 
         results.append(await scenario("History of an existing chat") {
             let chats = XcodeChats.project(store: ChatStore.storeDirectory(forProject: project)).sessions
-            guard let chat = chats.first(where: { $0.provider == Agent.claude.rawValue }) else {
+            guard let chat = chats.first(where: { $0.provider == .claude }) else {
                 throw CheckFailed(description: "the project has no Claude chat")
             }
             let history = try XcodeChats.history(conversationID: chat.id)
@@ -241,13 +241,16 @@ extension TestScenarios {
             let history = try XcodeChats.history(conversationID: chatID)
             try check(promptCount(history) == 3, "\(promptCount(history)) prompts in the history, expected 3")
             try check(toolResults(of: "Bash", in: history).count == 2, "expected 2 Bash results in the history")
-            return "\(history.count) events, 3 prompts"
+            let requests = history.filter { if case .userRequest(.permission) = $0 { true } else { false } }.count
+            try check(requests == 2, "\(requests) permission requests in the history, expected 2 (allowed, denied)")
+            return "\(history.count) events, 3 prompts, 2 permission requests"
         })
 
         if let chatID {
             results += await questionsAndPlans { prompt, answering in
                 try await sendDirect(prompt, to: .conversation(id: chatID, project: project), answering: answering)
             }
+            results += await requestsLeftWaiting(project: project, chatID: chatID, folder: folder)
         }
 
         results.append(await scenario("Errors") {
@@ -263,7 +266,7 @@ extension TestScenarios {
                 throw CheckFailed(description: "codex did not fail")
             } catch XcodeChatError.agentNotImplemented {}
             do {
-                try await answerUserRequest(.permission(toolUseID: "toolu_unknown", allow: true))
+                _ = try await collect(answerUserRequest(.permission(toolUseID: "toolu_unknown", allow: true)))
                 throw CheckFailed(description: "an answer to an unknown tool use was accepted")
             } catch SendMessageError.noWaitingRequest {}
             return "unknown chat, agent not implemented, answer to an unknown tool use"
@@ -273,21 +276,123 @@ extension TestScenarios {
         return results
     }
 
+    /// Scenarios for a request whose agent was killed while it waited (so it couldn't settle the request): the request
+    /// is in the chat's history, and `answerUserRequest` answers it by resuming the chat.
+    private static func requestsLeftWaiting(project: URL, chatID: String, folder: URL) async -> [ScenarioResult] {
+        let target = MessageTarget.conversation(id: chatID, project: project)
+        var results: [ScenarioResult] = []
+
+        let allowedFile = folder.appending(path: "left-waiting-allowed")
+        results.append(await scenario("Request left waiting: in the history, then allowed") {
+            let toolUse = try await leftWaitingPermission(
+                "Use the Bash tool to run: touch \(allowedFile.path). Then reply DONE.", to: target, chatID: chatID)
+            let events = try await collect(answerUserRequest(.permission(toolUseID: toolUse.id, allow: true), permissionTimeout: 120))
+            let bash = toolResults(of: "Bash", in: events)
+            try check(bash.count == 1 && !bash[0].isError, "Bash: \(bash.map(\.output))")
+            try check(FileManager.default.fileExists(atPath: allowedFile.path), "the command did not run")
+            try checkAnswered(toolUse, chatID: chatID)
+            return "the agent repeated it, answered without asking, and it ran; reply: \(reply(events))"
+        })
+
+        let deniedFile = folder.appending(path: "left-waiting-denied")
+        results.append(await scenario("Request left waiting: denied") {
+            let toolUse = try await leftWaitingPermission(
+                "Use the Bash tool to run: touch \(deniedFile.path). If it is denied, reply DENIED.", to: target, chatID: chatID)
+            let events = try await collect(answerUserRequest(.permission(toolUseID: toolUse.id, allow: false), permissionTimeout: 120))
+            try check(!FileManager.default.fileExists(atPath: deniedFile.path), "the denied command ran")
+            try checkAnswered(toolUse, chatID: chatID)
+            return "nothing ran; reply: \(reply(events))"
+        })
+
+        results.append(await scenario("Question left waiting: in the history, then answered") {
+            let request = try await leaveWaiting(
+                "Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose.",
+                to: target)
+            let history = try XcodeChats.history(conversationID: chatID)
+            guard case .questions(let toolUseID, let questions)? = waitingForUser(history).last, toolUseID == request.toolUseID
+            else { throw CheckFailed(description: "the history doesn't end waiting on the question: \(waitingForUser(history))") }
+            let events = try await collect(answerUserRequest(
+                .questions(toolUseID: toolUseID, answers: Dictionary(uniqueKeysWithValues: questions.map { ($0.question, ["Green"]) })),
+                permissionTimeout: 120))
+            try check(reply(events).contains("Green"), "reply: \(reply(events))")
+            let after = try XcodeChats.history(conversationID: chatID)
+            try check(waitingForUser(after).isEmpty, "the history still waits: \(waitingForUser(after))")
+            return "answered Green; reply: \(reply(events))"
+        })
+
+        return results
+    }
+
+    /// Leaves a permission request waiting and checks the chat's history ends waiting on it; returns its tool use.
+    private static func leftWaitingPermission(
+        _ prompt: String, to target: MessageTarget, chatID: String
+    ) async throws -> ChatEvent.ToolUse {
+        let request = try await leaveWaiting(prompt, to: target)
+        let history = try XcodeChats.history(conversationID: chatID)
+        guard case .permission(let toolUse)? = waitingForUser(history).last, toolUse.id == request.toolUseID else {
+            throw CheckFailed(description: "the history doesn't end waiting on it: \(waitingForUser(history))")
+        }
+        return toolUse
+    }
+
+    /// Checks an answered request is gone: its tool use out of the history (no interrupted marker), not marked
+    /// waiting, and the history not waiting for the user.
+    private static func checkAnswered(_ toolUse: ChatEvent.ToolUse, chatID: String) throws {
+        let history = try XcodeChats.history(conversationID: chatID)
+        try check(!history.contains { if case .toolUse(let old) = $0 { old.id == toolUse.id } else { false } },
+                  "the old tool use is still in the history")
+        try check(!history.contains { if case .toolResult(let result) = $0 { result.output.contains("Tool call interrupted") } else { false } },
+                  "the history has an interrupted marker")
+        try check(!WaitingMarks.contains(toolUse.id, agent: .claude), "the old tool use is still marked waiting")
+        try check(waitingForUser(history).isEmpty, "the history still waits: \(waitingForUser(history))")
+    }
+
+    /// Sends a message, and once the turn waits for the user (its stream ends at the request), kills the agent hard
+    /// (`kill -9`), so it can't settle the request: it stays waiting in the chat's `.jsonl`. Returns that request.
+    private static func leaveWaiting(_ prompt: String, to target: MessageTarget) async throws -> UserRequest {
+        guard case .conversation(let chatID, _) = target,
+              let sessionID = XcodeChats.listProjects().flatMap(\.sessions).first(where: { $0.id == chatID })?.providerSessionID
+        else { throw CheckFailed(description: "no session for the chat") }
+        let events = try await collect(sendMessage(prompt, to: target, permissionModeOverride: .manual, permissionTimeout: 120))
+        guard let request = waitingForUser(events).last else { throw CheckFailed(description: "the agent made no request") }
+        try check(WaitingMarks.contains(request.toolUseID, agent: .claude), "the request is not marked waiting")
+        // Claude writes the tool use to the `.jsonl` shortly after it asks: kill only once it's there.
+        var inFile = false
+        for _ in 0..<50 where !inFile {
+            let history = (try? XcodeChats.history(conversationID: chatID)) ?? []
+            inFile = waitingForUser(history).contains { $0.toolUseID == request.toolUseID }
+            if !inFile { try await Task.sleep(for: .milliseconds(200)) }
+        }
+        try check(inFile, "the waiting tool use never reached the chat's .jsonl")
+        let kill = Process()
+        kill.executableURL = URL(filePath: "/usr/bin/pkill")
+        kill.arguments = ["-9", "-f", "--", "resume \(sessionID)"]
+        try kill.run()
+        kill.waitUntilExit()
+        try await Task.sleep(for: .seconds(2))  // the killed turn ends
+        return request
+    }
+
+    /// All the events of a turn.
+    private static func collect(_ stream: AsyncThrowingStream<ChatEvent, Error>) async throws -> [ChatEvent] {
+        var events: [ChatEvent] = []
+        for try await event in stream { events.append(event) }
+        return events
+    }
+
     /// Sends one message and collects the turn's events; answers each request the turn waits for (permission,
-    /// questions, plan) with `answering`, when the agent asks.
+    /// questions, plan) with `answering`.
     private static func sendDirect(
         _ prompt: String, to target: MessageTarget, mode: PermissionMode = .manual, answering: @escaping Answering
     ) async throws -> [ChatEvent] {
+        // Each stream ends where the turn waits for the user; the answer's stream continues the turn.
         var events: [ChatEvent] = []
-        for try await event in sendMessage(prompt, to: target, permissionModeOverride: mode, permissionTimeout: 120) {
-            events.append(event)
-            if case .toolUse(let toolUse) = event {
-                await whenWaitingForUser(toolUseID: toolUse.id) {
-                    try? await answerUserRequest(answering(UserRequest(toolUse)))
-                }
-            }
+        var stream = sendMessage(prompt, to: target, permissionModeOverride: mode, permissionTimeout: 120)
+        while true {
+            for try await event in stream { events.append(event) }
+            guard let request = waitingForUser(events).last else { return events }
+            stream = answerUserRequest(answering(request), permissionTimeout: 120)
         }
-        return events
     }
 }
 #endif
@@ -324,7 +429,7 @@ extension TestScenarios {
 
         results.append(await scenario("History of an existing chat") {
             let chats = try await client.projects().first { $0.store.lastPathComponent == store }?.sessions ?? []
-            guard let chat = chats.first(where: { $0.provider == Agent.claude.rawValue }) else {
+            guard let chat = chats.first(where: { $0.provider == .claude }) else {
                 throw CheckFailed(description: "the project has no Claude chat")
             }
             let history = try await client.history(conversationID: chat.id)
@@ -373,7 +478,9 @@ extension TestScenarios {
             let history = try await client.history(conversationID: chatID)
             try check(promptCount(history) == 3, "\(promptCount(history)) prompts in the history, expected 3")
             try check(toolResults(of: "Bash", in: history).count == 2, "expected 2 Bash results in the history")
-            return "\(history.count) events, 3 prompts"
+            let requests = history.filter { if case .userRequest(.permission) = $0 { true } else { false } }.count
+            try check(requests == 2, "\(requests) permission requests in the history, expected 2 (allowed, denied)")
+            return "\(history.count) events, 3 prompts, 2 permission requests"
         })
 
         if let chatID {
