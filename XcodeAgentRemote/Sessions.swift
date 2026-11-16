@@ -65,7 +65,8 @@ nonisolated protocol AgentProvider: SendableMetatype {
     /// Removes a tool use and its result from the session's transcript (an earlier tool use the agent repeated).
     static func removeToolUse(_ toolUseID: String, sessionID: String) throws
     /// Removes the result the agent wrote for a tool use when it was stopped while the tool ran (Xcode's project
-    /// closed), and what it added after it, so the tool use is left without a result. Returns whether there was one.
+    /// closed), and the interrupted text after it if any, so the tool use is left without a result. A result the tool
+    /// produced itself (it finished before the stop) stays. Returns whether there was one to remove.
     static func removeStoppedResult(of toolUseID: String, sessionID: String) throws -> Bool
     /// Whether two tool uses are the same call (the same tool, with the same input that matters).
     static func isSameCall(_ toolUse: ChatEvent.ToolUse, _ other: ChatEvent.ToolUse) -> Bool

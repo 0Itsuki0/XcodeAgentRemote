@@ -150,9 +150,10 @@ nonisolated enum XcodeChat {
             // Its agent for this session writes what it settles as it stops: wait for it to be gone.
             await waitForAgentToStop(sessionID: sessionID)
         }
-        // Answering a request of Xcode's chat whose tool was running after all: closing Xcode stopped it, and its agent
-        // wrote the tool use as rejected. Remove that, so the tool use is left without a result like a waiting one and
-        // the agent's repeat runs with the user's answer.
+        // Answering a request of Xcode's chat whose tool was running after all: closing the project killed it, and its
+        // agent wrote that as its result (`Exit code 137`). Remove that result: the tool use is left without one like a
+        // waiting one, and the agent's repeat runs with the user's answer. (A tool that finished before the close keeps
+        // its result.)
         if let repeatedAnswer {
             _ = try provider.removeStoppedResult(of: repeatedAnswer.toolUse.id, sessionID: sessionID)
         }

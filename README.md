@@ -81,14 +81,16 @@ General Approach
         - anything it can't decide (missing settings, a command it can't parse) counts as asking
 - the user answers through the app: the project is closed, then the `.jsonl` is read again
     - the tool use still has no result (it was waiting): the chat is resumed with the answer, the same as an agent killed while waiting. the agent repeats the call, it is answered without asking, and the old tool use is removed
-    - it now has the `The tool use was rejected …` result and `[Request interrupted by user for tool use]` (it was running, closing Xcode cut it off): those entries are removed, and it continues like the no-result case
+    - it now has the result of a stop (it was running, closing the project killed it): that result is removed, and it continues like the no-result case. only these two results are removed; a result the tool produced itself (it finished before the close) stays, so it doesn't run again
+        - by the app (AppleScript): Xcode doesn't notice, the tool is killed: a plain error result `Exit code 137` (`permissionDecision.source` `hook`)
+        - by the user (the close button): Xcode notices: the `The tool use was rejected …` result (`"toolDenialKind": "user-rejected"`) and `[Request interrupted by user for tool use]` after it
 
 
 Why it works (scenario by scenario)
 
 - Xcode waits on its prompt, the user answers in the app: closing Xcode while it waits leaves no result (tested). the resume gives the agent the answer, it repeats the call, the call runs (or is denied) with that answer
 - Xcode allowed it by itself and the check agrees: it is not shown as a request, the user never answers it, so Xcode is never closed and nothing is interrupted
-- the check says Xcode asks, but Xcode allowed it (it was running): when the user answers, closing Xcode stops it and writes the "rejected" result (tested). that is removed and the call runs again with the user's answer. cost: the part that already ran runs a second time
+- the check says Xcode asks, but Xcode allowed it (it was running): when the user answers, closing the project kills it and its agent writes `Exit code 137` as the result (tested). that is removed and the call runs again with the user's answer. cost: the part that already ran runs a second time
 - the check says Xcode doesn't ask, but it did: shown as running, the request never reaches the app; it can only be answered in Xcode. known cases
     - a Bash command allowed by its rules that opens a file without access (the file supervisor asks; which files a command opens isn't in its input)
     - a setting changed while that chat was open (Xcode read its settings when the chat's agent started)

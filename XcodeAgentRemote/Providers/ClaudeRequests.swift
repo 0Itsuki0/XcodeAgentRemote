@@ -153,27 +153,40 @@ nonisolated extension ClaudeProvider {
         WaitingMarks.remove(toolUseID, agent: agent)
     }
 
-    /// The text Claude adds after the result it writes for a tool use when it is stopped while the tool runs.
+    /// The text Claude adds after a tool use's "rejected" result when the user stops it in Xcode (the close button).
     private static let interruptedText = "[Request interrupted by user for tool use]"
 
+    /// The result Claude writes for a tool killed while it ran (the project closed by the app with AppleScript: Xcode
+    /// doesn't notice, its agent's tool is killed).
+    private static let killedResult = "Exit code 137"
+
+    /// Removes the result the agent wrote when it was stopped while the tool ran, and only that, so a tool that finished
+    /// on its own keeps its result (it is not run again):
+    /// - the project closed by the app (AppleScript): `"content": "Exit code 137"`, `"is_error": true`,
+    ///   `"toolUseResult": "Error: Exit code 137"`;
+    /// - the user stopping it in Xcode (the close button): `"toolDenialKind": "user-rejected"`, then the interrupted
+    ///   text.
     static func removeStoppedResult(of toolUseID: String, sessionID: String) throws -> Bool {
         guard let transcript = transcript(sessionID: sessionID) else {
             throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
         }
-        // The result's line: `"toolDenialKind": "user-rejected"`, a `tool_result` for the tool use.
+        // The result's line, if it is one of those two.
         var resultLine: String?
         for line in try String(contentsOf: transcript, encoding: .utf8).split(separator: "\n") where line.contains(toolUseID) {
             guard let entry = try? JSONDecoder().decode([String: JSONValue].self, from: Data(line.utf8)),
-                  entry["toolDenialKind"] == .string("user-rejected"),
                   case .object(let message)? = entry["message"], case .array(let blocks)? = message["content"],
-                  blocks.contains(where: { isResultBlock($0, of: toolUseID) }), case .string(let uuid)? = entry["uuid"]
+                  let result = blocks.first(where: { isResultBlock($0, of: toolUseID) }), case .object(let fields) = result,
+                  case .string(let uuid)? = entry["uuid"]
             else { continue }
-            resultLine = uuid
+            let rejected = entry["toolDenialKind"] == .string("user-rejected")
+            let killed = fields["content"] == .string(killedResult) && fields["is_error"] == .bool(true)
+                && entry["toolUseResult"] == .string("Error: \(killedResult)")
+            if rejected || killed { resultLine = uuid }
         }
         guard let resultLine else { return false }
         return try removeBlocks(sessionID: sessionID) { entry, block in
             if isResultBlock(block, of: toolUseID) { return entry["uuid"] == .string(resultLine) }
-            // The interrupted text right after it.
+            // The interrupted text right after it (only when the user stopped it in Xcode).
             guard entry["parentUuid"] == .string(resultLine), case .object(let fields) = block else { return false }
             return fields["type"] == .string("text") && fields["text"] == .string(interruptedText)
         }

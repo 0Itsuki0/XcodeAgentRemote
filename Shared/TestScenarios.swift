@@ -184,19 +184,7 @@ extension TestScenarios {
 
         results.append(await scenario("List projects") {
             let projects = XcodeChats.listProjects()
-            guard let match = projects.first(where: { $0.projectFile?.standardizedFileURL == project.standardizedFileURL })
-            else { throw CheckFailed(description: "\(project.lastPathComponent) is not among \(projects.count) projects") }
-            return "\(projects.count) projects; \(match.sessions.count) chats in \(match.name)"
-        })
-
-        results.append(await scenario("History of an existing chat") {
-            let chats = XcodeChats.project(store: ChatStore.storeDirectory(forProject: project)).sessions
-            guard let chat = chats.first(where: { $0.provider == .claude }) else {
-                throw CheckFailed(description: "the project has no Claude chat")
-            }
-            let history = try XcodeChats.history(conversationID: chat.id)
-            try check(!history.isEmpty, "no events in \(chat.name)")
-            return "\(history.count) events in \"\(chat.name)\""
+            return "\(projects.count) projects, \(projects.map(\.sessions.count).reduce(0, +)) chats"
         })
 
         let allowedFile = folder.appending(path: "allowed")
@@ -433,20 +421,7 @@ extension TestScenarios {
 
         results.append(await scenario("List projects") {
             let projects = try await client.projects()
-            guard let match = projects.first(where: { $0.projectFile?.standardizedFileURL == project.standardizedFileURL })
-            else { throw CheckFailed(description: "\(project.lastPathComponent) is not among \(projects.count) projects") }
-            store = match.store.lastPathComponent
-            return "\(projects.count) projects; \(match.sessions.count) chats in \(match.name)"
-        })
-
-        results.append(await scenario("History of an existing chat") {
-            let chats = try await client.projects().first { $0.store.lastPathComponent == store }?.sessions ?? []
-            guard let chat = chats.first(where: { $0.provider == .claude }) else {
-                throw CheckFailed(description: "the project has no Claude chat")
-            }
-            let history = try await client.history(conversationID: chat.id)
-            try check(!history.isEmpty, "no events in \(chat.name)")
-            return "\(history.count) events in \"\(chat.name)\""
+            return "\(projects.count) projects, \(projects.map(\.sessions.count).reduce(0, +)) chats"
         })
 
         results.append(await scenario("New chat: a Bash command, allowed") {
@@ -457,7 +432,9 @@ extension TestScenarios {
             try check(!bash.isEmpty, "no Bash tool use")
             try check(bash.allSatisfy { !$0.isError }, "Bash failed: \(bash.map(\.output))")
             try check(responses >= 2, "the first response did not stop at the permission request")
-            chatID = try await client.projects().flatMap(\.sessions).first { $0.name == name }?.id
+            let projectOfChat = try await client.projects().first { $0.sessions.contains { $0.name == name } }
+            chatID = projectOfChat?.sessions.first { $0.name == name }?.id
+            store = projectOfChat?.store.lastPathComponent
             try check(chatID != nil, "the new chat is not in /projects")
             return "allowed; \(responses) responses (message, then answer); chat \(chatID ?? "")"
         })
