@@ -7,9 +7,10 @@
 //  - An answered request: the tool result's line has `permissionDecision.source` `user_temporary` (allowed /
 //    answered / approved) or `user_reject` (denied / declined / rejected).
 //  - A waiting request: the tool use is in the transcript with no result yet (Claude writes it shortly after it asks,
-//    because a PreToolUse hook is registered). It is a request if it is a question or plan, or if the app marked it
-//    waiting (`WaitingMarks`) and it is still the session's last message (else the mark is stale); otherwise it may
-//    just be running.
+//    because a PreToolUse hook is registered). It is a request if it is a question or plan, or if it is still the
+//    session's last message and either the app marked it waiting (`WaitingMarks`; else the mark is stale) or, in a
+//    session the app isn't running, Xcode would ask about it (`XcodePermissions.wouldAsk`: Xcode's own agent sets no
+//    mark); otherwise it is running.
 //  Both are decided in one place: `userRequest(for:decidedByUser:isLastMessage:)`, also used for a live turn.
 //
 
@@ -23,12 +24,14 @@ nonisolated extension ClaudeProvider {
     /// Whether a tool use is a request to the user, and which: the one place that decides it.
     /// It is one when the agent asked the user about it:
     /// - it has a result (`decidedByUser` not nil): if the user decided it (`permissionDecision.source`);
-    /// - it has none yet (`decidedByUser` nil): if it is a question or a plan, which always waits for the user, or if
-    ///   the app marked it waiting (`WaitingMarks`, set when the agent asks) and it is still the session's last message
-    ///   (else the mark is stale: the agent went on without the answer).
+    /// - it has none yet (`decidedByUser` nil): if it is a question or a plan, which always waits for the user, or if it
+    ///   is still the session's last message (else the agent went on without the answer) and either the app marked it
+    ///   waiting (`WaitingMarks`, set when the app's agent asks) or `xcodeWouldAsk` (a session Xcode runs: its agent
+    ///   sets no mark, so Xcode's own permission decision tells a waiting tool use from a running one).
     /// The kind follows the tool: questions for AskUserQuestion, a plan for ExitPlanMode, else permission.
     static func userRequest(
-        for toolUse: ChatEvent.ToolUse, decidedByUser: Bool?, isLastMessage: Bool
+        for toolUse: ChatEvent.ToolUse, decidedByUser: Bool?, isLastMessage: Bool,
+        xcodeWouldAsk: @autoclosure () -> Bool = false
     ) -> UserRequest? {
         let request = requestKind(of: toolUse)
         switch decidedByUser {
@@ -38,7 +41,7 @@ nonisolated extension ClaudeProvider {
             return nil
         case nil:
             if case .permission = request {
-                return isLastMessage && WaitingMarks.contains(toolUse.id, agent: agent) ? request : nil
+                return isLastMessage && (WaitingMarks.contains(toolUse.id, agent: agent) || xcodeWouldAsk()) ? request : nil
             }
             return request
         }
@@ -62,7 +65,7 @@ nonisolated extension ClaudeProvider {
 
     /// History events with the requests added (`ChatEvent.userRequest`, where a live turn streams them): before the
     /// result of each tool use that was a request, and at the end for a tool use that still waits for the user.
-    static func addingUserRequests(to events: [ChatEvent], transcript: Data) -> [ChatEvent] {
+    static func addingUserRequests(to events: [ChatEvent], transcript: Data, sessionID: String) -> [ChatEvent] {
         let answeredByUser = userAnsweredToolUseIDs(transcript)
         var toolUses: [String: ChatEvent.ToolUse] = [:]
         var resulted = Set<String>()
@@ -86,7 +89,12 @@ nonisolated extension ClaudeProvider {
         }
         let lastMessage = events.last
         for case .toolUse(let toolUse) in events where !resulted.contains(toolUse.id) {
-            if let request = userRequest(for: toolUse, decidedByUser: nil, isLastMessage: lastMessage == .toolUse(toolUse)) {
+            let request = userRequest(
+                for: toolUse, decidedByUser: nil, isLastMessage: lastMessage == .toolUse(toolUse),
+                xcodeWouldAsk: !RunningSessions.contains(sessionID)
+                    && XcodePermissions.wouldAsk(
+                        toolUse, agentAllowedTools: xcodeAllowedTools, workingDirectory: workingDirectory(sessionID: sessionID)))
+            if let request {
                 withRequests.append(.userRequest(request))
             }
         }
@@ -138,51 +146,105 @@ nonisolated extension ClaudeProvider {
         }.first
     }
 
-    /// Removes the tool use from the transcript: its line (or only its block, if the message has other blocks).
-    /// Lines that point at a removed line (`parentUuid`, `leafUuid`) are pointed at its parent, so the chain stays.
-    static func removePendingToolUse(_ toolUseID: String, sessionID: String) throws {
+    /// Removes a tool use and its result from the transcript: their lines (or only their blocks, if a message has
+    /// other blocks).
+    static func removeToolUse(_ toolUseID: String, sessionID: String) throws {
+        _ = try removeBlocks(sessionID: sessionID) { _, block in isBlock(block, of: toolUseID) }
+        WaitingMarks.remove(toolUseID, agent: agent)
+    }
+
+    /// The text Claude adds after the result it writes for a tool use when it is stopped while the tool runs.
+    private static let interruptedText = "[Request interrupted by user for tool use]"
+
+    static func removeStoppedResult(of toolUseID: String, sessionID: String) throws -> Bool {
         guard let transcript = transcript(sessionID: sessionID) else {
             throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
         }
-        var lines = try String(contentsOf: transcript, encoding: .utf8)
+        // The result's line: `"toolDenialKind": "user-rejected"`, a `tool_result` for the tool use.
+        var resultLine: String?
+        for line in try String(contentsOf: transcript, encoding: .utf8).split(separator: "\n") where line.contains(toolUseID) {
+            guard let entry = try? JSONDecoder().decode([String: JSONValue].self, from: Data(line.utf8)),
+                  entry["toolDenialKind"] == .string("user-rejected"),
+                  case .object(let message)? = entry["message"], case .array(let blocks)? = message["content"],
+                  blocks.contains(where: { isResultBlock($0, of: toolUseID) }), case .string(let uuid)? = entry["uuid"]
+            else { continue }
+            resultLine = uuid
+        }
+        guard let resultLine else { return false }
+        return try removeBlocks(sessionID: sessionID) { entry, block in
+            if isResultBlock(block, of: toolUseID) { return entry["uuid"] == .string(resultLine) }
+            // The interrupted text right after it.
+            guard entry["parentUuid"] == .string(resultLine), case .object(let fields) = block else { return false }
+            return fields["type"] == .string("text") && fields["text"] == .string(interruptedText)
+        }
+    }
+
+    /// Removes the content blocks `isRemoved` picks (given the block's line), and the lines left without blocks. Lines
+    /// that point at a removed line (`parentUuid`, `leafUuid`) are pointed past it, to the nearest line that stays, so
+    /// the chain stays. Returns whether anything was removed.
+    private static func removeBlocks(
+        sessionID: String, where isRemoved: ([String: JSONValue], JSONValue) -> Bool
+    ) throws -> Bool {
+        guard let transcript = transcript(sessionID: sessionID) else {
+            throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
+        }
+        let lines = try String(contentsOf: transcript, encoding: .utf8)
             .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var removedAny = false
         // Removed line uuid → its parent uuid.
-        var replacedParents: [String: JSONValue] = [:]
+        var removedParents: [String: JSONValue] = [:]
         var kept: [String] = []
         for line in lines {
-            guard line.contains(toolUseID),
-                  var entry = try? JSONDecoder().decode([String: JSONValue].self, from: Data(line.utf8)),
+            guard var entry = try? JSONDecoder().decode([String: JSONValue].self, from: Data(line.utf8)),
                   case .object(var message)? = entry["message"], case .array(let blocks)? = message["content"]
             else { kept.append(line); continue }
-            let others = blocks.filter { block in
-                guard case .object(let fields) = block, case .string("tool_use")? = fields["type"],
-                      case .string(toolUseID)? = fields["id"] else { return true }
-                return false
-            }
+            let others = blocks.filter { !isRemoved(entry, $0) }
             if others.count == blocks.count { kept.append(line); continue }
+            removedAny = true
             if others.isEmpty {
-                if case .string(let uuid)? = entry["uuid"] { replacedParents[uuid] = entry["parentUuid"] ?? .null }
+                if case .string(let uuid)? = entry["uuid"] { removedParents[uuid] = entry["parentUuid"] ?? .null }
             } else {
                 message["content"] = .array(others)
                 entry["message"] = .object(message)
                 kept.append(try encodedLine(entry))
             }
         }
-        lines = try kept.map { line in
-            guard !replacedParents.isEmpty,
+        /// The nearest line that stays, going up from a removed one.
+        func survivingParent(of uuid: String) -> JSONValue {
+            var parent = removedParents[uuid] ?? .null
+            while case .string(let next) = parent, let up = removedParents[next] { parent = up }
+            return parent
+        }
+        let relinked = try kept.map { line in
+            guard !removedParents.isEmpty,
                   var entry = try? JSONDecoder().decode([String: JSONValue].self, from: Data(line.utf8))
             else { return line }
             var changed = false
             for key in ["parentUuid", "leafUuid"] {
-                if case .string(let uuid)? = entry[key], let parent = replacedParents[uuid] {
-                    entry[key] = parent
+                if case .string(let uuid)? = entry[key], removedParents[uuid] != nil {
+                    entry[key] = survivingParent(of: uuid)
                     changed = true
                 }
             }
             return changed ? try encodedLine(entry) : line
         }
-        try lines.joined(separator: "\n").write(to: transcript, atomically: true, encoding: .utf8)
-        WaitingMarks.remove(toolUseID, agent: agent)
+        if removedAny { try relinked.joined(separator: "\n").write(to: transcript, atomically: true, encoding: .utf8) }
+        return removedAny
+    }
+
+    private static func isResultBlock(_ block: JSONValue, of toolUseID: String) -> Bool {
+        guard case .object(let fields) = block else { return false }
+        return fields["type"] == .string("tool_result") && fields["tool_use_id"] == .string(toolUseID)
+    }
+
+    /// Whether a content block is the tool use with this id, or its result.
+    private static func isBlock(_ block: JSONValue, of toolUseID: String) -> Bool {
+        guard case .object(let fields) = block else { return false }
+        switch fields["type"] {
+        case .string("tool_use")?: return fields["id"] == .string(toolUseID)
+        case .string("tool_result")?: return fields["tool_use_id"] == .string(toolUseID)
+        default: return false
+        }
     }
 
     /// One transcript line: compact JSON, slashes unescaped (as Claude writes them).

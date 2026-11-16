@@ -41,6 +41,64 @@ Known facts:
 - answering it by resuming the session doesn't run it: the agent gives it the `[Tool call interrupted …]` result, and makes the same tool use again (a new request)
 - the hook is a callback of Xcode's process: only Xcode can answer it
 
+Current State:
+
+- waiting on Xcode's prompt (permission Xcode asks for)
+    - `.jsonl`: the tool use is written, with no result after it
+
+    ```json
+    {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_012i2BhvPb5GLqqzncFXcaWD", "name": "Bash", "input": {"command": "touch /tmp/xcode-hook-order-test", "description": "Create empty test file in /tmp"}, "caller": {"type": "direct"}}]}}
+    ```
+
+    - history we read: a plain `tool_use`, no `tool_result`, no `user_request` (Xcode's agent never sets our mark, so it is not recognized as a request)
+    - the user sees a regular tool use (the same as a tool that is running)
+    - only exception: a question (AskUserQuestion) or a plan (ExitPlanMode) is a request by itself, so it would show as a `user_request` (not tested with Xcode)
+- answered in Xcode's prompt (allowed or denied)
+    - `.jsonl`: the tool result's line has `"permissionDecision": {"decision": "accept" | "reject", "source": "hook", "reasonType": "hook"}` (+ `"toolDenialKind": "permission-rule"` for a deny). a deny's result is `PreToolUse:<tool> hook error: User selected: Don’t Allow`
+
+    ```json
+    {"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_01BpaaNc4vmBEKhkCj28gShv", "type": "tool_result", "content": "(Bash completed with no output)", "is_error": false}]}, "permissionDecision": {"decision": "accept", "source": "hook", "reasonType": "hook"}}
+    ```
+
+    - history we read: plain `tool_use` + `tool_result`, no `user_request`. `"source": "hook"` is not counted as the user's decision
+    - the user sees a regular tool use with its result (a denied one: an error result)
+- allowed by Xcode without asking (e.g. ToolSearch, WebFetch)
+    - `.jsonl`: the same `"permissionDecision": {"decision": "accept", "source": "hook", "reasonType": "hook"}`
+    - so from the `.jsonl`, "Xcode asked the user and the user allowed" and "Xcode allowed it by itself" look the same
+- so for Xcode's chats, no permission request is recognized, waiting or answered: they all look like regular tool uses
+
+
+General Approach 
+
+- every turn the app runs (`sendMessage`, and resuming a chat to answer a request) first closes the project in Xcode (`XcodeAutomation.closeProject`): once the user answers through the app, Xcode can no longer answer it, and its agent stops
+- a tool use of Xcode's chat is a request when it is the last message with no result, no mark (Xcode's agent never sets one), and
+    - it is a question (AskUserQuestion) or a plan (ExitPlanMode), or
+    - Xcode would ask the user about it: `XcodePermissions.wouldAsk` (`XcodeChat/Permission.swift`) makes Xcode's own decision from Xcode's settings, read fresh on every check
+        - mode (`IDEChatAgentPermissionMode`): Manual → decided as below. Auto → the agent decides, counted as asking. dontAsk / bypassPermissions → never asks
+        - tools: allowed by name, by the tools Xcode passes the agent (`--allowedTools`) or `toolRules`
+        - Bash: split into simple commands (pipelines, `&&`, `;`, subshells, `$(…)` also inside assignments and redirects, `find -exec`). every one needs an `allow` rule (`shellCommandRules`): exact command name, the rule's other words in order with only options between them, leading `VAR=value` ignored, the longest matching pattern decides
+        - files (Control File & Folder Access on): a Read / Write / Edit file outside the project folder, checked with `pathRules` (longest path wins): no rule → asks, `read` → writing asks, `write` → no ask, `deny` / `readDenyWrite` → refused without asking
+        - anything it can't decide (missing settings, a command it can't parse) counts as asking
+- the user answers through the app: the project is closed, then the `.jsonl` is read again
+    - the tool use still has no result (it was waiting): the chat is resumed with the answer, the same as an agent killed while waiting. the agent repeats the call, it is answered without asking, and the old tool use is removed
+    - it now has the `The tool use was rejected …` result and `[Request interrupted by user for tool use]` (it was running, closing Xcode cut it off): those entries are removed, and it continues like the no-result case
+
+
+Why it works (scenario by scenario)
+
+- Xcode waits on its prompt, the user answers in the app: closing Xcode while it waits leaves no result (tested). the resume gives the agent the answer, it repeats the call, the call runs (or is denied) with that answer
+- Xcode allowed it by itself and the check agrees: it is not shown as a request, the user never answers it, so Xcode is never closed and nothing is interrupted
+- the check says Xcode asks, but Xcode allowed it (it was running): when the user answers, closing Xcode stops it and writes the "rejected" result (tested). that is removed and the call runs again with the user's answer. cost: the part that already ran runs a second time
+- the check says Xcode doesn't ask, but it did: shown as running, the request never reaches the app; it can only be answered in Xcode. known cases
+    - a Bash command allowed by its rules that opens a file without access (the file supervisor asks; which files a command opens isn't in its input)
+    - a setting changed while that chat was open (Xcode read its settings when the chat's agent started)
+- answered in Xcode first: the tool use has a result, so it is no longer a request; the app's answer gets `noWaitingRequest`
+- a question or a plan: always a request, whatever the settings
+- the check was matched against what Xcode did on 23 Bash commands and 4 other tool uses (Write in a read-only folder, Write and Edit in `/tmp`, ToolSearch): all the same
+
+
+---
+
 
 - shared logic: `XcodeAgentRemote/XcodeChat/`
 - per agent provider: `XcodeAgentRemote/Providers/`

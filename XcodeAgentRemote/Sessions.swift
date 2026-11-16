@@ -62,9 +62,11 @@ nonisolated protocol AgentProvider: SendableMetatype {
     /// The session's tool use that waits for the user's answer: its last tool use, if it has no result and is a
     /// request (a question / plan, or marked waiting: `WaitingMarks`); nil if there is none.
     static func pendingToolUse(sessionID: String) -> ChatEvent.ToolUse?
-    /// Removes a waiting tool use from the session's own transcript (before the session is resumed with its answer),
-    /// so the agent doesn't mark it interrupted.
-    static func removePendingToolUse(_ toolUseID: String, sessionID: String) throws
+    /// Removes a tool use and its result from the session's transcript (an earlier tool use the agent repeated).
+    static func removeToolUse(_ toolUseID: String, sessionID: String) throws
+    /// Removes the result the agent wrote for a tool use when it was stopped while the tool ran (Xcode's project
+    /// closed), and what it added after it, so the tool use is left without a result. Returns whether there was one.
+    static func removeStoppedResult(of toolUseID: String, sessionID: String) throws -> Bool
     /// Whether two tool uses are the same call (the same tool, with the same input that matters).
     static func isSameCall(_ toolUse: ChatEvent.ToolUse, _ other: ChatEvent.ToolUse) -> Bool
     /// The card Xcode shows for one of the agent's tool uses; nil if it never finished (no result).

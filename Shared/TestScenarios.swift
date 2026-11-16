@@ -300,8 +300,8 @@ extension TestScenarios {
                 "Use the Bash tool to run: touch \(deniedFile.path). If it is denied, reply DENIED.", to: target, chatID: chatID)
             let events = try await collect(answerUserRequest(.permission(toolUseID: toolUse.id, allow: false), permissionTimeout: 120))
             try check(!FileManager.default.fileExists(atPath: deniedFile.path), "the denied command ran")
-            try checkAnswered(toolUse, chatID: chatID)
-            return "nothing ran; reply: \(reply(events))"
+            try checkLeftInterrupted(toolUse, chatID: chatID)
+            return "nothing ran; the old tool use stays, interrupted; reply: \(reply(events))"
         })
 
         results.append(await scenario("Question left waiting: in the history, then answered") {
@@ -323,6 +323,18 @@ extension TestScenarios {
         return results
     }
 
+    /// Checks an answered request the agent didn't repeat (a deny): the old tool use stays, with Claude's interrupted
+    /// result; not marked waiting, and the history not waiting for the user.
+    private static func checkLeftInterrupted(_ toolUse: ChatEvent.ToolUse, chatID: String) throws {
+        let history = try XcodeChats.history(conversationID: chatID)
+        let result = history.lazy.compactMap { event -> ChatEvent.ToolResult? in
+            if case .toolResult(let result) = event, result.toolUseID == toolUse.id { result } else { nil }
+        }.first
+        try check(result?.output.contains("Tool call interrupted") == true, "the old tool use's result: \(result?.output ?? "none")")
+        try check(!WaitingMarks.contains(toolUse.id, agent: .claude), "the old tool use is still marked waiting")
+        try check(waitingForUser(history).isEmpty, "the history still waits: \(waitingForUser(history))")
+    }
+
     /// Leaves a permission request waiting and checks the chat's history ends waiting on it; returns its tool use.
     private static func leftWaitingPermission(
         _ prompt: String, to target: MessageTarget, chatID: String
@@ -335,8 +347,8 @@ extension TestScenarios {
         return toolUse
     }
 
-    /// Checks an answered request is gone: its tool use out of the history (no interrupted marker), not marked
-    /// waiting, and the history not waiting for the user.
+    /// Checks an answered request the agent repeated is gone: the old tool use and its interrupted result out of the
+    /// history, not marked waiting, and the history not waiting for the user.
     private static func checkAnswered(_ toolUse: ChatEvent.ToolUse, chatID: String) throws {
         let history = try XcodeChats.history(conversationID: chatID)
         try check(!history.contains { if case .toolUse(let old) = $0 { old.id == toolUse.id } else { false } },

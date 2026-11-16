@@ -823,7 +823,7 @@ nonisolated extension ClaudeProvider: AgentProvider {
             throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
         }
         let events = try SessionHistory.load(contentsOf: transcript).flatMap(\.chatEvents)
-        return addingUserRequests(to: events, transcript: try Data(contentsOf: transcript))
+        return addingUserRequests(to: events, transcript: try Data(contentsOf: transcript), sessionID: sessionID)
     }
 
     /// The `cwd` recorded in the session's transcript.

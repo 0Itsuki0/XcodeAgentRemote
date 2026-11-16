@@ -4,6 +4,17 @@
 //
 
 import Foundation
+import Synchronization
+
+/// The sessions whose agent the app is running now (by session id). A tool use with no result in one of them is the
+/// app's own: its requests are marked (`WaitingMarks`), so Xcode's permission check (`XcodePermissions`) is not used.
+nonisolated enum RunningSessions {
+    private static let ids = Mutex<Set<String>>([])
+
+    static func insert(_ sessionID: String) { ids.withLock { _ = $0.insert(sessionID) } }
+    static func remove(_ sessionID: String) { ids.withLock { _ = $0.remove(sessionID) } }
+    static func contains(_ sessionID: String) -> Bool { ids.withLock { $0.contains(sessionID) } }
+}
 
 /// The tool uses the agent waits on the user for, by id, kept across launches (`UserDefaults`).
 /// The `.jsonl` shows a tool use with no result both while it runs and while it waits for the user; this mark tells

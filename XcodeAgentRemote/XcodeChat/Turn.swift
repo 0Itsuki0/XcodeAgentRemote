@@ -86,6 +86,14 @@ actor ToolUseRecords {
     func setDenied(toolUseID: String) {
         byToolUseID[toolUseID, default: Record()].denied = true
     }
+
+    /// The earlier answer (`TurnRequest.repeatedAnswer`) was given to a repeat of its tool use in this turn.
+    private(set) var repeatedEarlierToolUse = false
+
+    /// Records that the agent repeated the earlier tool use, and was given the earlier answer.
+    func setRepeatedEarlierToolUse() {
+        repeatedEarlierToolUse = true
+    }
 }
 
 nonisolated extension ChatEvent.ToolUse {

@@ -18,11 +18,11 @@ nonisolated extension ClaudeProvider {
     static func newSessionID() -> String { UUID().uuidString.lowercased() }
 
     /// Claude Code's tools that run without asking, as Xcode passes them to `--allowedTools`.
-    private static let allowedTools = [
+    static let xcodeAllowedTools = [
         "mcp__xcode-tools", "ReadMcpResourceTool", "ListMcpResourcesTool", "Agent", "Task",
         "EnterPlanMode", "AgentEnterMode", "ToolSearch", "TodoWrite",
         "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TaskOutput",
-    ].joined(separator: ",")
+    ]
 
     /// Tools whose file content is captured before and after they run.
     private static let fileChangingTools: Set<String> = ["Edit", "Write"]
@@ -62,7 +62,7 @@ nonisolated extension ClaudeProvider {
             "--permission-mode", claudePermissionMode(permissionMode),
             "--allow-dangerously-skip-permissions",
             "--thinking-display", "summarized",
-            "--allowedTools", allowedTools,
+            "--allowedTools", xcodeAllowedTools.joined(separator: ","),
         ]
         if let prompt = xcodeSystemPrompt() {
             arguments += ["--append-system-prompt", prompt]
@@ -110,7 +110,9 @@ nonisolated extension ClaudeProvider {
         // The request the turn waits on: if the agent exits meanwhile (e.g. it is killed), nothing will come of it,
         // so the wait ends right away (the request is left waiting in the transcript, still answerable).
         let waitingOn = WaitingToolUse()
+        let sessionID = request.sessionID
         process.terminationHandler = { _ in
+            RunningSessions.remove(sessionID)
             exitedContinuation.finish()
             Task {
                 if let toolUseID = await waitingOn.toolUseID { await PendingUserRequests.shared.unregister(toolUseID) }
@@ -127,7 +129,11 @@ nonisolated extension ClaudeProvider {
             try? stdin.write(contentsOf: line)
         }
 
-        try process.run()
+        RunningSessions.insert(sessionID)
+        do { try process.run() } catch {
+            RunningSessions.remove(sessionID)
+            throw error
+        }
         try await withTaskCancellationHandler {
             // A pass-through PreToolUse hook, like the one Xcode registers: with any PreToolUse hook, Claude writes a
             // tool use to the session's transcript before it asks the user about it, so a waiting request is in the
@@ -136,6 +142,8 @@ nonisolated extension ClaudeProvider {
             sendToAgent(PromptMessage(prompt: request.prompt, sessionID: request.sessionID))
             // The earlier answer to give again, once, when the agent repeats the tool use it was given for.
             var repeatedAnswer = request.repeatedAnswer
+            // That earlier request is answered by this turn: it no longer waits.
+            if let earlier = request.repeatedAnswer { WaitingMarks.remove(earlier.toolUse.id, agent: agent) }
 
             var toolUses: [String: ChatEvent.ToolUse] = [:]
             var agentError: String?
@@ -207,6 +215,7 @@ nonisolated extension ClaudeProvider {
                         if let repeated = repeatedAnswer, !repeated.answer.isDeny, isSameCall(repeated.toolUse, toolUse) {
                             repeatedAnswer = nil
                             answer = repeated.answer.answering(toolUseID)
+                            await request.records.setRepeatedEarlierToolUse()
                         } else {
                             await waitingOn.set(toolUseID)
                             answer = await PendingUserRequests.shared.waitForAnswer(

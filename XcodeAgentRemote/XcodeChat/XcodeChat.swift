@@ -144,6 +144,18 @@ nonisolated enum XcodeChat {
             project = found
         }
         guard let project else { return }
+        // Xcode keeps the project's chats in memory: it would write over what this turn records, and a request it
+        // shows could still be answered there. Close the project in Xcode before the turn (nothing if it isn't open).
+        if try await MainActor.run(body: { try XcodeAutomation.closeProject(at: project) }) {
+            // Its agent for this session writes what it settles as it stops: wait for it to be gone.
+            await waitForAgentToStop(sessionID: sessionID)
+        }
+        // Answering a request of Xcode's chat whose tool was running after all: closing Xcode stopped it, and its agent
+        // wrote the tool use as rejected. Remove that, so the tool use is left without a result like a waiting one and
+        // the agent's repeat runs with the user's answer.
+        if let repeatedAnswer {
+            _ = try provider.removeStoppedResult(of: repeatedAnswer.toolUse.id, sessionID: sessionID)
+        }
         let workingDirectory = project.deletingLastPathComponent()
         let permissionMode: XcodeAgentConfiguration.PermissionMode =
             switch permissionModeOverride {
@@ -190,7 +202,21 @@ nonisolated enum XcodeChat {
             snapshotBefore: snapshotBefore, snapshotAfter: snapshotAfter)
         try conversation.save()
 
+        // The agent repeated the earlier tool use and was given its answer: the earlier one (left without a result
+        // when its agent was stopped, then marked interrupted on resume) is replaced by the repeat, so remove it.
+        if let repeatedAnswer, await records.repeatedEarlierToolUse {
+            try provider.removeToolUse(repeatedAnswer.toolUse.id, sessionID: sessionID)
+        }
+
         if let agentError { throw agentError }
+    }
+
+    /// Waits (up to 10 seconds) until no process runs with the session id in its arguments: the agent Xcode ran it in.
+    private static func waitForAgentToStop(sessionID: String) async {
+        for _ in 0..<50 {
+            if runCommand(["pgrep", "-f", sessionID]) == nil { return }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
     }
 
     // MARK: Answering a request no running turn waits for
@@ -222,9 +248,10 @@ nonisolated enum XcodeChat {
         return nil
     }
 
-    /// Answers a request no running turn waits for (`unansweredRequest`), streaming the turn like `runTurn`:
-    /// removes the waiting tool use from the session (so the agent doesn't mark it interrupted), resumes the chat with
-    /// the answer as the prompt, and gives the same answer to the agent's repeat of that tool use without asking.
+    /// Answers a request no running turn waits for (`unansweredRequest`), streaming the turn like `runTurn`: resumes
+    /// the chat with the answer as the prompt (the agent marks the waiting tool use interrupted), and gives the same
+    /// answer to the agent's repeat of that tool use without asking. Once the turn ended, if the agent did repeat it,
+    /// the earlier tool use and its interrupted result are removed from the session: only the repeat remains.
     /// Throws `SendMessageError.noWaitingRequest` if no chat waits on that tool use.
     static func resume(answering answer: UserAnswer, permissionTimeout: TimeInterval) -> AsyncThrowingStream<ChatEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -233,7 +260,6 @@ nonisolated enum XcodeChat {
                     guard let request = unansweredRequest(toolUseID: answer.toolUseID) else {
                         throw SendMessageError.noWaitingRequest(toolUseID: answer.toolUseID)
                     }
-                    try request.provider.removePendingToolUse(answer.toolUseID, sessionID: request.sessionID)
                     let events = runTurn(
                         prompt(answering: answer, about: request.toolUse),
                         to: .conversationInStore(id: request.conversationID, store: request.store.path),
