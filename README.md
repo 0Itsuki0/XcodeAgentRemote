@@ -1,111 +1,27 @@
-#  Xcode Agent Remote
+# Xcode Agent Remote
+
+## Base Approach
+
+<!-- TODO -->
 
 ## Run Xcode Agent Programmatically
 
-Basic Idea:
+### Basic Idea
+
 - use `xcrun mcpbridge run-agent <agent>`
     - Xcode's bundled binary, config dir, Xcode MCP tools.
     - `+` the flags Xcode adds: stream-json, Xcode's system prompt (from its template inside Xcode), Xcode's skills plugin, allowed tools
+    - permission mode follows Xcode's Manual / Auto setting (`IDEChatAgentPermissionMode` in Xcode's preferences: `standard` = Manual, `auto` = Auto), can be overridden per message
+    - Each call to `xcrun mcpbridge run-agent` is single turn only. If the agent asks for user interaction (choices, permission requests), the turn wait until timeout
 - write the turn into Xcode's chat files, in Xcode's own format
     - `conversation.plist`, `metadata.plist`, `CodingAssistantManifest.plist`, `Snapshots/`
-- permission mode follows Xcode's Manual / Auto setting (`IDEChatAgentPermissionMode` in Xcode's preferences: `standard` = Manual, `auto` = Auto), can be overridden per message
-- Each call to `xcrun mcpbridge run-agent` is single turn only. If the agent asks for user interaction (choices, permission requests), the turn wait (until timeout)
+    - needed so that the user can later continue the chat within xcode
+- when display chat history within the app, use provider specific chat history.
+    - Xcode's chat files are only what Xcode displays. It is not necessarily the full history. It contains unnecessary styling / UI
+- Before sending a message from the app, close xcode programmatically (with apple script) for the corresponding project.
+    - This is needed to avoid doubled tool use, chat history overwrite. In addition, the entries we wrote into the Xcode's chat files needs a reopen on the project to load. (Xcode only read those when open a specific project. After that, it only writes to the file, but read from the session memory/cache.)
 
-- the app calls it through `sendMessage` and gets typed events back
-- the agent's history is the Claude session `.jsonl`, shared with Xcode. Xcode's chat files are only what Xcode displays
-
-
-## How to determine whether there is a pending user request
-
-**If initiated by send message**
-
-- the agent asks the user with Claude's built in permission prompt (`can_use_tool`), for a permission, questions (AskUserQuestion) and a plan (ExitPlanMode) alike
-- a pass through PreToolUse hook is registered (answers no decision, Claude still decides what to ask): with it, Claude writes the tool use to the `.jsonl` before the answer
-    - shortly after it asks, not at the same moment. killed within a second of the request, the tool use is lost
-    - without any PreToolUse hook, the tool use is only written after the answer
-- when the agent asks, the app marks the tool use waiting (`UserDefaults`, per agent: `[agent: [tool use id]]`). removed once the answer arrives or the tool use has a result
-- a tool use is a request when (one place decides: `ClaudeProvider.userRequest`)
-    - it has a result decided by the user: `permissionDecision.source` `user_temporary` (allowed / answered / approved) or `user_reject` (denied / declined / rejected)
-    - it has no result yet, and it is a question or a plan
-    - it has no result yet, it is marked, and it is the session's last message (else the mark is stale)
-- live, the request is a `user_request` event, and the stream ends there. history (`/history`) has the same event
-- the app quitting (or the turn being stopped) is not a pending request: the agent sees its stdin close, settles the request itself (`Tool permission request failed: … stream closed …`), finishes the turn
-- the agent killed while waiting is: the tool use stays without a result. answering it resumes the chat with the answer, the agent repeats the tool use, and it is answered with the same answer without asking
-
-**If initiated by xcode**
-Known facts:
-- Xcode asks with its own PreToolUse hook (a callback it registers when it starts the agent, not in any config file). not every tool asks (Bash, Write did; ToolSearch, WebFetch didn't)
-- the waiting tool use is in the `.jsonl`, with no result
-- a tool that is running looks the same: the `.jsonl` (tool use, no result), `conversation.plist` (turn without `finishedDate`, no card for it) and `Snapshots/` (only at the start and the end of a turn) don't tell them apart
-- Xcode's agent debug log (`--debug-file`) does: `tool_dispatch_start … toolUseId=<id>` once a tool runs, nothing for a tool use waiting for the user. undocumented format, temporary file per agent process
-- answering it by resuming the session doesn't run it: the agent gives it the `[Tool call interrupted …]` result, and makes the same tool use again (a new request)
-- the hook is a callback of Xcode's process: only Xcode can answer it
-
-Current State:
-
-- waiting on Xcode's prompt (permission Xcode asks for)
-    - `.jsonl`: the tool use is written, with no result after it
-
-    ```json
-    {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_012i2BhvPb5GLqqzncFXcaWD", "name": "Bash", "input": {"command": "touch /tmp/xcode-hook-order-test", "description": "Create empty test file in /tmp"}, "caller": {"type": "direct"}}]}}
-    ```
-
-    - history we read: a plain `tool_use`, no `tool_result`, no `user_request` (Xcode's agent never sets our mark, so it is not recognized as a request)
-    - the user sees a regular tool use (the same as a tool that is running)
-    - only exception: a question (AskUserQuestion) or a plan (ExitPlanMode) is a request by itself, so it would show as a `user_request` (not tested with Xcode)
-- answered in Xcode's prompt (allowed or denied)
-    - `.jsonl`: the tool result's line has `"permissionDecision": {"decision": "accept" | "reject", "source": "hook", "reasonType": "hook"}` (+ `"toolDenialKind": "permission-rule"` for a deny). a deny's result is `PreToolUse:<tool> hook error: User selected: Don’t Allow`
-
-    ```json
-    {"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_01BpaaNc4vmBEKhkCj28gShv", "type": "tool_result", "content": "(Bash completed with no output)", "is_error": false}]}, "permissionDecision": {"decision": "accept", "source": "hook", "reasonType": "hook"}}
-    ```
-
-    - history we read: plain `tool_use` + `tool_result`, no `user_request`. `"source": "hook"` is not counted as the user's decision
-    - the user sees a regular tool use with its result (a denied one: an error result)
-- allowed by Xcode without asking (e.g. ToolSearch, WebFetch)
-    - `.jsonl`: the same `"permissionDecision": {"decision": "accept", "source": "hook", "reasonType": "hook"}`
-    - so from the `.jsonl`, "Xcode asked the user and the user allowed" and "Xcode allowed it by itself" look the same
-- so for Xcode's chats, no permission request is recognized, waiting or answered: they all look like regular tool uses
-
-
-General Approach
-
-- every turn the app runs (`sendMessage`, and resuming a chat to answer a request) first closes the project in Xcode (`XcodeAutomation.closeProject`): once the user answers through the app, Xcode can no longer answer it, and its agent stops
-- a tool use of Xcode's chat is a request when it is the last message with no result, no mark (Xcode's agent never sets one), and
-    - it is a question (AskUserQuestion) or a plan (ExitPlanMode), or
-    - Xcode would ask the user about it: `XcodePermissions.wouldAsk` (`XcodeChat/Permission.swift`) makes Xcode's own decision from Xcode's settings, read fresh on every check
-        - mode (`IDEChatAgentPermissionMode`): Manual → decided as below. Auto → the agent decides, counted as asking. dontAsk / bypassPermissions → never asks
-        - tools: allowed by name, by the tools Xcode passes the agent (`--allowedTools`) or `toolRules`
-        - Bash: split into simple commands (pipelines, `&&`, `;`, subshells, `$(…)` also inside assignments and redirects, `find -exec`). every one needs an `allow` rule (`shellCommandRules`): exact command name, the rule's other words in order with only options between them, leading `VAR=value` ignored, the longest matching pattern decides
-        - files (Control File & Folder Access on): a Read / Write / Edit file outside the project folder, checked with `pathRules` (longest path wins): no rule → asks, `read` → writing asks, `write` → no ask, `deny` / `readDenyWrite` → refused without asking
-        - anything it can't decide (missing settings, a command it can't parse) counts as asking
-- the user answers through the app: the project is closed, then the `.jsonl` is read again
-    - the tool use still has no result (it was waiting): the chat is resumed with the answer, the same as an agent killed while waiting. the agent repeats the call, it is answered without asking, and the old tool use is removed
-    - it now has the result of a stop (it was running, closing the project killed it): that result is removed, and it continues like the no-result case. only these two results are removed; a result the tool produced itself (it finished before the close) stays, so it doesn't run again
-        - by the app (AppleScript): Xcode doesn't notice, the tool is killed: a plain error result `Exit code 137` (`permissionDecision.source` `hook`)
-        - by the user (the close button): Xcode notices: the `The tool use was rejected …` result (`"toolDenialKind": "user-rejected"`) and `[Request interrupted by user for tool use]` after it
-
-
-Why it works (scenario by scenario)
-
-- Xcode waits on its prompt, the user answers in the app: closing Xcode while it waits leaves no result (tested). the resume gives the agent the answer, it repeats the call, the call runs (or is denied) with that answer
-- Xcode allowed it by itself and the check agrees: it is not shown as a request, the user never answers it, so Xcode is never closed and nothing is interrupted
-- the check says Xcode asks, but Xcode allowed it (it was running): when the user answers, closing the project kills it and its agent writes `Exit code 137` as the result (tested). that is removed and the call runs again with the user's answer. cost: the part that already ran runs a second time
-- the check says Xcode doesn't ask, but it did: shown as running, the request never reaches the app; it can only be answered in Xcode. known cases
-    - a Bash command allowed by its rules that opens a file without access (the file supervisor asks; which files a command opens isn't in its input)
-    - a setting changed while that chat was open (Xcode read its settings when the chat's agent started)
-- answered in Xcode first: the tool use has a result, so it is no longer a request; the app's answer gets `noWaitingRequest`
-- a question or a plan: always a request, whatever the settings
-- the check was matched against what Xcode did on 23 Bash commands and 4 other tool uses (Write in a read-only folder, Write and Edit in `/tmp`, ToolSearch): all the same
-
-
----
-
-
-- shared logic: `XcodeAgentRemote/XcodeChat/`
-- per agent provider: `XcodeAgentRemote/Providers/`
-
-### `xcrun` command
+### `xcrun` Command
 
 - `xcrun mcpbridge run-agent claude`: Launch a coding agent
     - Supported agents: `antigravity`, `claude`, `claude-ext`, `codex`, `copilot`, `mock-agent`
@@ -161,7 +77,7 @@ EXAMPLES:
     xcrun agent plugin path --plugin-format <name>
 ```
 
-### Important locations
+### Important File locations
 - Agent Configuration:  `~/Library/Developer/Xcode/CodingAssistant/`
     - Xcode's agent binary (what `xcrun mcpbridge run-agent claude` runs): `Agents/XcodeVersions/<Xcode build>/claude/claude`
     - per agent process, temporary: `$TMPDIR/mcp-config-<UUID>.json` (`--mcp-config`), `$TMPDIR/com.apple.dt.IDEIntelligenceAgents/plugins/<Xcode build>/xcode-integration/` (`--plugin-dir`)
@@ -172,7 +88,7 @@ EXAMPLES:
     - `<chat UUID>/metadata.plist`: name, dates, provider
     - `Snapshots/<UUID>.plist`: git state before / after each turn
 - chat data (provider bundled by xcode)
-    - claude session history: `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/projects`
+    - claude session history: `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/projects`, stored as `.jsonl` files.
     - The link: `CodingAssistant/projectName/<conversation_id>/conversation.plist` has a binary field: `assistantConfiguration`. Decoded, it contains: `{"agent":{"_0":{"sessionID":"2a561bc4-7ab8-4561-a88f-69e6a53ca073"}}}` where the `sessionID` is that under provider session history's `projects/projectName/sessionId`.
     - `conversation_id` is xcode's own id. has nothing to do with `sessionId`.
 - Xcode's system prompt addition (template): `$(xcode-select -p)/../PlugIns/IDEIntelligenceChat.framework/Resources/AgentSystemPromptAddition.idechatprompttemplate`
@@ -186,74 +102,7 @@ EXAMPLES:
 - the app's marks of waiting tool uses: the app's `UserDefaults`, key `WaitingForUserToolUseIDsByAgent` (`[agent: [tool use id]]`)
 
 
-#### Permission: Hook vs agent build in.
-
-- Xcode: a `PreToolUse` hook. a denied tool comes back to the agent as `PreToolUse:Bash hook error: User selected: Don’t Allow`
-    - not in Xcode's plugin (`--plugin-dir` has skills and `.mcp.json`, no hooks)
-    - only some tools asked: Bash and Write. Edit failed before asking (file missing), WebFetch went through
-- here: Claude's built in permission prompt (`--permission-prompt-tool stdio`, `can_use_tool` requests)
-    - a denied tool comes back as `The user denied this tool use.`, no answer in time as `No answer to this permission request within N seconds.`
-    - asked for Bash, Write and Edit
-- what the user does / sees is the same: asked, allowed runs, denied doesn't, the agent is told it was denied
-    - only the denial text differs (it ends up in the denied card's output, and the agent may word its reply differently)
-    - which tools ask may differ
-- the card is the same either way: a denied tool keeps its card with `status: cancelled` (the "!")
-
-
-#### Current Testing State
-
-**Confirmed**
-
-- cards match Xcode's own, field for field (two turns Xcode wrote, replayed through the port)
-    - Bash (terminal card), Read, Write (new file), Edit
-    - WebFetch, WebSearch (group cards), ToolSearch, Agent (title only cards)
-    - TaskCreate: no card
-    - a table in a reply: cut out as its own table block
-    - thinking and reply text
-    - denied tool: its own card with `status: cancelled`. failed tool: `status: failed` with the error
-- a turn the port writes matches what the old script wrote (which was checked against Xcode): chat, metadata, manifest, snapshots
-- new chat, continue a chat, continue a chat by its store name
-- permission in Manual mode: allow, deny, no answer in time (denied), answer to an unknown tool use (rejected)
-- questions (AskUserQuestion): one choice, several choices (multi select), declined
-- plans (ExitPlanMode): approved (then it runs), rejected with feedback (nothing runs)
-    - both directly on the Mac and through the server
-- cancelling a turn stops the agent, the turn is not saved
-- errors: unknown chat, missing project, missing store, agent not implemented (e.g. codex)
-- server + iOS client code (run from the Mac, against the app's server code)
-    - `/health`, `/projects`, `/history`
-    - message → permission request → answer → … : each response ends where the turn waits for an answer, the answer's response continues the turn
-    - allow and deny, the denied tool doesn't run
-
-**Not Confirmed**
-
-- `isModification`: Xcode said false for a turn whose Write went outside the project (`/tmp`). the port says true
-- tools never seen in Xcode: Xcode MCP tools (BuildProject…), TaskUpdate / TaskList, NotebookEdit, a failed Bash (non zero exit). they get the generic card, a guess
-- each card format is from one Xcode example
-- the agent itself failing: the turn should be saved, then the error sent
-- chats written by the port, opened in Xcode (after reopening the project)
-- the iOS app itself (only its client code was run, on the Mac)
-- an event containing U+2028 on the iOS client (it splits lines on it)
-- a turn whose permission request is never answered: its saved stream is never cleaned up
-
-
-### Rejected
-
-- resume the chat with the CLI (`xcrun agent claude --resume <sessionID>`)
-    - only the Claude session `.jsonl` gets the turn. Xcode's chat never shows it
-    - `/resume` in the CLI doesn't even list Xcode chats
-- drive Xcode's chat UI with Accessibility
-    - the message box and the send button can't be focused or typed into from outside
-- call into Xcode itself (the private method that sends a message)
-    - needs SIP or library validation turned off. not something every Mac can do
-- `MCP_XCODE_SESSION_ID`, `xcrun mcpbridge` tools
-    - these are for the agent calling Xcode (build, run, read files…), not for sending a message to a chat
-- make Xcode reload the chat while it is open
-    - nothing watches the chat files, no refresh button, switching tabs does nothing
-- a Python script / `.pyz` that needs `python3` installed
-    - not a single executable
-
-
-### Sample Jsonl
+### Sample Jsonl (Claude history)
 
 Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessionID>.jsonl`), shortened: only `type`, `message` and `toolUseResult` kept, long text cut with `…`.
 
@@ -425,6 +274,184 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 ```
 
 
+### Implementation Details / Q&A
+
+#### How to determine whether there is a pending user request
+
+A user request (permission request, choices) shows up as tool user, whether it is initiated by the app or Xcode.
+We need to tell it apart from other tool user so that we can have the user to answer to those requests.
+
+##### If initiated by THIS App
+
+**Claude specific**
+
+- the agent asks the user with Claude's built in permission prompt (`can_use_tool`), for a permission, questions (`AskUserQuestion`) and a plan (`ExitPlanMode`) alike
+- a *pass through* `PreToolUse` hook is registered (answers no decision, Claude still decides what to ask): with it, Claude writes the tool use to the `.jsonl` before the answer
+    - The write happens shortly after it asks, not at the same moment.
+        - If `claude` is terminated, for example, due to a crash or a test's pkill, within a second of the request, the tool use is lost, aka: no entry is written to `.jsonl`.
+    - without any `PreToolUse` hook, the tool use is only written after the answer
+- when the agent asks, the app marks the tool use waiting (stored in `UserDefaults`, per agent: `[agent: [tool use id]]`). removed once the answer arrives or the tool use has a result
+- a tool use is a request **initiated by THIS App** when all three are `true` (Logic: `ClaudeProvider.userRequest`)
+    - it has a result decided by the user: `permissionDecision.source` `user_temporary` (allowed / answered / approved) or `user_reject` (denied / declined / rejected)
+    - it has no result yet, and it is a question or a plan
+    - it has no result yet, it is marked, and it is the session's last message (else the mark is stale)
+- `POST /message`:  the request is a `user_request` event, and the stream ends there.
+- `GET /history`: history has the same event
+- the app quitting (or the turn being stopped) is not a pending request: the agent sees its stdin close, settles the request itself (`Tool permission request failed: … stream closed …`), finishes the turn
+- the agent terminated while waiting is: the tool use stays without a result. If the user answers the request, the app resumes the chat with the answer as the prompt:
+      1. the agent writes these entries to `.jsonl`, in order, before the model replies
+          1. the `[Tool call interrupted …]` result for the old tool use, which had none
+          2. the synthetic `No response requested.` assistant message
+          3. the user's answer (the resume prompt), e.g. `Allowed: you may run the Bash call you asked permission for.`
+      2. the agent repeats the tool call (its reply to the answer)
+      3. the app checks whether it is the same call (logically) as the old one. if it is, and the answer is not a deny, the app answers it automatically, and once the turn ends removes the old tool use and its interrupted result: only the repeat remains. they stay (interrupted) if the answer was a deny (a repeat is not answered for it) or the agent didn't repeat the call
+
+##### If initiated by Xcode
+
+**Facts**
+
+- Xcode asks with its own `PreToolUse` hook (a callback it registers when it starts the agent, not in any config file. it does not use provider's built in permission prompt claude's such as `can_use_tool`).
+    - not every tool asks. based on permission setting and mode (manual vs auto).
+    - the hook is a callback of Xcode's process: only Xcode can answer it
+- the waiting tool use is in the `.jsonl`, with no result (because there is a `PreToolUse` hook from Xcode, like the one we added above)
+- We **cannot** distinguish *a tool that is running* from `a tool waiting for permission` using the following.
+    - `.jsonl`: both end with a tool use, no result
+        ```json
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_012i2BhvPb5GLqqzncFXcaWD", "name": "Bash", "input": {"command": "touch /tmp/xcode-hook-order-test", "description": "Create empty test file in /tmp"}, "caller": {"type": "direct"}}]}}
+        ```
+    - `conversation.plist`: both has a turn without `finishedDate`, no card UI for neither
+    - `Snapshots/`. It only snapshot at the start and the end of a turn
+- We **COULD** distinguish *a tool that is running* from `a tool waiting for permission` with Xcode's agent debug log (`--debug-file`). It records: `tool_dispatch_start … toolUseId=<id>` once a tool runs, nothing for a tool use waiting for the user.
+    - problem: undocumented format, temporary file per agent process
+- answering it from the app (with `xcrun`) doesn't run the tool.
+    - the agent gives it the `[Tool call interrupted …]` result, and makes the same tool use again as a new request. (same phenomenon as the *agent terminated while waiting* above)
+- If we answered in Xcode's prompt (allowed or denied)
+    - `.jsonl`: the tool result's line has `"permissionDecision": {"decision": "accept" | "reject", "source": "hook", "reasonType": "hook"}` (+ `"toolDenialKind": "permission-rule"` for a deny). a deny's result is `PreToolUse:<tool> hook error: User selected: Don’t Allow`
+    ```json
+    {"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_01BpaaNc4vmBEKhkCj28gShv", "type": "tool_result", "content": "(Bash completed with no output)", "is_error": false}]}, "permissionDecision": {"decision": "accept", "source": "hook", "reasonType": "hook"}}
+    ```
+- Tool call allowed by Xcode without asking (e.g. ToolSearch, WebFetch)
+    - `.jsonl`: the same `"permissionDecision": {"decision": "accept", "source": "hook", "reasonType": "hook"}`
+    - so from the `.jsonl`, "Xcode asked the user and the user allowed" and "Xcode allowed it by itself" look the same
+
+
+**General Approach**
+
+- every turn the app runs (`sendMessage`, and resuming a chat to answer a request) first closes the project in Xcode (`XcodeAutomation.closeProject`): once the user answers through the app, Xcode can no longer answer it, and its agent stops
+- a tool use of Xcode's chat is a request when it is the last message with no result, no mark (Xcode's agent never sets one), and
+    - it is a question (AskUserQuestion) or a plan (ExitPlanMode), or
+    - Xcode would ask the user about it: `XcodePermissions.wouldAsk` (`XcodeChat/Permission.swift`) makes Xcode's own decision from Xcode's settings, read fresh on every check
+        - mode (`IDEChatAgentPermissionMode`): Manual → decided as below. Auto → the agent decides, counted as asking. dontAsk / bypassPermissions → never asks
+        - tools: allowed by name, by the tools Xcode passes the agent (`--allowedTools`) or `toolRules`
+        - Bash: split into simple commands (pipelines, `&&`, `;`, subshells, `$(…)` also inside assignments and redirects, `find -exec`). every one needs an `allow` rule (`shellCommandRules`): exact command name, the rule's other words in order with only options between them, leading `VAR=value` ignored, the longest matching pattern decides
+        - files (Control File & Folder Access on): a Read / Write / Edit file outside the project folder, checked with `pathRules` (longest path wins): no rule → asks, `read` → writing asks, `write` → no ask, `deny` / `readDenyWrite` → refused without asking
+        - anything it can't decide (missing settings, a command it can't parse) counts as asking
+- the user answers through the app: the project is closed, then the `.jsonl` is read again
+    - the tool use still has no result (it was waiting): the chat is resumed with the answer, the same as an agent killed while waiting. the agent repeats the call, it is answered without asking, and the old tool use is removed
+    - it now has the result of a stop (it was running, closing the project killed it): that result is removed, and it continues like the no-result case. only these two results are removed; a result the tool produced itself (it finished before the close) stays, so it doesn't run again
+        - by the app (AppleScript): Xcode doesn't notice, the tool is killed: a plain error result `Exit code 137` (`permissionDecision.source` `hook`)
+        - by the user (the close button): Xcode notices: the `The tool use was rejected …` result (`"toolDenialKind": "user-rejected"`) and `[Request interrupted by user for tool use]` after it
+
+
+**Why it works (scenario by scenario)**
+
+- Xcode waits on its prompt, the user answers in the app: closing Xcode while it waits leaves no result (tested). the resume gives the agent the answer, it repeats the call, the call runs (or is denied) with that answer
+- Xcode allowed it by itself and the check agrees: it is not shown as a request, the user never answers it, so Xcode is never closed and nothing is interrupted
+- the check says Xcode asks, but Xcode allowed it (it was running): when the user answers, closing the project kills it and its agent writes `Exit code 137` as the result (tested). that is removed and the call runs again with the user's answer. cost: the part that already ran runs a second time
+- the check says Xcode doesn't ask, but it did: shown as running, the request never reaches the app; it can only be answered in Xcode. known cases
+    - a Bash command allowed by its rules that opens a file without access (the file supervisor asks; which files a command opens isn't in its input)
+    - a setting changed while that chat was open (Xcode read its settings when the chat's agent started)
+- answered in Xcode first: the tool use has a result, so it is no longer a request; the app's answer gets `noWaitingRequest`
+- a question or a plan: always a request, whatever the settings
+- the check was matched against what Xcode did on 23 Bash commands and 4 other tool uses (Write in a read-only folder, Write and Edit in `/tmp`, ToolSearch): all the same
+
+
+#### Different Permission request logic: Xcode Hook vs agent build in
+
+Xcode uses its own `PreToolUse` hook for permission request.
+We are using agent's built-in, in the case of claude, `--permission-prompt-tool stdio` + `can_use_tool` requests
+Why are we not using it to reproduce what Xcode does? Does it matter?
+
+- Xcode hook is not in Xcode's plugin (`--plugin-dir` has skills and `.mcp.json`, no hooks), aka: `xcrun mcpbridge run-agent <agent>` does not see it.
+- what the user does / sees is the same: asked, allowed runs, denied doesn't, the agent is told it was denied
+    - only the denial text differs (it ends up in the denied card's output, and the agent may word its reply differently)
+- Xcode doesn't read the actual history from each agent, but only its own copy (`conversation.plist`)
+    - we can create the card UI the same either way: a denied tool keeps its card with `status: cancelled` (the "!")
+
+
+#### Why not keep Xcode open
+
+**Xcode use in memory cache for chat**
+
+Evidence:
+- Open the xcode and send some message
+- resume the same conversation by sending a message from THIS app's `sendMessage` function
+    - `conversation.plist`: 15 turns, the last one is the turn from THIS app
+    - Xcode UI is not updated to include the new turn
+- send a new message from xcode UI without reopen xcode, for example, "repeat the last message"
+    - the **agent** (not Xcode, not xcode UI, but the provider side such as claude, codex) will repeat the message we sent from the app (turn 15) → agent knew the message we sent from THIS app (turn 15) as the agent reads its own session history, In the case of claude, claude reads its own `jsonl`.
+- `conversation.plist` after we send a new message from xcode UI
+    - still 15 turns: the turn we sent from the app is gone, replaced by the one from Xcode UI
+    - Conclusion: Xcode saved what it had in memory, without reading the file first
+
+What that means for us:
+- close the project before we call the app's `sendMessage` function to avoid
+    - loosing the turns send from the app
+    - avoid the user from answering the same permission request / choices twice.
+
+
+### Current Testing State
+
+#### Confirmed
+
+- cards match Xcode's own, field for field (two turns Xcode wrote, replayed through the port)
+    - Bash (terminal card), Read, Write (new file), Edit
+    - WebFetch, WebSearch (group cards), ToolSearch, Agent (title only cards)
+    - TaskCreate: no card
+    - a table in a reply: cut out as its own table block
+    - thinking and reply text
+    - denied tool: its own card with `status: cancelled`. failed tool: `status: failed` with the error
+- a turn the port writes matches what the old script wrote (which was checked against Xcode): chat, metadata, manifest, snapshots
+- new chat, continue a chat, continue a chat by its store name
+- permission in Manual mode: allow, deny, no answer in time (denied), answer to an unknown tool use (rejected)
+- questions (AskUserQuestion): one choice, several choices (multi select), declined
+- plans (ExitPlanMode): approved (then it runs), rejected with feedback (nothing runs)
+    - both directly on the Mac and through the server
+- cancelling a turn stops the agent, the turn is not saved
+- errors: unknown chat, missing project, missing store, agent not implemented (e.g. codex)
+- server + iOS client code (run from the Mac, against the app's server code)
+    - `/health`, `/projects`, `/history`
+    - message → permission request → answer → … : each response ends where the turn waits for an answer, the answer's response continues the turn
+    - allow and deny, the denied tool doesn't run
+
+#### Not Confirmed
+
+- `isModification`: Xcode said false for a turn whose Write went outside the project (`/tmp`). the port says true
+- tools never seen in Xcode: Xcode MCP tools (BuildProject…), TaskUpdate / TaskList, NotebookEdit, a failed Bash (non zero exit). they get the generic card, a guess
+- each card format is from one Xcode example
+- the agent itself failing: the turn should be saved, then the error sent
+- chats written by the port, opened in Xcode (after reopening the project)
+- the iOS app itself (only its client code was run, on the Mac)
+- an event containing U+2028 on the iOS client (it splits lines on it)
+- a turn whose permission request is never answered: its saved stream is never cleaned up
+
+
+### Rejected Approaches
+
+- drive Xcode's chat UI with Accessibility
+    - the message box and the send button can't be focused or typed into from outside
+- call into Xcode itself (the private method that sends a message)
+    - needs SIP or library validation turned off. not something every Mac can do
+- `MCP_XCODE_SESSION_ID`, `xcrun mcpbridge` tools
+    - these are for the agent calling Xcode (build, run, read files…), not for sending a message to a chat
+- make Xcode reload the chat while it remains open
+    - nothing watches the chat files, no refresh button, switching tabs does nothing
+- use hooks for permission request / response received
+    - `PreToolCall` conflicts with Xcode registered ones (Xcode registered hook invoke after any ones set in `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/settings.json`)
+    - hard (if no impossible) to control which chat to watch
+    - have to inject for both Xcode-started sessions as well as every single message THIS app send.
+
+
 ### Sample Send Message Calls
 
 Real calls to the server (`POST /message`, JSON body, SSE response), from one chat.
@@ -531,27 +558,6 @@ data: {"type":"assistant_message","text":"DENIED"}
 - reject a plan: `{"answer":{"_0":{"planApproval":{"approve":false,"feedback":"Run `echo second` instead.","toolUseID":"toolu_…"}}}}`
 - no turn waiting for that tool use: `404`, `{"error":{"message":"No turn is waiting for an answer to tool use toolu_…"}}`
 - the turn failed: the response ends with `event: error`, `data: {"message":"…"}`
-
-
-### Xcode In memory cache for chat?
-
-evidence:
-- send a message from script
-    - `conversation.plist`: 15 turns, the last one is the script's
-- send a new message from xcode UI without reopen xcode
-    - the agent still knew the script's message (it reads the Claude session `.jsonl`)
-- conversation.plist
-    - still 15 turns: the script's turn is gone, replaced by the one from Xcode
-    - Xcode saved what it had in memory, without reading the file first
-- the chat's text exists only in `conversation.plist` and the Claude session `.jsonl`. Nowhere else in Xcode's folders
-- `Snapshots/` only hold git diffs, not the chat
-
-
-what that means:
-- reopen the project after using the script
-- don't send from Xcode in that chat before reopening, or the script's turns are lost from Xcode's chat (the agent still remembers them)
-
-
 
 
 ## Additional Notes / Discussions
