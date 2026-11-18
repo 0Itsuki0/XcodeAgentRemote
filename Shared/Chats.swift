@@ -2,8 +2,8 @@
 //  Chats.swift
 //  XcodeAgentRemote
 //
-//  The Xcode projects and conversations listed by the macOS app (`XcodeChats.listProjects`, `GET /projects`), and one
-//  conversation in full (`XcodeChats.conversation(id:)`, `GET /conversation/<id>`), shared with the iOS app.
+//  The Xcode projects and conversations listed by the macOS app (`XcodeChat.listProjects`, `GET /projects`), and one
+//  conversation in full (`XcodeChat.conversation(id:)`, `GET /conversation/<id>`), shared with the iOS app.
 //
 
 import Foundation

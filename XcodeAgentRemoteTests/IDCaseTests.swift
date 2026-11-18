@@ -51,7 +51,7 @@ struct IDCaseTests {
 
     /// A Claude chat of Xcode's chat store whose agent session has a transcript.
     static func claudeChat() -> (project: XcodeProject, chat: XcodeChatConversation, sessionID: String)? {
-        for project in XcodeChats.listProjects() {
+        for project in XcodeChat.listProjects() {
             for chat in project.conversations where chat.provider == .claude {
                 if let sessionID = chat.providerSessionID, ClaudeProvider.transcript(sessionID: sessionID) != nil {
                     return (project, chat, sessionID)
@@ -65,10 +65,10 @@ struct IDCaseTests {
         let (project, chat, _) = try #require(Self.claudeChat(), "no Claude chat with a transcript in Xcode's chat store")
         let id = otherCase ? chat.id.lowercased() : chat.id  // Xcode writes its chat ids uppercase
 
-        let detail = try XcodeChats.conversation(id: id)
+        let detail = try XcodeChat.conversation(id: id)
         #expect(detail.id == chat.id)
         #expect(detail.project.store == project.store)
-        #expect(try !XcodeChats.history(conversationID: id).isEmpty)
+        #expect(try !XcodeChat.history(conversationID: id).isEmpty)
         #expect(ChatStore.Chat.load(store: project.store, id: id)?.id == chat.id)  // the id as its folder is named
     }
 
@@ -82,7 +82,7 @@ struct IDCaseTests {
 
     @Test func unknownConversationNotFound() {
         #expect(throws: ChatHistoryError.self) {
-            try XcodeChats.conversation(id: "00000000-0000-0000-0000-000000000000")
+            try XcodeChat.conversation(id: "00000000-0000-0000-0000-000000000000")
         }
     }
 }

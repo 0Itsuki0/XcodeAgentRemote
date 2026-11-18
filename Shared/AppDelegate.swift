@@ -233,7 +233,6 @@ class AppDelegate: NSObject {
             setupAppOnLaunch()
         }
     }
-
 #endif
 
 extension AppDelegate: UNUserNotificationCenterDelegate {

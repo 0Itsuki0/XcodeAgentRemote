@@ -173,7 +173,7 @@ nonisolated enum TestScenarios {
 #if os(macOS)
 extension TestScenarios {
 
-    /// Runs the scenarios on the Mac with the app's own functions (`XcodeChats`, `sendMessage`, `answerUserRequest`),
+    /// Runs the scenarios on the Mac with the app's own functions (`XcodeChat`, `sendMessage`, `answerUserRequest`),
     /// against the chats of `project` (its `.xcodeproj` / `.xcworkspace`).
     static func runDirect(project: URL) async -> [ScenarioResult] {
         let folder = FileManager.default.temporaryDirectory.appending(path: "test-scenarios-\(UUID().uuidString.prefix(8))")
@@ -183,7 +183,7 @@ extension TestScenarios {
         var results: [ScenarioResult] = []
 
         results.append(await scenario("List projects") {
-            let projects = XcodeChats.listProjects()
+            let projects = XcodeChat.listProjects()
             return "\(projects.count) projects, \(projects.map(\.conversations.count).reduce(0, +)) chats"
         })
 
@@ -196,7 +196,7 @@ extension TestScenarios {
             try check(!bash.isEmpty, "no Bash tool use")
             try check(bash.allSatisfy { !$0.isError }, "Bash failed: \(bash.map(\.output))")
             try check(FileManager.default.fileExists(atPath: allowedFile.path), "the command did not create the file")
-            chatID = XcodeChats.listProjects().flatMap(\.conversations).first { $0.name == name }?.id
+            chatID = XcodeChat.listProjects().flatMap(\.conversations).first { $0.name == name }?.id
             try check(chatID != nil, "the new chat is not in Xcode's chat store")
             return "file created; chat \(chatID ?? "")"
         })
@@ -226,7 +226,7 @@ extension TestScenarios {
 
         results.append(await scenario("History of the new chat") {
             guard let chatID else { throw CheckFailed(description: "needs the chat of the previous scenarios") }
-            let history = try XcodeChats.history(conversationID: chatID)
+            let history = try XcodeChat.history(conversationID: chatID)
             try check(promptCount(history) == 3, "\(promptCount(history)) prompts in the history, expected 3")
             try check(toolResults(of: "Bash", in: history).count == 2, "expected 2 Bash results in the history")
             let requests = history.filter { if case .userRequest(.permission) = $0 { true } else { false } }.count
@@ -296,14 +296,14 @@ extension TestScenarios {
             let request = try await leaveWaiting(
                 "Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose.",
                 to: target)
-            let history = try XcodeChats.history(conversationID: chatID)
+            let history = try XcodeChat.history(conversationID: chatID)
             guard case .questions(let toolUseID, let questions)? = waitingForUser(history).last, toolUseID == request.toolUseID
             else { throw CheckFailed(description: "the history doesn't end waiting on the question: \(waitingForUser(history))") }
             let events = try await collect(answerUserRequest(
                 .questions(toolUseID: toolUseID, answers: Dictionary(uniqueKeysWithValues: questions.map { ($0.question, ["Green"]) })),
                 permissionTimeout: 120))
             try check(reply(events).contains("Green"), "reply: \(reply(events))")
-            let after = try XcodeChats.history(conversationID: chatID)
+            let after = try XcodeChat.history(conversationID: chatID)
             try check(waitingForUser(after).isEmpty, "the history still waits: \(waitingForUser(after))")
             return "answered Green; reply: \(reply(events))"
         })
@@ -314,7 +314,7 @@ extension TestScenarios {
     /// Checks an answered request the agent didn't repeat (a deny): the old tool use stays, with Claude's interrupted
     /// result; not marked waiting, and the history not waiting for the user.
     private static func checkLeftInterrupted(_ toolUse: ChatEvent.ToolUse, chatID: String) throws {
-        let history = try XcodeChats.history(conversationID: chatID)
+        let history = try XcodeChat.history(conversationID: chatID)
         let result = history.lazy.compactMap { event -> ChatEvent.ToolResult? in
             if case .toolResult(let result) = event, result.toolUseID == toolUse.id { result } else { nil }
         }.first
@@ -328,7 +328,7 @@ extension TestScenarios {
         _ prompt: String, to target: MessageTarget, chatID: String
     ) async throws -> ChatEvent.ToolUse {
         let request = try await leaveWaiting(prompt, to: target)
-        let history = try XcodeChats.history(conversationID: chatID)
+        let history = try XcodeChat.history(conversationID: chatID)
         guard case .permission(let toolUse)? = waitingForUser(history).last, toolUse.id == request.toolUseID else {
             throw CheckFailed(description: "the history doesn't end waiting on it: \(waitingForUser(history))")
         }
@@ -338,7 +338,7 @@ extension TestScenarios {
     /// Checks an answered request the agent repeated is gone: the old tool use and its interrupted result out of the
     /// history, not marked waiting, and the history not waiting for the user.
     private static func checkAnswered(_ toolUse: ChatEvent.ToolUse, chatID: String) throws {
-        let history = try XcodeChats.history(conversationID: chatID)
+        let history = try XcodeChat.history(conversationID: chatID)
         try check(!history.contains { if case .toolUse(let old) = $0 { old.id == toolUse.id } else { false } },
                   "the old tool use is still in the history")
         try check(!history.contains { if case .toolResult(let result) = $0 { result.output.contains("Tool call interrupted") } else { false } },
@@ -351,7 +351,7 @@ extension TestScenarios {
     /// (`kill -9`), so it can't settle the request: it stays waiting in the chat's `.jsonl`. Returns that request.
     private static func leaveWaiting(_ prompt: String, to target: MessageTarget) async throws -> UserRequest {
         guard case .conversation(let chatID, _) = target,
-              let sessionID = XcodeChats.listProjects().flatMap(\.conversations).first(where: { $0.id == chatID })?.providerSessionID
+              let sessionID = XcodeChat.listProjects().flatMap(\.conversations).first(where: { $0.id == chatID })?.providerSessionID
         else { throw CheckFailed(description: "no session for the chat") }
         let events = try await collect(sendMessage(prompt, to: target, permissionModeOverride: .manual, permissionTimeout: 120))
         guard let request = waitingForUser(events).last else { throw CheckFailed(description: "the agent made no request") }
@@ -359,7 +359,7 @@ extension TestScenarios {
         // Claude writes the tool use to the `.jsonl` shortly after it asks: kill only once it's there.
         var inFile = false
         for _ in 0..<50 where !inFile {
-            let history = (try? XcodeChats.history(conversationID: chatID)) ?? []
+            let history = (try? XcodeChat.history(conversationID: chatID)) ?? []
             inFile = waitingForUser(history).contains { $0.toolUseID == request.toolUseID }
             if !inFile { try await Task.sleep(for: .milliseconds(200)) }
         }

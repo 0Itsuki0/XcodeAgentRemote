@@ -15,8 +15,8 @@ import ServiceLifecycle
 /// `POST /message` runs an agent that can use tools on this Mac, so it is not exposed to the network.
 ///
 /// - `GET /health` → `{"status": "ok"}`
-/// - `GET /projects` → `[XcodeProject]` (`XcodeChats.listProjects`)
-/// - `GET /conversation/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChats.conversation`): the conversation, its
+/// - `GET /projects` → `[XcodeProject]` (`XcodeChat.listProjects`)
+/// - `GET /conversation/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChat.conversation`): the conversation, its
 ///   history and its project; 404 no such chat, 501 not implemented
 /// - `POST /message` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
 ///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
@@ -136,7 +136,7 @@ actor APIServer {
 
         // For when iCloud syncing fails: the chats and their histories, read directly from this Mac.
         router.get(RouterPath(APIServerConstant.projectsPath)) { _, _ in
-            XcodeChats.listProjects()
+            XcodeChat.listProjects()
         }
 
         router.get(
@@ -144,7 +144,7 @@ actor APIServer {
         ) { _, context -> XcodeConversationDetail in
             let conversationID = try context.parameters.require("conversation")
             do {
-                return try XcodeChats.conversation(id: conversationID)
+                return try XcodeChat.conversation(id: conversationID)
             } catch let error as ChatHistoryError {
                 switch error {
                 case .notImplemented:

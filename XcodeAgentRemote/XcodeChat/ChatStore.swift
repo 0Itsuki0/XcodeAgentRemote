@@ -40,8 +40,8 @@ nonisolated enum ChatStore {
     /// The store of a `.xcodeproj` / `.xcworkspace`: `<ProjectName>-<hash of the project file path>`.
     static func storeDirectory(forProject project: URL) -> URL {
         let name = project.deletingPathExtension().lastPathComponent
-        return XcodeChats.storeRoot.appending(
-            path: "\(name)-\(XcodeChats.xcodePathHash(project.path))", directoryHint: .isDirectory)
+        return XcodeChat.storeRoot.appending(
+            path: "\(name)-\(XcodeChat.xcodePathHash(project.path))", directoryHint: .isDirectory)
     }
 
     /// A store given by folder name (`<ProjectName>-<hash>`, looked up in the store root) or by path.
@@ -50,7 +50,7 @@ nonisolated enum ChatStore {
         while store.count > 1 && store.hasSuffix("/") { store.removeLast() }
         let url = store.contains("/")
             ? URL(filePath: store, directoryHint: .isDirectory)
-            : XcodeChats.storeRoot.appending(path: store, directoryHint: .isDirectory)
+            : XcodeChat.storeRoot.appending(path: store, directoryHint: .isDirectory)
         return url.absoluteURL.standardizedFileURL
     }
 
@@ -218,7 +218,7 @@ nonisolated enum ChatStore {
             store: URL, modelDefinition: AgentModel, sessionID: String, name: String
         ) throws -> Chat {
             let id = newUUID()
-            let configuration = XcodeChats.AssistantConfiguration(agent: .init(_0: .init(sessionID: sessionID)))
+            let configuration = XcodeChat.AssistantConfiguration(agent: .init(_0: .init(sessionID: sessionID)))
             let plist: [String: Any] = [
                 "assistantConfiguration": try JSONEncoder().encode(configuration),
                 "assistantKind": "agent",
@@ -244,7 +244,7 @@ nonisolated enum ChatStore {
         /// The agent session id stored in `assistantConfiguration`.
         var sessionID: String? {
             (plist["assistantConfiguration"] as? Data)
-                .flatMap { try? JSONDecoder().decode(XcodeChats.AssistantConfiguration.self, from: $0) }?
+                .flatMap { try? JSONDecoder().decode(XcodeChat.AssistantConfiguration.self, from: $0) }?
                 .agent._0.sessionID
         }
 

@@ -29,7 +29,7 @@
 ///  - provider's session id
 ///  - folder / group
 ///  - provider (claude opus 5.5, claude haiku, codex ...)
-///  - session history (loaded from each provider instead of the xcode chat data, `XcodeChats.history`). For not implemented providers, "NOT IMPLEMENTED"
+///  - session history (loaded from each provider instead of the xcode chat data, `XcodeChat.history`). For not implemented providers, "NOT IMPLEMENTED"
 ///  - any other metadata available
 
 import AppKit
@@ -108,12 +108,12 @@ nonisolated enum ChatHistoryError: LocalizedError {
     }
 }
 
-nonisolated enum XcodeChats {
+nonisolated extension XcodeChat {
 
     static let storeRoot = FileManager.default.homeDirectoryForCurrentUser
         .appending(path: "Library/Developer/Xcode/UserData/CodingAssistant")
 
-    /// Every project with Xcode chats, with its chats.
+    /// List all projects that has one more more Xcode chat sessions
     static func listProjects() -> [XcodeProject] {
         let stores =
             (try? FileManager.default.contentsOfDirectory(

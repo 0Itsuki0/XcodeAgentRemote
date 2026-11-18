@@ -1,6 +1,6 @@
 //
 //  WindowAccessor.swift
-//  DevLens
+//  XcodeAgentRemote
 //
 //  Created by Itsuki on 2026/06/30.
 //
