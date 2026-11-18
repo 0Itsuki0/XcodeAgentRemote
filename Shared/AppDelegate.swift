@@ -9,8 +9,12 @@ import CloudKit
 import SwiftUI
 import UserNotifications
 
+private let logger = Logger.shared
+private let category = Logger.category(#fileID)
+
 class AppDelegate: NSObject {
     // to initialize the records on launch
+    //    let manager = CloudManager()
     let manager = ICloudManager()
 
     /// perform set ups
@@ -25,29 +29,30 @@ class AppDelegate: NSObject {
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().setBadgeCount(0)
         requestNotificationPermission()
-
-        //        Task {
-        //            do {
-        //                try await manager.addDatabaseSubscription()
-        //            } catch (let error) {
-        //                print("error adding database subscription: \(error)")
-        //            }
-        //        }
-
     }
 
     func didRegisterForRemoteNotificationsWithDeviceToken(
         deviceToken: Data
     ) {
-        print(
-            "\(#function). \(deviceToken.base64EncodedString())"
+        logger.info(
+            category: category,
+            message: "\(#function). \(deviceToken.base64EncodedString())"
         )
+    }
+
+    func didFailToRegisterForRemoteNotifications(
+        _ error: Error
+    ) {
+        logger.error(category: category, error: error)
     }
 
     func didReceiveRemoteNotification(
         userInfo: [AnyHashable: Any]
     ) {
-        print(#function)
+        logger.info(
+            category: category,
+            message: "\(#function)"
+        )
         guard
             let notification = CKNotification(
                 fromRemoteNotificationDictionary: userInfo
@@ -55,8 +60,54 @@ class AppDelegate: NSObject {
         else {
             return
         }
+
+        logger.info(
+            category: category,
+            message: "\(notification.debugDescription)"
+        )
+
+        /// Sample notification
+        /// ```
+        /// <CKQueryNotification: 0x109435c00; notificationType=1, notificationID=a04efc92-0dfa-48b0-97e6-4751d6d57d16, containerID=iCloud.xxx:Sandbox, subscriptionOwnerUserRecordID=xxx:(_defaultZone:__defaultOwner__), subscriptionID=XcodeAgentRemote.query.subscription.PushToIOS, queryNotificationReason=1, recordFields={
+        ///     Body = "some body";
+        ///     ConversationID = 123;
+        ///     Subtitle = "2026-11-18T02:30:44Z";
+        ///     Title = test;
+        /// }, recordID=96E4847D-78BC-4E94-9FD9-CECE02FC8952:(_defaultZone:xxx), database=Private>
+        /// ```
+        guard let queryNotification = notification as? CKQueryNotification
+        else {
+            logger.info(
+                category: category,
+                message: "Unknown notification type."
+            )
+            return
+        }
+
+        guard
+            let type = ICloudManager.recordTypeFromSubscriptionId(
+                queryNotification.subscriptionID
+            )
+        else {
+            logger.info(category: category, message: "Unknown record type.")
+            return
+        }
         
-        print(notification)
+        switch type {
+        case .pushToIOS:
+            /// delete the record here instead of `userNotificationCenter.didReceive`
+            /// in case user never tap on the notification to avoid the records getting piled up.
+            ///
+            /// we can still retrieve the `CKQueryNotification` with necessary information (such as ConversationID) within `userNotificationCenter.didReceive` even if the record itself is deleted.
+            if let recordID = queryNotification.recordID {
+                self.manager.deleteRecord(recordID)
+            }
+        }
+
+        //        let record = queryNotification.recordFields
+
+        //        let queryNotification = notification as! CKQueryNotification
+        //        queryNotification.recordID
 
         //        guard
         //            let notification = CKNotification(
@@ -114,8 +165,6 @@ class AppDelegate: NSObject {
 #if os(iOS)
 
     extension AppDelegate: UIApplicationDelegate {
-        // to initialize the records on launch
-        //        let manager = CloudManager.shared
 
         func application(
             _ application: UIApplication,
@@ -134,63 +183,6 @@ class AppDelegate: NSObject {
             didReceiveRemoteNotification userInfo: [AnyHashable: Any]
         ) async -> UIBackgroundFetchResult {
             didReceiveRemoteNotification(userInfo: userInfo)
-
-            //            print("\(#function)")
-            //
-            //            // we are not interested in processing if our app is not active
-            //            if application.applicationState != .active {
-            //                print("not active")
-            //                return .newData
-            //            }
-            //
-            //            guard
-            //                let notification = CKNotification(
-            //                    fromRemoteNotificationDictionary: userInfo
-            //                )
-            //            else {
-            //                return .noData
-            //            }
-            //
-            //            print(notification)
-            //
-            //            if notification.notificationType == .database,
-            //                notification.subscriptionID
-            //                    == CloudManager.sharedCloudDatabaseSubscriptionId
-            //            {
-            //                Task {
-            //                    do {
-            //                        try await manager.fetchChangesForSharedDBSubscription()
-            //                    } catch (let error) {
-            //                        print(
-            //                            "error fetching changes for shared database subscription: \(error)"
-            //                        )
-            //                        manager.error = error
-            //                    }
-            //
-            //                }
-            //            }
-            //
-            //            if notification.notificationType == .query,
-            //                notification.subscriptionID
-            //                    == CloudManager.privateDatabaseQuerySubscriptionId,
-            //                let queryNotification = notification as? CKQueryNotification
-            //            {
-            //
-            //                Task {
-            //                    do {
-            //                        try await manager.fetchChangesForQuerySubscription(
-            //                            queryNotification
-            //                        )
-            //                    } catch (let error) {
-            //                        print(
-            //                            "error fetching changes for query subscription: \(error)"
-            //                        )
-            //                        manager.error = error
-            //                    }
-            //
-            //                }
-            //            }
-            //
             return .newData
         }
 
@@ -209,7 +201,7 @@ class AppDelegate: NSObject {
             _ application: UIApplication,
             didFailToRegisterForRemoteNotificationsWithError error: Error
         ) {
-            print("\(#function). \(error))")
+            didFailToRegisterForRemoteNotifications(error)
         }
     }
 
@@ -220,7 +212,7 @@ class AppDelegate: NSObject {
             _ application: NSApplication,
             didFailToRegisterForRemoteNotificationsWithError error: any Error
         ) {
-
+            didFailToRegisterForRemoteNotifications(error)
         }
 
         func application(
@@ -242,7 +234,6 @@ class AppDelegate: NSObject {
         func applicationDidFinishLaunching(_ notification: Notification) {
             setupAppOnLaunch()
         }
-
     }
 
 #endif
@@ -255,7 +246,10 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             .requestAuthorization(options: [.alert, .sound, .badge]) {
                 granted,
                 error in
-                print("Permission granted: \(granted)")
+                logger.info(
+                    category: category,
+                    message: "Notification permission granted"
+                )
             }
     }
 
@@ -263,7 +257,10 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        print(#function)
+        logger.info(
+            category: category,
+            message: "\(#function): \(notification)"
+        )
         return [[.badge, .sound, .banner, .list]]
     }
 
@@ -272,7 +269,37 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        print(response.notification.request.content)
-        // title, body, userInfo(data)
+        logger.info(
+            category: category,
+            message: """
+                User interacted with notification:
+                content: \(response.notification.request.content)
+                userInfo: \(response.notification.request.content.userInfo)
+                """
+        )
+
+        guard
+            let notification = CKNotification(
+                fromRemoteNotificationDictionary: response.notification.request
+                    .content.userInfo
+            )
+        else {
+            return
+        }
+
+        logger.info(
+            category: category,
+            message: "\(notification.debugDescription)"
+        )
+        /// Sample notification
+        /// ```
+        /// <CKQueryNotification: 0x109435c00; notificationType=1, notificationID=a04efc92-0dfa-48b0-97e6-4751d6d57d16, containerID=iCloud.xxx:Sandbox, subscriptionOwnerUserRecordID=xxx:(_defaultZone:__defaultOwner__), subscriptionID=XcodeAgentRemote.query.subscription.PushToIOS, queryNotificationReason=1, recordFields={
+        ///     Body = "some body";
+        ///     ConversationID = 123;
+        ///     Subtitle = "2026-11-18T02:30:44Z";
+        ///     Title = test;
+        /// }, recordID=96E4847D-78BC-4E94-9FD9-CECE02FC8952:(_defaultZone:xxx), database=Private>
+        /// ```
+
     }
 }

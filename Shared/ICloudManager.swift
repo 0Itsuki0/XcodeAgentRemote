@@ -10,6 +10,7 @@ import CloudKit
 private let logger = Logger.shared
 private let category = Logger.category(#fileID)
 
+/// Using iCloud / CloudKit for sending Push Notifications between MacOS and iOS
 class ICloudManager {
 
     enum RecordType: String, Sendable {
@@ -23,11 +24,8 @@ class ICloudManager {
         case conversationId = "ConversationID"
     }
 
-    static let containerIdentifier =
+    private static let containerIdentifier =
         "iCloud.itsuki.enjoy.xcodeAgentRemote"
-
-    private static let databaseSubscriptionId: String =
-        "database.subscription"
 
     private let container = CKContainer(
         identifier: ICloudManager.containerIdentifier
@@ -171,51 +169,21 @@ class ICloudManager {
     private func deleteSubscription(_ id: String) async throws {
         guard checkCommon() else { return }
 
-        try await self.privateDatabase.deleteSubscription(
-            withID: Self.databaseSubscriptionId
-        )
+        try await self.privateDatabase.deleteSubscription(withID: id)
     }
 
-    private func addSubscription(for record: RecordType) async throws {
-        print("\(#function)")
-
-        /// https://developer.apple.com/documentation/cloudkit/cksubscription/notificationinfo-swift.class
-        let notificationInfo = CKSubscription.NotificationInfo()
-        /// set `shouldSendContentAvailable` to `true` to have the system to wake or launch an app that isn’t currently running
-        notificationInfo.shouldSendContentAvailable = true
-        /// set any other properties other than `shouldSendContentAvailable`
-        /// so that CloudKit treats the notification as high-priority.
-        notificationInfo.soundName = "default"
-        notificationInfo.desiredKeys = ["CD_timestamp"]
-        notificationInfo.titleLocalizationArgs = ["CD_timestamp"]
-        /// This can also be written as `%@`
-        /// If you use %@ for your substitution variables, CloudKit replaces those variables by traversing the array in order.
-        /// If you use variables of the form %n$@, where n is an integer, n represents the index (starting at 1) of the item in the array to use.
-        notificationInfo.titleLocalizationKey = "Timestamp: %1$@"
-        notificationInfo.shouldBadge = true
-
-        let truePredicate = NSPredicate(format: "TRUEPREDICATE")
-
-        let querySubscription = CKQuerySubscription(
-            recordType: "CD_ItemModel",
-            predicate: truePredicate,
-            subscriptionID: "query.subscription",
-            options: [
-                .firesOnRecordCreation, .firesOnRecordDeletion,
-                .firesOnRecordUpdate,
-            ]
-        )
-
-        querySubscription.notificationInfo = notificationInfo
-
-        /// After the operation completes, record that state on-device (in UserDefaults, for example). You can then check that state on subsequent launches to prevent unnecessary trips to the server.
-        let _ = try await self.privateDatabase.save(
-            querySubscription
-        )
-    }
+    private static let subscriptionIdPrefix =
+        "XcodeAgentRemote.query.subscription."
 
     private static func subscriptionId(for type: RecordType) -> String {
-        return "XcodeAgentRemote.query.subscription.\(type.rawValue)"
+        return "\(subscriptionIdPrefix)\(type.rawValue)"
+    }
+
+    static func recordTypeFromSubscriptionId(_ id: String?) -> RecordType? {
+        guard let id else { return nil }
+        guard id.hasPrefix(subscriptionIdPrefix) else { return nil }
+        let raw = id.dropFirst(subscriptionIdPrefix.count)
+        return RecordType(rawValue: String(raw))
     }
 
     private static func subscriptionOptions(for type: RecordType)
@@ -223,6 +191,7 @@ class ICloudManager {
     {
         switch type {
         case .pushToIOS:
+            /// Each new push is a new record.
             [.firesOnRecordCreation]
         }
     }
@@ -233,7 +202,7 @@ class ICloudManager {
         guard !self.subscriptions.contains(type) else { return }
         guard checkCommon() else { return }
 
-        print("\(#function)")
+        logger.info(category: category, message: "Subscribe to \(type)")
 
         let notificationInfo = Self.buildNotificationInfo(for: type)
 
@@ -306,6 +275,19 @@ class ICloudManager {
         ]
         notificationInfo.alertLocalizationKey = "%@"
 
+    }
+
+    func deleteRecord(_ recordId: CKRecord.ID) {
+        guard checkCommon() else { return }
+
+        Task {
+            do {
+                try await privateDatabase.deleteRecord(withID: recordId)
+            } catch {
+                logger.error(category: category, error: error)
+                self.failedDeletingRecords.insert(recordId)
+            }
+        }
     }
 }
 
