@@ -15,7 +15,7 @@ nonisolated enum XcodeChatError: LocalizedError {
     case storeNotFound(URL)
     case conversationNotFound(id: String, store: URL)
     /// Running turns is not implemented for this agent (only Claude is).
-    case agentNotImplemented(Agent)
+    case agentNotImplemented(AgentProviderName)
     /// The chat's agent is not one of the agents Xcode can run (`Agent`), or the chat doesn't say.
     case unknownAgent(conversationID: String)
     /// The chat has no agent session id.
@@ -137,8 +137,8 @@ nonisolated enum XcodeChat {
 
         if project == nil {  // a store only: find the project from the session's folder and the snapshots
             let folders = [provider.workingDirectory(sessionID: sessionID)].compactMap { $0 }
-                + XcodeChat.snapshotRoots(store: store)
-            guard let found = XcodeChat.projectFile(store: store, folders: folders) else {
+                + ChatStore.snapshotRoots(store: store)
+            guard let found = ChatStore.projectFile(store: store, folders: folders) else {
                 throw XcodeChatError.projectFileNotFound(store: store)
             }
             project = found
@@ -235,7 +235,7 @@ nonisolated enum XcodeChat {
 
     /// The chat whose session waits for the user on this tool use (its last tool use: `AgentProvider.pendingToolUse`).
     static func unansweredRequest(toolUseID: String) -> UnansweredRequest? {
-        for project in XcodeChat.listProjects() {
+        for project in ChatStore.listProjects() {
             for chat in project.conversations {
                 guard let agent = chat.provider, let provider = AgentProviders.provider(for: agent),
                       let sessionID = chat.providerSessionID,

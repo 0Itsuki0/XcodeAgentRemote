@@ -42,17 +42,17 @@ nonisolated enum WaitingMarks {
         }
     }
 
-    static func contains(_ toolUseID: String, agent: Agent) -> Bool {
+    static func contains(_ toolUseID: String, agent: AgentProviderName) -> Bool {
         marks[agent.rawValue]?.contains(toolUseID) ?? false
     }
 
-    static func add(_ toolUseID: String, agent: Agent) {
+    static func add(_ toolUseID: String, agent: AgentProviderName) {
         var ids = marks[agent.rawValue] ?? []
         if !ids.contains(toolUseID) { ids.append(toolUseID) }
         marks[agent.rawValue] = ids
     }
 
-    static func remove(_ toolUseID: String, agent: Agent) {
+    static func remove(_ toolUseID: String, agent: AgentProviderName) {
         marks[agent.rawValue] = (marks[agent.rawValue] ?? []).filter {
             $0 != toolUseID
         }

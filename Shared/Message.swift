@@ -11,7 +11,7 @@ import Foundation
 
 /// The agents Xcode can run: `xcrun mcpbridge run-agent <agent>`
 /// ("Supported agents: antigravity, claude, claude-ext, codex, copilot, mock-agent").
-nonisolated enum Agent: String, Codable, CaseIterable, Sendable {
+nonisolated enum AgentProviderName: String, Codable, CaseIterable, Sendable {
     case antigravity
     case claude
     case claudeExt = "claude-ext"
@@ -23,7 +23,7 @@ nonisolated enum Agent: String, Codable, CaseIterable, Sendable {
 /// Which chat a message goes to (`sendMessage`).
 nonisolated enum MessageTarget: Codable, Sendable {
     /// Start a new chat in the project (`.xcodeproj` / `.xcworkspace`) with this agent.
-    case newConversation(project: URL, agent: Agent, name: String? = nil)
+    case newConversation(project: URL, agent: AgentProviderName, name: String? = nil)
     /// Continue a chat of the project.
     case conversation(id: String, project: URL)
     /// Continue a chat, given its Xcode chat store folder (`<ProjectName>-<hash>`, name or path).

@@ -136,7 +136,7 @@ actor APIServer {
 
         // For when iCloud syncing fails: the chats and their histories, read directly from this Mac.
         router.get(RouterPath(APIServerConstant.projectsPath)) { _, _ in
-            XcodeChat.listProjects()
+            ChatStore.listProjects()
         }
 
         router.get(
@@ -144,7 +144,7 @@ actor APIServer {
         ) { _, context -> XcodeConversationDetail in
             let conversationID = try context.parameters.require("conversation")
             do {
-                return try XcodeChat.conversation(id: conversationID)
+                return try ChatStore.conversation(id: conversationID)
             } catch let error as ChatHistoryError {
                 switch error {
                 case .notImplemented:

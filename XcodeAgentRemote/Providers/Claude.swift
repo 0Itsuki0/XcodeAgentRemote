@@ -802,7 +802,7 @@ nonisolated extension ClaudeProvider {
 // MARK: - Provider
 
 nonisolated extension ClaudeProvider: AgentProvider {
-    static let agent = Agent.claude
+    static let agent = AgentProviderName.claude
 
     /// Xcode's config folder for its Claude agent (`CLAUDE_CONFIG_DIR`).
     static let configDirectory = FileManager.default.homeDirectoryForCurrentUser

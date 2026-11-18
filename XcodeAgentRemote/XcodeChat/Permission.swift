@@ -37,6 +37,7 @@
 
 import Foundation
 
+// TODO: - move this to be under XcodeAgentConfiguration
 nonisolated enum XcodePermissions {
 
     // MARK: Settings

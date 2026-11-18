@@ -22,15 +22,15 @@ nonisolated struct XcodeProject: Codable, Identifiable, Sendable {
     var id: String { store.lastPathComponent }
 }
 
-/// One Xcode conversation, as a project lists it (no history: `XcodeConversationDetail` has it). It runs in one agent
-/// session (`providerSessionID`).
+/// One Xcode conversation, as a project lists it (no history: `XcodeConversationDetail` has it).
+/// It runs in one agent session (`providerSessionID`).
 nonisolated struct XcodeChatConversation: Codable, Identifiable, Sendable {
     /// Xcode's chat UUID (the chat's folder name in the store).
     var id: String
     var name: String
     /// The agent (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`); nil if it is not one of the agents
     /// Xcode can run (`Agent`).
-    var provider: Agent?
+    var provider: AgentProviderName?
     /// Xcode's model identifier for the agent, e.g. "claude-code" (the chat's metadata).
     var modelIdentifier: String?
     /// The agent's own session id (`conversation.plist` → `assistantConfiguration`).
@@ -52,7 +52,7 @@ nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable {
     var name: String
     /// The agent (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`); nil if it is not one of the agents
     /// Xcode can run (`Agent`).
-    var provider: Agent?
+    var provider: AgentProviderName?
     /// Xcode's model identifier for the agent, e.g. "claude-code" (the chat's metadata).
     var modelIdentifier: String?
     /// The agent's own session id (`conversation.plist` → `assistantConfiguration`).
