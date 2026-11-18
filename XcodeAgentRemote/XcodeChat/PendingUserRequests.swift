@@ -12,9 +12,15 @@ nonisolated enum RunningSessions {
     private static let ids = Mutex<Set<String>>([])
 
     // Kept lowercased, and looked up lowercased (`ChatStore.sameID`): the id may be cased differently.
-    static func insert(_ sessionID: String) { ids.withLock { _ = $0.insert(sessionID.lowercased()) } }
-    static func remove(_ sessionID: String) { ids.withLock { _ = $0.remove(sessionID.lowercased()) } }
-    static func contains(_ sessionID: String) -> Bool { ids.withLock { $0.contains(sessionID.lowercased()) } }
+    static func insert(_ sessionID: String) {
+        ids.withLock { _ = $0.insert(sessionID.lowercased()) }
+    }
+    static func remove(_ sessionID: String) {
+        ids.withLock { _ = $0.remove(sessionID.lowercased()) }
+    }
+    static func contains(_ sessionID: String) -> Bool {
+        ids.withLock { $0.contains(sessionID.lowercased()) }
+    }
 }
 
 /// The tool uses the agent waits on the user for, by id, kept across launches (`UserDefaults`).
@@ -25,12 +31,15 @@ nonisolated enum RunningSessions {
 /// agent was killed before it settled the request, the request can still be answered (`answerUserRequest`); if the app quit
 /// instead, the agent settles it itself (as failed) and goes on, and the mark left behind is stale.
 nonisolated enum WaitingMarks {
-    /// `[agent: [tool use id]]`: tool use ids are an agent's own, and only that agent's provider reads them.
-    private static let key = "WaitingForUserToolUseIDsByAgent"
 
     private static var marks: [String: [String]] {
-        get { UserDefaults.standard.dictionary(forKey: key) as? [String: [String]] ?? [:] }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+        get {
+            UserDefaultsKey.pendingToolUseIdMap.getValue()
+                as? [String: [String]] ?? [:]
+        }
+        set {
+            UserDefaultsKey.pendingToolUseIdMap.setValue(value: newValue)
+        }
     }
 
     static func contains(_ toolUseID: String, agent: Agent) -> Bool {
@@ -44,7 +53,9 @@ nonisolated enum WaitingMarks {
     }
 
     static func remove(_ toolUseID: String, agent: Agent) {
-        marks[agent.rawValue] = (marks[agent.rawValue] ?? []).filter { $0 != toolUseID }
+        marks[agent.rawValue] = (marks[agent.rawValue] ?? []).filter {
+            $0 != toolUseID
+        }
     }
 }
 
@@ -74,7 +85,9 @@ actor PendingUserRequests {
     /// No longer answerable; a provider waiting for it gets no answer.
     func unregister(_ toolUseID: String) {
         waitingHandlers[toolUseID] = nil
-        if case .waiting(let continuation)? = requests.removeValue(forKey: toolUseID) {
+        if case .waiting(let continuation)? = requests.removeValue(
+            forKey: toolUseID
+        ) {
             continuation.resume(returning: nil)
         }
     }
@@ -101,7 +114,10 @@ actor PendingUserRequests {
 
     /// Runs `handler` once the agent waits for the answer to this tool use (right away if it already waits);
     /// never if the agent doesn't ask for it.
-    func whenWaiting(for toolUseID: String, _ handler: @escaping @Sendable () async -> Void) {
+    func whenWaiting(
+        for toolUseID: String,
+        _ handler: @escaping @Sendable () async -> Void
+    ) {
         if case .waiting? = requests[toolUseID] {
             Task { await handler() }
         } else {
@@ -111,7 +127,9 @@ actor PendingUserRequests {
 
     /// For providers: the user's answer to the tool use the agent waits for; nil if none arrives within
     /// `timeout` seconds, the tool use is closed, or the task is cancelled.
-    func waitForAnswer(toolUseID: String, timeout: TimeInterval) async -> UserAnswer? {
+    func waitForAnswer(toolUseID: String, timeout: TimeInterval) async
+        -> UserAnswer?
+    {
         if case .answered(let answer)? = requests[toolUseID] {
             requests[toolUseID] = nil
             return answer
@@ -119,7 +137,8 @@ actor PendingUserRequests {
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 requests[toolUseID] = .waiting(continuation)
-                if let handler = waitingHandlers.removeValue(forKey: toolUseID) {
+                if let handler = waitingHandlers.removeValue(forKey: toolUseID)
+                {
                     Task { await handler() }
                 }
                 Task {

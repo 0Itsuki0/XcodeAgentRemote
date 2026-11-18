@@ -1,13 +1,9 @@
 //
-//  Server.swift
+//  APIServer.swift
 //  XcodeAgentRemote
 //
 //  Created by Itsuki on 2026/11/15.
 //
-
-/// A Server
-/// - `POST /message`: send a single message. same parameters as `sendMessage`. SSE event for Async stream.
-/// - `GET /health`
 
 import Foundation
 import HTTPTypes
@@ -41,10 +37,9 @@ import ServiceLifecycle
 ///     ```
 ///   The turn does not depend on the client: if the connection closes, the turn still runs to completion and is saved.
 ///
-/// If `AgentServerAPI.authHeader` is set, every request must carry that header with that exact value, or it is
+/// If `APIServerConstant.authHeader` is set, every request must carry that header with that exact value, or it is
 /// rejected with 401.
-actor AgentServer {
-//    static let shared = AgentServer()
+actor APIServer {
 
     private var group: ServiceGroup?
     private var task: Task<Void, Error>?
@@ -60,7 +55,7 @@ actor AgentServer {
     /// (port 0 picks a free one). If the server is already running (or starting), returns its port.
     /// Throws only if the server cannot run, e.g. the port is in use.
     @discardableResult
-    func start(port: Int = AgentServerAPI.defaultPort) async throws -> Int {
+    func start(port: Int = APIServerConstant.defaultPort) async throws -> Int {
         if let runningPort {
             return try await runningPort.value
         }
@@ -131,34 +126,45 @@ actor AgentServer {
     private static func router() -> Router<BasicRequestContext> {
         let router = Router()
 
-        if let authHeader = AgentServerAPI.authHeader {
+        if let authHeader = APIServerConstant.authHeader {
             router.add(middleware: AuthHeaderMiddleware(authHeader))
         }
 
-        router.get(RouterPath(AgentServerAPI.healthPath)) { _, _ in
+        router.get(RouterPath(APIServerConstant.healthPath)) { _, _ in
             SuccessResponse()
         }
 
         // For when iCloud syncing fails: the chats and their histories, read directly from this Mac.
-        router.get(RouterPath(AgentServerAPI.projectsPath)) { _, _ in
+        router.get(RouterPath(APIServerConstant.projectsPath)) { _, _ in
             XcodeChats.listProjects()
         }
 
-        router.get(RouterPath("\(AgentServerAPI.conversationPath)/:conversation")) { _, context -> XcodeConversationDetail in
+        router.get(
+            RouterPath("\(APIServerConstant.conversationPath)/:conversation")
+        ) { _, context -> XcodeConversationDetail in
             let conversationID = try context.parameters.require("conversation")
             do {
                 return try XcodeChats.conversation(id: conversationID)
             } catch let error as ChatHistoryError {
                 switch error {
                 case .notImplemented:
-                    throw HTTPError(.notImplemented, message: error.localizedDescription)
-                case .chatNotFound, .unknownProvider, .sessionMissing, .transcriptMissing:
-                    throw HTTPError(.notFound, message: error.localizedDescription)
+                    throw HTTPError(
+                        .notImplemented,
+                        message: error.localizedDescription
+                    )
+                case .chatNotFound, .unknownProvider, .sessionMissing,
+                    .transcriptMissing:
+                    throw HTTPError(
+                        .notFound,
+                        message: error.localizedDescription
+                    )
                 }
             }
         }
 
-        router.post(RouterPath(AgentServerAPI.messagePath)) { request, context -> Response in
+        router.post(RouterPath(APIServerConstant.messagePath)) {
+            request,
+            context -> Response in
             let body = try await request.decode(
                 as: MessageRequest.self,
                 context: context
@@ -167,16 +173,27 @@ actor AgentServer {
             case .answer(let answer):
                 guard await isWaitingForUser(toolUseID: answer.toolUseID) else {
                     throw HTTPError(
-                        .notFound, message: SendMessageError.noWaitingRequest(toolUseID: answer.toolUseID).localizedDescription)
+                        .notFound,
+                        message: SendMessageError.noWaitingRequest(
+                            toolUseID: answer.toolUseID
+                        ).localizedDescription
+                    )
                 }
                 return streamResponse(answerUserRequest(answer))
-            case .prompt(let prompt, let target, let permissionModeOverride, let permissionTimeout):
-                return streamResponse(sendMessage(
-                    prompt,
-                    to: target,
-                    permissionModeOverride: permissionModeOverride,
-                    permissionTimeout: permissionTimeout
-                ))
+            case .prompt(
+                let prompt,
+                let target,
+                let permissionModeOverride,
+                let permissionTimeout
+            ):
+                return streamResponse(
+                    sendMessage(
+                        prompt,
+                        to: target,
+                        permissionModeOverride: permissionModeOverride,
+                        permissionTimeout: permissionTimeout
+                    )
+                )
             }
         }
 
@@ -186,22 +203,35 @@ actor AgentServer {
     /// An SSE response streaming a turn's events (`sendMessage` / `answerUserRequest`): each `ChatEvent` as
     /// `event: <type>` + `data: <json>`, and an `event: error` if the turn fails. The turn doesn't depend on it: if the
     /// client disconnects, only this response ends.
-    private static func streamResponse(_ events: AsyncThrowingStream<ChatEvent, Error>) -> Response {
+    private static func streamResponse(
+        _ events: AsyncThrowingStream<ChatEvent, Error>
+    ) -> Response {
         let body = ResponseBody { writer in
             do {
                 for try await event in events {
-                    try await writer.write(serverSentEvent(event.type, try JSONEncoder().encode(event)))
+                    try await writer.write(
+                        serverSentEvent(
+                            event.type,
+                            try JSONEncoder().encode(event)
+                        )
+                    )
                 }
             } catch {
                 let message =
-                    (try? JSONEncoder().encode(ErrorResponse.Body(message: error.localizedDescription))) ?? Data("{}".utf8)
-                try await writer.write(serverSentEvent(AgentServerAPI.errorEvent, message))
+                    (try? JSONEncoder().encode(
+                        ErrorResponse.Body(message: error.localizedDescription)
+                    )) ?? Data("{}".utf8)
+                try await writer.write(
+                    serverSentEvent(APIServerConstant.errorEvent, message)
+                )
             }
             try await writer.finish(nil)
         }
         return Response(
             status: .ok,
-            headers: [.contentType: "text/event-stream", .cacheControl: "no-cache"],
+            headers: [
+                .contentType: "text/event-stream", .cacheControl: "no-cache",
+            ],
             body: body
         )
     }
@@ -223,10 +253,11 @@ extension XcodeProject: ResponseEncodable {}
 extension XcodeConversationDetail: ResponseEncodable {}
 extension ChatEvent: ResponseEncodable {}
 
-
-/// Rejects (401) every request that does not carry `AgentServerAPI.authHeader` with its exact value.
+/// Rejects (401) every request that does not carry `APIServerConstant.authHeader` with its exact value.
 /// An invalid header name rejects every request.
-nonisolated struct AuthHeaderMiddleware<Context: RequestContext>: RouterMiddleware {
+nonisolated struct AuthHeaderMiddleware<Context: RequestContext>:
+    RouterMiddleware
+{
     let name: HTTPField.Name?
     let value: String
 
@@ -240,19 +271,24 @@ nonisolated struct AuthHeaderMiddleware<Context: RequestContext>: RouterMiddlewa
         context: Context,
         next: @concurrent (Request, Context) async throws -> Response
     ) async throws -> Response {
-        guard let name, let received = request.headers[name], Self.constantTimeEqual(received, value) else {
+        guard let name, let received = request.headers[name],
+            Self.constantTimeEqual(received, value)
+        else {
             throw HTTPError(.unauthorized)
         }
         return try await next(request, context)
     }
 
     /// Compares without stopping at the first difference, so response timing doesn't reveal how much of a guess matched.
-    private static func constantTimeEqual(_ lhs: String, _ rhs: String) -> Bool {
+    private static func constantTimeEqual(_ lhs: String, _ rhs: String) -> Bool
+    {
         let a = Array(lhs.utf8)
         let b = Array(rhs.utf8)
         var difference = UInt8(a.count == b.count ? 0 : 1)
         for index in 0..<max(a.count, b.count) {
-            difference |= (index < a.count ? a[index] : 0) ^ (index < b.count ? b[index] : 0)
+            difference |=
+                (index < a.count ? a[index] : 0)
+                ^ (index < b.count ? b[index] : 0)
         }
         return difference == 0
     }

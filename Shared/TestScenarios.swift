@@ -402,10 +402,10 @@ extension TestScenarios {
 #if os(iOS)
 extension TestScenarios {
 
-    /// Runs the scenarios from iOS through the Mac's server (`AgentServerClient`), against the chats of `project`
+    /// Runs the scenarios from iOS through the Mac's server (`APIServerClient`), against the chats of `project`
     /// (the `.xcodeproj` / `.xcworkspace` on the Mac). The tools create their files in `macFolder`, on the Mac.
     static func runThroughServer(
-        client: AgentServerClient, project: URL, macFolder: String = "/tmp"
+        client: APIServerClient, project: URL, macFolder: String = "/tmp"
     ) async -> [ScenarioResult] {
         let run = UUID().uuidString.prefix(8)
         let name = chatName("iOS")
@@ -501,7 +501,7 @@ extension TestScenarios {
     /// user, which is answered with `answering`, and the answer's response continues the turn.
     /// Returns the turn's events and how many responses it took.
     private static func sendThroughServer(
-        _ client: AgentServerClient, _ prompt: String, to target: MessageTarget, mode: PermissionMode = .manual,
+        _ client: APIServerClient, _ prompt: String, to target: MessageTarget, mode: PermissionMode = .manual,
         answering: Answering
     ) async throws -> (events: [ChatEvent], responses: Int) {
         var events: [ChatEvent] = []

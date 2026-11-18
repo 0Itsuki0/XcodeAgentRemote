@@ -10,30 +10,9 @@ import SwiftUI
 
 @main
 struct XcodeAgentRemoteApp: App {
-    #if os(iOS)
-        @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    #else
-        @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    #endif
-
-//    var sharedModelContainer: ModelContainer = {
-//        let schema = Schema([
-//            ItemModel.self
-//        ])
-//        let modelConfiguration = ModelConfiguration(
-//            schema: schema,
-//            cloudKitDatabase: .private(ICloudManager.containerIdentifier)
-//        )
-//
-//        do {
-//            return try ModelContainer(
-//                for: schema,
-//                configurations: [modelConfiguration]
-//            )
-//        } catch {
-//            fatalError("Could not create ModelContainer: \(error)")
-//        }
-//    }()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
+    private let apiServer = APIServer()
 
     var body: some Scene {
         WindowGroup {

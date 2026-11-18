@@ -461,7 +461,7 @@ Real calls to the server (`POST /message`, JSON body, SSE response), from one ch
 - every response is `HTTP 200 text/event-stream`: `event: <type>` + `data: <ChatEvent JSON>` per event
 - a response ends where the turn waits for the user (its last `tool_use` has no `tool_result`), or where the turn ends
 - the answer to that tool use is another `POST /message`, and its response continues the same turn
-- `project` is a file URL. in Swift: `sendMessage(_:to:…)` / `answerUserRequest(_:)` on the Mac, `AgentServerClient.sendMessage` / `.answer` on iOS
+- `project` is a file URL. in Swift: `sendMessage(_:to:…)` / `answerUserRequest(_:)` on the Mac, `APIServerClient.sendMessage` / `.answer` on iOS
 
 #### Regular message (new chat)
 

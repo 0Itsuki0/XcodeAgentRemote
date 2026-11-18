@@ -1,5 +1,5 @@
 //
-//  AgentServerAPI.swift
+//  APIServerConstant.swift
 //  XcodeAgentRemote
 //
 //  The macOS app's HTTP server API, shared by the server (macOS) and its client (iOS).
@@ -7,7 +7,7 @@
 
 import Foundation
 
-nonisolated enum AgentServerAPI {
+nonisolated enum APIServerConstant {
     static let defaultPort = 8765
 
     /// `GET /health` → `SuccessResponse`
@@ -31,7 +31,7 @@ nonisolated enum AgentServerAPI {
     static let authHeader: AuthHeader? = nil
 }
 
-/// A header name and the exact value required (`AgentServerAPI.authHeader`).
+/// A header name and the exact value required (`APIServerConstant.authHeader`).
 nonisolated struct AuthHeader: Codable, Hashable, Sendable {
     /// Header name, e.g. "Authorization" or "X-Api-Key".
     var name: String

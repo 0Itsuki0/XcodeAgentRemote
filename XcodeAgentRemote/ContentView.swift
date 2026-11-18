@@ -13,7 +13,7 @@ struct ContentView: View {
 //    @Environment(\.modelContext) private var modelContext
 //    @Query private var items: [ItemModel]
     @State private var sendMessageOutput: [String] = []
-    private let server = AgentServer()
+    private let server = APIServer()
     private let iCloudManager = ICloudManager()
 
     var body: some View {

@@ -13,12 +13,10 @@ private let logger = Logger.shared
 private let category = Logger.category(#fileID)
 
 class AppDelegate: NSObject {
-    // to initialize the records on launch
-    //    let manager = CloudManager()
-    let manager = ICloudManager()
+    let iCloudManager = ICloudManager()
 
     /// perform set ups
-    func setupAppOnLaunch() {
+    private func setupAppOnLaunch() {
 
         #if os(iOS)
             UIApplication.shared.registerForRemoteNotifications()
@@ -31,7 +29,7 @@ class AppDelegate: NSObject {
         requestNotificationPermission()
     }
 
-    func didRegisterForRemoteNotificationsWithDeviceToken(
+    private func didRegisterForRemoteNotificationsWithDeviceToken(
         deviceToken: Data
     ) {
         logger.info(
@@ -40,13 +38,13 @@ class AppDelegate: NSObject {
         )
     }
 
-    func didFailToRegisterForRemoteNotifications(
+    private func didFailToRegisterForRemoteNotifications(
         _ error: Error
     ) {
         logger.error(category: category, error: error)
     }
 
-    func didReceiveRemoteNotification(
+    private func didReceiveRemoteNotification(
         userInfo: [AnyHashable: Any]
     ) {
         logger.info(
@@ -92,7 +90,7 @@ class AppDelegate: NSObject {
             logger.info(category: category, message: "Unknown record type.")
             return
         }
-        
+
         switch type {
         case .pushToIOS:
             /// delete the record here instead of `userNotificationCenter.didReceive`
@@ -100,7 +98,7 @@ class AppDelegate: NSObject {
             ///
             /// we can still retrieve the `CKQueryNotification` with necessary information (such as ConversationID) within `userNotificationCenter.didReceive` even if the record itself is deleted.
             if let recordID = queryNotification.recordID {
-                self.manager.deleteRecord(recordID)
+                self.iCloudManager.deleteRecord(recordID)
             }
         }
 

@@ -18,8 +18,8 @@ nonisolated enum ServerRequestError: Error, LocalizedError {
     }
 }
 
-/// Requests to the macOS app's server (`AgentServer`, see `AgentServerAPI`).
-nonisolated struct AgentServerClient: Sendable {
+/// Requests to the macOS app's server (`APIServer`, see `APIServerConstant`).
+nonisolated struct APIServerClient: Sendable {
     /// The server, e.g. `http://192.168.0.4:8765`.
     var baseURL: URL
 
@@ -28,7 +28,7 @@ nonisolated struct AgentServerClient: Sendable {
     }
 
     /// The server at `http://<host>:<port>`.
-    init(host: String, port: Int = AgentServerAPI.defaultPort) throws {
+    init(host: String, port: Int = APIServerConstant.defaultPort) throws {
         guard let url = URL(string: "http://\(host):\(port)") else { throw NetworkError.failToCreateURL }
         self.baseURL = url
     }
@@ -36,7 +36,7 @@ nonisolated struct AgentServerClient: Sendable {
     /// `GET /health`
     func health() async throws -> SuccessResponse {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: AgentServerAPI.healthPath),
+            url: baseURL.appending(path: APIServerConstant.healthPath),
             method: "GET",
             headers: Self.headers(["Accept": "application/json"]),
             body: nil
@@ -47,7 +47,7 @@ nonisolated struct AgentServerClient: Sendable {
     /// `GET /projects`: every project with Xcode chats on the Mac, with its chats (for when iCloud syncing fails).
     func projects() async throws -> [XcodeProject] {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: AgentServerAPI.projectsPath),
+            url: baseURL.appending(path: APIServerConstant.projectsPath),
             method: "GET",
             headers: Self.headers(["Accept": "application/json"]),
             body: nil
@@ -60,7 +60,7 @@ nonisolated struct AgentServerClient: Sendable {
     /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
     func conversation(id: String) async throws -> XcodeConversationDetail {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: AgentServerAPI.conversationPath).appending(path: id),
+            url: baseURL.appending(path: APIServerConstant.conversationPath).appending(path: id),
             method: "GET",
             headers: Self.headers(["Accept": "application/json"]),
             body: nil
@@ -100,7 +100,7 @@ nonisolated struct AgentServerClient: Sendable {
 
     /// Sends a `POST /message` and streams the turn's events from its SSE response.
     private func events(for request: MessageRequest) -> AsyncThrowingStream<ChatEvent, Error> {
-        let url = baseURL.appending(path: AgentServerAPI.messagePath)
+        let url = baseURL.appending(path: APIServerConstant.messagePath)
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -117,7 +117,7 @@ nonisolated struct AgentServerClient: Sendable {
                         if let name = Self.field("event", in: line) {
                             eventName = name
                         } else if let data = Self.field("data", in: line) {
-                            if eventName == AgentServerAPI.errorEvent {
+                            if eventName == APIServerConstant.errorEvent {
                                 let error = try NetworkService.decode(ErrorResponse.Body.self, from: data)
                                 throw ServerRequestError.turnFailed(message: error.message)
                             }
@@ -134,9 +134,9 @@ nonisolated struct AgentServerClient: Sendable {
         }
     }
 
-    /// The request's headers, plus `AgentServerAPI.authHeader` if it is set.
+    /// The request's headers, plus `APIServerConstant.authHeader` if it is set.
     private static func headers(_ headers: [String: String]) -> [String: String] {
-        guard let authHeader = AgentServerAPI.authHeader else { return headers }
+        guard let authHeader = APIServerConstant.authHeader else { return headers }
         return headers.merging([authHeader.name: authHeader.value]) { _, auth in auth }
     }
 
