@@ -1,5 +1,5 @@
 //
-//  DashboardView.swift
+//  DashboardWindow.swift
 //  XcodeAgentRemote
 //
 //  Created by Itsuki on 2026/11/18.
@@ -9,11 +9,14 @@ import SwiftUI
 
 enum DashboardOption: String, Hashable, CaseIterable {
     case server
+    case watcher
 
     var label: String {
         switch self {
         case .server:
             "API Server"
+        case .watcher:
+            "Chat Watcher"
         }
     }
 }
@@ -21,7 +24,7 @@ enum DashboardOption: String, Hashable, CaseIterable {
 struct DashboardWindow: View {
     static let identifier = "DashboardWindow"
 
-    @State private var selection: DashboardOption = .server
+    @State private var selection: DashboardOption = .watcher
 
     var body: some View {
         NavigationSplitView {
@@ -36,8 +39,30 @@ struct DashboardWindow: View {
             switch selection {
             case .server:
                 APIServerView()
+            case .watcher:
+                ChatWatcherConfigurationView()
             }
 
+        }
+        .onWindow { window in
+            window.collectionBehavior.insert(.moveToActiveSpace)
+        }
+    }
+}
+
+struct ChatWatcherConfigurationView: View {
+    @Environment(ChatWatcher.self) private var chatWatcher
+
+    var body: some View {
+        Button("watch") {
+            let url = URL.desktopDirectory.appending(path: "test.txt")
+            Task {
+                do {
+                    try await chatWatcher.watchFile(at: url)
+                } catch {
+                    print(error)
+                }
+            }
         }
     }
 }

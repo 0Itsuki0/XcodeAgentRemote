@@ -19,24 +19,20 @@ nonisolated enum FileWatcherError: Error {
     case cannotOpen(path: String, errno: Int32)
 }
 
-/// Watches one file for changes (DispatchSource on the file's descriptor; no folder watching).
-/// Ends with `FileWatcherError.cannotOpen` if the file doesn't exist, or is deleted and doesn't come back.
-/// Stops when the caller stops iterating.
-nonisolated func watchFile(at url: URL) -> AsyncThrowingStream<FileChange, Error> {
-    AsyncThrowingStream { continuation in
-        let watcher = FileWatcher(path: url.path, continuation: continuation)
-        continuation.onTermination = { _ in Task { await watcher.stop() } }
-        Task { await watcher.start() }
-    }
-}
-
+/// `FileWatcher`for watching for file changes
+///
 /// Runs on its own serial queue, the same queue the DispatchSource calls its handler on,
 /// so the handler enters the actor directly (`assumeIsolated`), in event order.
-private actor FileWatcher {
+///
+/// Usage: Refer to `ChatWatcher.watchFile`
+actor FileWatcher {
     private let path: String
-    private let continuation: AsyncThrowingStream<FileChange, Error>.Continuation
+    private let continuation:
+        AsyncThrowingStream<FileChange, Error>.Continuation
     private let queue = DispatchSerialQueue(label: "FileWatcher")
-    nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        queue.asUnownedSerialExecutor()
+    }
 
     private var source: DispatchSourceFileSystemObject?
     private var reopenTask: Task<Void, Never>?
@@ -46,18 +42,25 @@ private actor FileWatcher {
     private static let reopenInterval: Duration = .milliseconds(50)
     private static let reopenAttempts = 20
 
-    init(path: String, continuation: AsyncThrowingStream<FileChange, Error>.Continuation) {
+    init(
+        path: String,
+        continuation: AsyncThrowingStream<FileChange, Error>.Continuation
+    ) {
         self.path = path
         self.continuation = continuation
     }
 
-    func start() {
+    //    func start() {
+    //        guard !stopped else { return }
+    //        do {
+    //            try open()
+    //        } catch {
+    //            continuation.finish(throwing: error)
+    //        }
+    //    }
+    func start() throws(FileWatcherError) {
         guard !stopped else { return }
-        do {
-            try open()
-        } catch {
-            continuation.finish(throwing: error)
-        }
+        try open()
     }
 
     func stop() {
@@ -70,9 +73,14 @@ private actor FileWatcher {
     /// Opens the file and starts watching it.
     private func open() throws(FileWatcherError) {
         let descriptor = Darwin.open(path, O_EVTONLY)
-        guard descriptor >= 0 else { throw .cannotOpen(path: path, errno: errno) }
+        guard descriptor >= 0 else {
+            throw .cannotOpen(path: path, errno: errno)
+        }
         let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: descriptor, eventMask: [.write, .extend, .delete, .rename, .revoke], queue: queue)
+            fileDescriptor: descriptor,
+            eventMask: [.write, .extend, .delete, .rename, .revoke],
+            queue: queue
+        )
         source.setEventHandler { [self] in
             assumeIsolated { $0.handleEvent() }
         }
