@@ -143,15 +143,15 @@ nonisolated enum XcodeChats {
             from: store.appending(path: "CodingAssistantNavigator.plist")
         )
 
-        let sessions = manifest.map { entry -> XcodeChatSession in
+        let conversations = manifest.map { entry -> XcodeChatConversation in
             let provider = entry.chatModelDefinitionIdentifier?
                 .providerIdentifier?.builtIn?._0.keys.first.flatMap(Agent.init(rawValue:))
             let sessionID = providerSessionID(
                 store: store,
                 conversationID: entry.id
             )
-            let state = navigator?.conversations[entry.id]
-            return XcodeChatSession(
+            let state = navigator?.state(of: entry.id)
+            return XcodeChatConversation(
                 id: entry.id,
                 name: entry.name ?? "",
                 provider: provider,
@@ -178,9 +178,9 @@ nonisolated enum XcodeChats {
             ).dropLast().joined(separator: "-")
         )
         let folders =
-            sessions.compactMap { session -> URL? in
-                guard let provider = session.provider.flatMap(AgentProviders.provider(for:)),
-                    let sessionID = session.providerSessionID
+            conversations.compactMap { conversation -> URL? in
+                guard let provider = conversation.provider.flatMap(AgentProviders.provider(for:)),
+                    let sessionID = conversation.providerSessionID
                 else { return nil }
                 return provider.workingDirectory(sessionID: sessionID)
             } + snapshotRoots(store: store)
@@ -188,8 +188,41 @@ nonisolated enum XcodeChats {
             name: name,
             projectFile: projectFile(store: store, folders: folders),
             store: store,
-            sessions: sessions
+            conversations: conversations
         )
+    }
+
+    // MARK: A conversation
+
+    /// One conversation in full, given Xcode's chat UUID: its fields, its history (`history(conversationID:)`) and its
+    /// project. Throws `ChatHistoryError` like `history(conversationID:)`.
+    static func conversation(id: String) throws -> XcodeConversationDetail {
+        let history = try history(conversationID: id)
+        guard let folder = chatFolder(conversationID: id) else { throw ChatHistoryError.chatNotFound(conversationID: id) }
+        let project = project(store: folder.deletingLastPathComponent())
+        guard let conversation = project.conversations.first(where: { ChatStore.sameID($0.id, id) })
+        else { throw ChatHistoryError.chatNotFound(conversationID: id) }
+        return XcodeConversationDetail(
+            id: conversation.id,
+            name: conversation.name,
+            provider: conversation.provider,
+            modelIdentifier: conversation.modelIdentifier,
+            providerSessionID: conversation.providerSessionID,
+            group: conversation.group,
+            isArchived: conversation.isArchived,
+            isUnread: conversation.isUnread,
+            subtitle: conversation.subtitle,
+            startDate: conversation.startDate,
+            lastActivityDate: conversation.lastActivityDate,
+            history: history,
+            project: ProjectReference(name: project.name, projectFile: project.projectFile, store: project.store))
+    }
+
+    /// The chat's folder (`<store>/<chat UUID>`), in whichever store has it.
+    private static func chatFolder(conversationID: String) -> URL? {
+        let stores = (try? FileManager.default.contentsOfDirectory(at: storeRoot, includingPropertiesForKeys: nil)) ?? []
+        return stores.lazy.compactMap { ChatStore.item(named: conversationID, in: $0) }
+            .first { FileManager.default.fileExists(atPath: $0.appending(path: "conversation.plist").path) }
     }
 
     // MARK: History
@@ -197,23 +230,12 @@ nonisolated enum XcodeChats {
     /// The history of an Xcode chat, given Xcode's chat UUID (the chat's folder name in its store),
     /// loaded from the agent's own session: the same events a live turn streams (`sendMessage`).
     static func history(conversationID: String) throws -> [ChatEvent] {
-        let id = conversationID.uppercased()
-        let stores =
-            (try? FileManager.default.contentsOfDirectory(
-                at: storeRoot,
-                includingPropertiesForKeys: nil
-            )) ?? []
-        guard
-            let store = stores.first(where: {
-                FileManager.default.fileExists(
-                    atPath: $0.appending(path: "\(id)/conversation.plist").path
-                )
-            })
-        else { throw ChatHistoryError.chatNotFound(conversationID: id) }
+        let id = conversationID
+        guard let folder = chatFolder(conversationID: id) else { throw ChatHistoryError.chatNotFound(conversationID: id) }
 
         let metadata = decode(
             ManifestEntry.self,
-            from: store.appending(path: "\(id)/metadata.plist")
+            from: folder.appending(path: "metadata.plist")
         )
         guard
             let agent = metadata?.chatModelDefinitionIdentifier?
@@ -222,7 +244,7 @@ nonisolated enum XcodeChats {
         guard let provider = AgentProviders.provider(for: agent) else {
             throw ChatHistoryError.notImplemented(agent: agent)
         }
-        guard let sessionID = providerSessionID(store: store, conversationID: id) else {
+        guard let sessionID = providerSessionID(store: folder.deletingLastPathComponent(), conversationID: id) else {
             throw ChatHistoryError.sessionMissing(conversationID: id)
         }
         return try provider.history(sessionID: sessionID)
@@ -231,9 +253,10 @@ nonisolated enum XcodeChats {
     /// The agent's session id of a chat: `conversation.plist` → `assistantConfiguration`.
     static func providerSessionID(store: URL, conversationID: String) -> String?
     {
+        guard let folder = ChatStore.item(named: conversationID, in: store) else { return nil }
         let conversation = decode(
             ConversationFile.self,
-            from: store.appending(path: "\(conversationID)/conversation.plist")
+            from: folder.appending(path: "conversation.plist")
         )
         return conversation?.assistantConfiguration
             .flatMap {
@@ -380,8 +403,8 @@ nonisolated enum XcodeChats {
         }
 
         var groups: [Group]
-        /// Chat UUID → its state.
-        var conversations: [String: ConversationState]
+        /// Chat UUID (lowercased: `state(of:)`) → its state.
+        private var conversations: [String: ConversationState]
         /// Top-level order: group ids and ids of chats not in a group.
         var rootNodeOrder: [String]
 
@@ -399,14 +422,19 @@ nonisolated enum XcodeChats {
                 var flat = try container.nestedUnkeyedContainer(forKey: .navigatorConversations)
                 while !flat.isAtEnd {
                     let id = try flat.decode(String.self)
-                    conversations[id] = try flat.decode(ConversationState.self)
+                    conversations[id.lowercased()] = try flat.decode(ConversationState.self)
                 }
             }
         }
 
+        /// A chat's state, if the navigator has one.
+        func state(of conversationID: String) -> ConversationState? {
+            conversations[conversationID.lowercased()]
+        }
+
         /// The group a chat is in, if any.
         func group(of conversationID: String) -> Group? {
-            groups.first { $0.memberConversationIDs.contains(conversationID) }
+            groups.first { $0.memberConversationIDs.contains { ChatStore.sameID($0, conversationID) } }
         }
     }
 }

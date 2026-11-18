@@ -15,11 +15,13 @@ nonisolated enum AgentServerAPI {
     /// `POST /message` with a `MessageRequest` body: `.prompt` → SSE stream of `ChatEvent`s (event name =
     /// `ChatEvent.type`), or an `errorEvent` if the turn fails; `.answer` → the same turn's events, continued, or 404.
     static let messagePath = "message"
-    /// `GET /projects` → `[XcodeProject]`: every project with Xcode chats, with its chats (`XcodeChats.listProjects`).
+    /// `GET /projects` → `[XcodeProject]`: every project with Xcode chats, with its conversations, no histories
+    /// (`XcodeChats.listProjects`).
     static let projectsPath = "projects"
-    /// `GET /history/<Xcode chat UUID>` → `[ChatEvent]`: a chat's history (`XcodeChats.history(conversationID:)`).
-    /// 404 if there is no such chat (or its session is missing), 501 if history is not implemented for its agent.
-    static let historyPath = "history"
+    /// `GET /conversation/<Xcode chat UUID>` → `XcodeConversationDetail`: one conversation in full, with its history
+    /// and its project (`XcodeChats.conversation(id:)`). 404 if there is no such chat (or its session is missing), 501
+    /// if history is not implemented for its agent.
+    static let conversationPath = "conversation"
     /// SSE event name sent instead of the remaining events when a turn fails; data is `ErrorResponse.Body`.
     static let errorEvent = "error"
 

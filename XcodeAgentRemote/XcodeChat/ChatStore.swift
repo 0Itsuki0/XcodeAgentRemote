@@ -23,6 +23,18 @@ nonisolated enum ChatStore {
     /// A new id, uppercased like the UUIDs Xcode writes.
     static func newUUID() -> String { UUID().uuidString }
 
+    // MARK: Ids
+
+    /// Whether two ids are the same Xcode chat id or agent session id. Xcode writes its chat UUIDs uppercase, Claude
+    /// its session ids lowercase, and an id given to the app may be cased either way: both sides are lowercased.
+    static func sameID(_ id: String, _ other: String) -> Bool { id.lowercased() == other.lowercased() }
+
+    /// The item in `folder` named after an id (plus `suffix`, e.g. ".jsonl"), however its name is cased on disk.
+    static func item(named id: String, suffix: String = "", in folder: URL) -> URL? {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return names.first { $0.lowercased() == (id + suffix).lowercased() }.map { folder.appending(path: $0) }
+    }
+
     // MARK: Locating the store
 
     /// The store of a `.xcodeproj` / `.xcworkspace`: `<ProjectName>-<hash of the project file path>`.
@@ -193,15 +205,12 @@ nonisolated enum ChatStore {
 
         private var directory: URL { store.appending(path: id, directoryHint: .isDirectory) }
 
-        /// A chat's `conversation.plist`.
-        static func plistFile(store: URL, id: String) -> URL {
-            store.appending(path: "\(id.uppercased())/conversation.plist")
-        }
-
-        /// An existing chat; nil if the store has no chat with this id.
+        /// An existing chat (its id as its folder is named); nil if the store has no chat with this id.
         static func load(store: URL, id: String) -> Chat? {
-            guard let plist = readPlist(at: plistFile(store: store, id: id)) as? [String: Any] else { return nil }
-            return Chat(store: store, id: id.uppercased(), plist: plist)
+            guard let folder = item(named: id, in: store),
+                  let plist = readPlist(at: folder.appending(path: "conversation.plist")) as? [String: Any]
+            else { return nil }
+            return Chat(store: store, id: folder.lastPathComponent, plist: plist)
         }
 
         /// A new chat (not written until `save`), for an agent session.
@@ -284,7 +293,9 @@ nonisolated enum ChatStore {
 
             let manifestFile = store.appending(path: "CodingAssistantManifest.plist")
             let existing = readPlist(at: manifestFile) as? [Any] ?? []
-            let manifest = existing.filter { ($0 as? [String: Any])?["id"] as? String != id } + [metadata]
+            let manifest = existing.filter { entry in
+                ((entry as? [String: Any])?["id"] as? String).map { !sameID($0, id) } ?? true
+            } + [metadata]
             try writePlist(manifest, to: manifestFile)
         }
     }

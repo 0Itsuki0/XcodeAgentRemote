@@ -1,5 +1,7 @@
 # Xcode Agent Remote
 
+[ngrok: Static dev domains for all ngrok users](https://ngrok.com/blog/free-static-domains-ngrok-users)
+
 ## Base Approach
 
 <!-- TODO -->
@@ -296,7 +298,7 @@ We need to tell it apart from other tool user so that we can have the user to an
     - it has no result yet, and it is a question or a plan
     - it has no result yet, it is marked, and it is the session's last message (else the mark is stale)
 - `POST /message`:  the request is a `user_request` event, and the stream ends there.
-- `GET /history`: history has the same event
+- `GET /conversation/<id>`: the conversation's `history` has the same event
 - the app quitting (or the turn being stopped) is not a pending request: the agent sees its stdin close, settles the request itself (`Tool permission request failed: … stream closed …`), finishes the turn
 - the agent terminated while waiting is: the tool use stays without a result. If the user answers the request, the app resumes the chat with the answer as the prompt:
       1. the agent writes these entries to `.jsonl`, in order, before the model replies
@@ -420,7 +422,7 @@ What that means for us:
 - cancelling a turn stops the agent, the turn is not saved
 - errors: unknown chat, missing project, missing store, agent not implemented (e.g. codex)
 - server + iOS client code (run from the Mac, against the app's server code)
-    - `/health`, `/projects`, `/history`
+    - `/health`, `/projects`, `/conversation`
     - message → permission request → answer → … : each response ends where the turn waits for an answer, the answer's response continues the turn
     - allow and deny, the denied tool doesn't run
 

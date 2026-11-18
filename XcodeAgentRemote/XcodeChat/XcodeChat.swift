@@ -32,7 +32,7 @@ nonisolated enum XcodeChatError: LocalizedError {
         case .storeNotFound(let store):
             "No such chat store: \(store.path)"
         case .conversationNotFound(let id, let store):
-            "No conversation at \(ChatStore.Chat.plistFile(store: store, id: id).path)"
+            "No conversation \(id) in \(store.path)"
         case .agentNotImplemented(let agent):
             "Agent \(agent.rawValue) is not implemented; implemented: \(AgentProviders.all.map { $0.agent.rawValue }.joined(separator: ", "))"
         case .unknownAgent(let id):
@@ -215,7 +215,7 @@ nonisolated enum XcodeChat {
     /// Waits (up to 10 seconds) until no process runs with the session id in its arguments: the agent Xcode ran it in.
     private static func waitForAgentToStop(sessionID: String) async {
         for _ in 0..<50 {
-            if runCommand(["pgrep", "-f", sessionID]) == nil { return }
+            if runCommand(["pgrep", "-if", sessionID]) == nil { return }  // -i: the id may be cased differently
             try? await Task.sleep(for: .milliseconds(200))
         }
     }
@@ -236,7 +236,7 @@ nonisolated enum XcodeChat {
     /// The chat whose session waits for the user on this tool use (its last tool use: `AgentProvider.pendingToolUse`).
     static func unansweredRequest(toolUseID: String) -> UnansweredRequest? {
         for project in XcodeChats.listProjects() {
-            for chat in project.sessions {
+            for chat in project.conversations {
                 guard let agent = chat.provider, let provider = AgentProviders.provider(for: agent),
                       let sessionID = chat.providerSessionID,
                       let toolUse = provider.pendingToolUse(sessionID: sessionID), toolUse.id == toolUseID

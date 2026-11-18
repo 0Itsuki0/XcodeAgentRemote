@@ -20,7 +20,8 @@ import ServiceLifecycle
 ///
 /// - `GET /health` → `{"status": "ok"}`
 /// - `GET /projects` → `[XcodeProject]` (`XcodeChats.listProjects`)
-/// - `GET /history/<Xcode chat UUID>` → `[ChatEvent]` (`XcodeChats.history`); 404 no such chat, 501 not implemented
+/// - `GET /conversation/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChats.conversation`): the conversation, its
+///   history and its project; 404 no such chat, 501 not implemented
 /// - `POST /message` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
 ///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
 ///     (the stream ends with that tool use, which has no result yet) or the turn ends:
@@ -43,7 +44,7 @@ import ServiceLifecycle
 /// If `AgentServerAPI.authHeader` is set, every request must carry that header with that exact value, or it is
 /// rejected with 401.
 actor AgentServer {
-    static let shared = AgentServer()
+//    static let shared = AgentServer()
 
     private var group: ServiceGroup?
     private var task: Task<Void, Error>?
@@ -75,7 +76,7 @@ actor AgentServer {
         )
         var configuration = ServiceGroupConfiguration(
             services: [app],
-            logger: Logger(label: "AgentServer")
+            logger: Logging.Logger(label: Logger.subsystem)
         )
         configuration.gracefulShutdownSignals = []
         configuration.cancellationSignals = []
@@ -143,10 +144,10 @@ actor AgentServer {
             XcodeChats.listProjects()
         }
 
-        router.get(RouterPath("\(AgentServerAPI.historyPath)/:conversation")) { _, context -> [ChatEvent] in
+        router.get(RouterPath("\(AgentServerAPI.conversationPath)/:conversation")) { _, context -> XcodeConversationDetail in
             let conversationID = try context.parameters.require("conversation")
             do {
-                return try XcodeChats.history(conversationID: conversationID)
+                return try XcodeChats.conversation(id: conversationID)
             } catch let error as ChatHistoryError {
                 switch error {
                 case .notImplemented:
@@ -219,6 +220,7 @@ actor AgentServer {
 
 extension SuccessResponse: ResponseEncodable {}
 extension XcodeProject: ResponseEncodable {}
+extension XcodeConversationDetail: ResponseEncodable {}
 extension ChatEvent: ResponseEncodable {}
 
 

@@ -11,9 +11,10 @@ import Synchronization
 nonisolated enum RunningSessions {
     private static let ids = Mutex<Set<String>>([])
 
-    static func insert(_ sessionID: String) { ids.withLock { _ = $0.insert(sessionID) } }
-    static func remove(_ sessionID: String) { ids.withLock { _ = $0.remove(sessionID) } }
-    static func contains(_ sessionID: String) -> Bool { ids.withLock { $0.contains(sessionID) } }
+    // Kept lowercased, and looked up lowercased (`ChatStore.sameID`): the id may be cased differently.
+    static func insert(_ sessionID: String) { ids.withLock { _ = $0.insert(sessionID.lowercased()) } }
+    static func remove(_ sessionID: String) { ids.withLock { _ = $0.remove(sessionID.lowercased()) } }
+    static func contains(_ sessionID: String) -> Bool { ids.withLock { $0.contains(sessionID.lowercased()) } }
 }
 
 /// The tool uses the agent waits on the user for, by id, kept across launches (`UserDefaults`).

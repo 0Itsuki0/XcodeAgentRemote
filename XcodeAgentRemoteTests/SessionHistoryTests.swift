@@ -2,9 +2,10 @@
 //  SessionHistoryTests.swift
 //  XcodeAgentRemoteTests
 //
-//  Compares ClaudeProvider.SessionHistory with the official Agent SDK's getSessionMessages
-//  (SDKReference/getSessionMessages.mjs) on every session of Xcode's Claude agent.
-//  Needs Node and `npm install` in SDKReference/.
+//  Reading Claude's session transcripts (`.jsonl`) with ClaudeProvider:
+//  - a session written by Xcode's bundled Claude itself (`xcrun mcpbridge run-agent claude`, none of the app's
+//    functions) decodes to the history the turn must have: the prompt, the tool use, its result, the reply;
+//  - the tool inputs of every session of Xcode's Claude agent decode to their typed input.
 //
 
 #if os(macOS)
@@ -14,22 +15,8 @@ import Testing
 
 struct SessionHistoryTests {
 
-    /// What is compared per message: type, ids, and content blocks (type + tool id/name).
-    struct MessageSummary: Codable, Equatable {
-        struct Block: Codable, Equatable {
-            var type: String
-            var id: String?
-            var name: String?
-        }
-        var type: String
-        var uuid: String
-        var session_id: String
-        var blocks: [Block]?
-    }
-
     static let configDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appending(path: "Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig")
-    static let sdkReference = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "SDKReference")
 
     /// Every session transcript of Xcode's Claude agent: <config>/projects/<project-dir>/<sessionId>.jsonl
     static func sessions() -> [URL] {
@@ -42,12 +29,56 @@ struct SessionHistoryTests {
         .sorted { $0.path < $1.path }
     }
 
-    @Test(arguments: sessions(), [false, true])
-    func matchesAgentSDK(session: URL, includeSystemMessages: Bool) throws {
-        let swift = try ClaudeProvider.SessionHistory.load(contentsOf: session, includeSystemMessages: includeSystemMessages)
-            .map(Self.summary)
-        let sdk = try Self.sdkMessages(session: session, includeSystemMessages: includeSystemMessages)
-        #expect(swift == sdk)
+    /// One message of `claude -p --output-format json` (a JSON array of the turn's messages); the `result` one has the
+    /// session id (the fields read here).
+    struct CLIMessage: Decodable {
+        var type: String?
+        var session_id: String?
+        var is_error: Bool?
+        var result: String?
+    }
+
+    @Test func decodesSessionWrittenByClaude() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "SessionHistoryTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let marker = "session-history-test-\(UUID().uuidString.prefix(8))"
+        let prompt = "Use the Bash tool to run: echo \(marker). Then reply with only the word DONE."
+
+        // Xcode's bundled Claude, run directly; Bash allowed so nothing asks.
+        let output = try #require(
+            runCommand(
+                ["xcrun", "mcpbridge", "run-agent", "claude", "-p", prompt, "--output-format", "json",
+                 "--allowedTools", "Bash"],
+                in: folder),
+            "the agent did not run")
+        let messages = try JSONDecoder().decode([CLIMessage].self, from: Data(output.utf8))
+        let result = try #require(messages.last { $0.type == "result" }, "no result message")
+        let sessionID = try #require(result.session_id)
+        let transcript = try #require(ClaudeProvider.transcript(sessionID: sessionID), "no transcript for the session")
+        // Claude's folder for the test's temporary working directory (named after it): only this session, and its memory.
+        let projectFolder = transcript.deletingLastPathComponent()
+        defer {
+            if projectFolder.lastPathComponent.hasSuffix(folder.lastPathComponent) {
+                try? FileManager.default.removeItem(at: projectFolder)
+            }
+        }
+        try #require(result.is_error != true, "the turn failed: \(result.result ?? "")")
+
+        let history = try ClaudeProvider.history(sessionID: sessionID)
+        #expect(history.first == .userMessage(prompt))
+        let bash = history.compactMap { event -> ChatEvent.ToolUse? in
+            if case .toolUse(let toolUse) = event, toolUse.name == "Bash" { toolUse } else { nil }
+        }
+        try #require(bash.count == 1, "expected one Bash tool use, got \(bash.count)")
+        #expect(bash[0].stringInput("command")?.contains(marker) == true)
+        let bashResults = history.compactMap { event -> ChatEvent.ToolResult? in
+            if case .toolResult(let result) = event, result.toolUseID == bash[0].id { result } else { nil }
+        }
+        #expect(bashResults.count == 1)
+        #expect(bashResults.first?.isError == false)
+        #expect(bashResults.first?.output.contains(marker) == true)
+        #expect(history.contains { if case .assistantMessage(let text) = $0 { text.contains("DONE") } else { false } })
     }
 
     @Test(arguments: sessions())
@@ -69,54 +100,5 @@ struct SessionHistoryTests {
         }
     }
 
-    // MARK: - Helpers
-
-    static func summary(_ message: ClaudeProvider.SessionMessage) -> MessageSummary {
-        MessageSummary(
-            type: message.type.rawValue,
-            uuid: message.uuid,
-            session_id: message.sessionID,
-            blocks: message.message?.content.map(blockSummary)
-        )
-    }
-
-    static func blockSummary(_ block: ClaudeProvider.ContentBlock) -> MessageSummary.Block {
-        switch block {
-        case .text: MessageSummary.Block(type: "text")
-        case .thinking: MessageSummary.Block(type: "thinking")
-        case .redactedThinking: MessageSummary.Block(type: "redacted_thinking")
-        case .toolUse(let toolUse): MessageSummary.Block(type: "tool_use", id: toolUse.id, name: toolUse.name)
-        case .toolResult(let result): MessageSummary.Block(type: "tool_result", id: result.toolUseID)
-        case .image: MessageSummary.Block(type: "image")
-        case .unknown(let value):
-            if case .object(let object) = value, case .string(let type) = object["type"] {
-                MessageSummary.Block(type: type)
-            } else {
-                MessageSummary.Block(type: "unknown")
-            }
-        }
-    }
-
-    /// Runs SDKReference/getSessionMessages.mjs (the official SDK) on a session.
-    static func sdkMessages(session: URL, includeSystemMessages: Bool) throws -> [MessageSummary] {
-        try #require(
-            FileManager.default.fileExists(atPath: sdkReference.appending(path: "node_modules").path),
-            "run `npm install` in \(sdkReference.path)"
-        )
-        let process = Process()
-        process.executableURL = URL(filePath: "/usr/bin/env")
-        process.arguments = ["node", "getSessionMessages.mjs", session.path] + (includeSystemMessages ? ["--system"] : [])
-        process.currentDirectoryURL = sdkReference
-        var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = (environment["PATH"].map { $0 + ":" } ?? "") + "/opt/homebrew/bin:/usr/local/bin"
-        process.environment = environment
-        let output = Pipe()
-        process.standardOutput = output
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        try #require(process.terminationStatus == 0, "getSessionMessages.mjs failed for \(session.lastPathComponent)")
-        return try JSONDecoder().decode([MessageSummary].self, from: data)
-    }
 }
 #endif

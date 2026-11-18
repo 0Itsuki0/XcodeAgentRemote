@@ -16,29 +16,29 @@ struct XcodeAgentRemoteApp: App {
         @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     #endif
 
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            ItemModel.self
-        ])
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            cloudKitDatabase: .private(CloudManager.containerIdentifier)
-        )
-
-        do {
-            return try ModelContainer(
-                for: schema,
-                configurations: [modelConfiguration]
-            )
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+//    var sharedModelContainer: ModelContainer = {
+//        let schema = Schema([
+//            ItemModel.self
+//        ])
+//        let modelConfiguration = ModelConfiguration(
+//            schema: schema,
+//            cloudKitDatabase: .private(ICloudManager.containerIdentifier)
+//        )
+//
+//        do {
+//            return try ModelContainer(
+//                for: schema,
+//                configurations: [modelConfiguration]
+//            )
+//        } catch {
+//            fatalError("Could not create ModelContainer: \(error)")
+//        }
+//    }()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(sharedModelContainer)
+//        .modelContainer(sharedModelContainer)
     }
 }

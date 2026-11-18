@@ -11,7 +11,7 @@ import UserNotifications
 
 class AppDelegate: NSObject {
     // to initialize the records on launch
-    let manager = CloudManager()
+    let manager = ICloudManager()
 
     /// perform set ups
     func setupAppOnLaunch() {

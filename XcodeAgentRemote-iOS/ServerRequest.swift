@@ -55,16 +55,17 @@ nonisolated struct AgentServerClient: Sendable {
         return try NetworkService.decode([XcodeProject].self, from: data)
     }
 
-    /// `GET /history/<Xcode chat UUID>`: a chat's history (for when iCloud syncing fails).
+    /// `GET /conversation/<Xcode chat UUID>`: one conversation in full, with its history and its project (for when
+    /// iCloud syncing fails).
     /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
-    func history(conversationID: String) async throws -> [ChatEvent] {
+    func conversation(id: String) async throws -> XcodeConversationDetail {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: AgentServerAPI.historyPath).appending(path: conversationID),
+            url: baseURL.appending(path: AgentServerAPI.conversationPath).appending(path: id),
             method: "GET",
             headers: Self.headers(["Accept": "application/json"]),
             body: nil
         )
-        return try NetworkService.decode([ChatEvent].self, from: data)
+        return try NetworkService.decode(XcodeConversationDetail.self, from: data)
     }
 
     /// `POST /message` (`.prompt`): sends one message, the same parameters as the macOS app's `sendMessage`, and

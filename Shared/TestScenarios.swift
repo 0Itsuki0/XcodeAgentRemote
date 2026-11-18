@@ -184,7 +184,7 @@ extension TestScenarios {
 
         results.append(await scenario("List projects") {
             let projects = XcodeChats.listProjects()
-            return "\(projects.count) projects, \(projects.map(\.sessions.count).reduce(0, +)) chats"
+            return "\(projects.count) projects, \(projects.map(\.conversations.count).reduce(0, +)) chats"
         })
 
         let allowedFile = folder.appending(path: "allowed")
@@ -196,7 +196,7 @@ extension TestScenarios {
             try check(!bash.isEmpty, "no Bash tool use")
             try check(bash.allSatisfy { !$0.isError }, "Bash failed: \(bash.map(\.output))")
             try check(FileManager.default.fileExists(atPath: allowedFile.path), "the command did not create the file")
-            chatID = XcodeChats.listProjects().flatMap(\.sessions).first { $0.name == name }?.id
+            chatID = XcodeChats.listProjects().flatMap(\.conversations).first { $0.name == name }?.id
             try check(chatID != nil, "the new chat is not in Xcode's chat store")
             return "file created; chat \(chatID ?? "")"
         })
@@ -351,7 +351,7 @@ extension TestScenarios {
     /// (`kill -9`), so it can't settle the request: it stays waiting in the chat's `.jsonl`. Returns that request.
     private static func leaveWaiting(_ prompt: String, to target: MessageTarget) async throws -> UserRequest {
         guard case .conversation(let chatID, _) = target,
-              let sessionID = XcodeChats.listProjects().flatMap(\.sessions).first(where: { $0.id == chatID })?.providerSessionID
+              let sessionID = XcodeChats.listProjects().flatMap(\.conversations).first(where: { $0.id == chatID })?.providerSessionID
         else { throw CheckFailed(description: "no session for the chat") }
         let events = try await collect(sendMessage(prompt, to: target, permissionModeOverride: .manual, permissionTimeout: 120))
         guard let request = waitingForUser(events).last else { throw CheckFailed(description: "the agent made no request") }
@@ -421,7 +421,7 @@ extension TestScenarios {
 
         results.append(await scenario("List projects") {
             let projects = try await client.projects()
-            return "\(projects.count) projects, \(projects.map(\.sessions.count).reduce(0, +)) chats"
+            return "\(projects.count) projects, \(projects.map(\.conversations.count).reduce(0, +)) chats"
         })
 
         results.append(await scenario("New chat: a Bash command, allowed") {
@@ -432,8 +432,8 @@ extension TestScenarios {
             try check(!bash.isEmpty, "no Bash tool use")
             try check(bash.allSatisfy { !$0.isError }, "Bash failed: \(bash.map(\.output))")
             try check(responses >= 2, "the first response did not stop at the permission request")
-            let projectOfChat = try await client.projects().first { $0.sessions.contains { $0.name == name } }
-            chatID = projectOfChat?.sessions.first { $0.name == name }?.id
+            let projectOfChat = try await client.projects().first { $0.conversations.contains { $0.name == name } }
+            chatID = projectOfChat?.conversations.first { $0.name == name }?.id
             store = projectOfChat?.store.lastPathComponent
             try check(chatID != nil, "the new chat is not in /projects")
             return "allowed; \(responses) responses (message, then answer); chat \(chatID ?? "")"
@@ -462,14 +462,21 @@ extension TestScenarios {
             return "reply: \(reply(events))"
         })
 
-        results.append(await scenario("History of the new chat") {
-            guard let chatID else { throw CheckFailed(description: "needs the chat of the previous scenarios") }
-            let history = try await client.history(conversationID: chatID)
+        results.append(await scenario("Conversation of the new chat (with its history)") {
+            guard let chatID, let store else { throw CheckFailed(description: "needs the chat and store of the previous scenarios") }
+            let conversation = try await client.conversation(id: chatID)
+            try check(conversation.id.caseInsensitiveCompare(chatID) == .orderedSame, "id \(conversation.id), expected \(chatID)")
+            try check(conversation.name == name, "name \(conversation.name), expected \(name)")
+            try check(conversation.provider == .claude && conversation.providerSessionID != nil, "no Claude session")
+            try check(conversation.project.store.lastPathComponent == store, "store \(conversation.project.store.lastPathComponent)")
+            try check(conversation.project.projectFile?.standardizedFileURL == project.standardizedFileURL,
+                      "project file \(conversation.project.projectFile?.path ?? "nil")")
+            let history = conversation.history
             try check(promptCount(history) == 3, "\(promptCount(history)) prompts in the history, expected 3")
             try check(toolResults(of: "Bash", in: history).count == 2, "expected 2 Bash results in the history")
             let requests = history.filter { if case .userRequest(.permission) = $0 { true } else { false } }.count
             try check(requests == 2, "\(requests) permission requests in the history, expected 2 (allowed, denied)")
-            return "\(history.count) events, 3 prompts, 2 permission requests"
+            return "\"\(conversation.name)\" in \(conversation.project.name): \(history.count) events, 3 prompts, 2 permission requests"
         })
 
         if let chatID {

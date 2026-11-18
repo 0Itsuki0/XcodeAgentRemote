@@ -11,7 +11,8 @@ import UserNotifications
 
 class AppDelegate: NSObject {
     // to initialize the records on launch
-    let manager = CloudManager()
+//    let manager = CloudManager()
+    let manager = ICloudManager()
 
     /// perform set ups
     func setupAppOnLaunch() {
@@ -57,6 +58,8 @@ class AppDelegate: NSObject {
         }
         
         print(notification)
+//        let queryNotification = notification as! CKQueryNotification
+//        queryNotification.recordID
 
         //        guard
         //            let notification = CKNotification(

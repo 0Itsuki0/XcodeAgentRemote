@@ -812,9 +812,7 @@ nonisolated extension ClaudeProvider: AgentProvider {
     static func transcript(sessionID: String) -> URL? {
         let projects = configDirectory.appending(path: "projects")
         let folders = (try? FileManager.default.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil)) ?? []
-        return folders
-            .map { $0.appending(path: "\(sessionID).jsonl") }
-            .first { FileManager.default.fileExists(atPath: $0.path) }
+        return folders.lazy.compactMap { ChatStore.item(named: sessionID, suffix: ".jsonl", in: $0) }.first
     }
 
     /// A session's events, with the requests to the user (`ChatEvent.userRequest`) the transcript shows.
