@@ -79,7 +79,7 @@ actor Logger {
         func info(category: String, message: String)
     {
         logger.info(
-            "\(category, privacy: .public): \(message, privacy: .public)"
+            "\(Date().formatted()) info [\(category, privacy: .public)] \(message, privacy: .public)"
         )
 
         Task { @MainActor [weak self] in
@@ -96,7 +96,7 @@ actor Logger {
     {
         let message = error.localizedDescription
         logger.error(
-            "\(category, privacy: .public): \(message, privacy: .public)"
+            "\(Date().formatted()) error [\(category, privacy: .public)] \(message, privacy: .public)"
         )
 
         Task { @MainActor [weak self] in
