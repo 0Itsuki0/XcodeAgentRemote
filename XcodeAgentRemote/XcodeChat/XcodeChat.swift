@@ -195,7 +195,7 @@ nonisolated enum XcodeChat {
         let snapshotAfter = try ChatStore.writeGitSnapshot(store: store, workingDirectory: workingDirectory)
 
         let toolUseRecords = await records.byToolUseID
-        let response = ChatCards.turnCards(for: events) { toolUse, result in
+        let response = ChatCard.turnCards(for: events) { toolUse, result in
             provider.card(for: toolUse, result: result, record: toolUseRecords[toolUse.id])
         }
         try conversation.appendTurn(

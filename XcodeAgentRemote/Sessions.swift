@@ -73,7 +73,7 @@ nonisolated protocol AgentProvider: SendableMetatype {
     /// The card Xcode shows for one of the agent's tool uses; nil if it never finished (no result).
     static func card(
         for toolUse: ChatEvent.ToolUse, result: ChatEvent.ToolResult?, record: ToolUseRecords.Record?
-    ) -> ChatCards.Card?
+    ) -> ChatCard.Card?
 }
 
 /// The providers implemented so far.

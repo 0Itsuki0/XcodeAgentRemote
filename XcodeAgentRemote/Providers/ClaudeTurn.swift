@@ -416,10 +416,10 @@ nonisolated extension ClaudeProvider {
     /// A denied tool use keeps its card as `cancelled`, a failed one as `failed`. Nil if it has no result.
     static func card(
         for call: ChatEvent.ToolUse, result toolResult: ChatEvent.ToolResult?, record: ToolUseRecords.Record?
-    ) -> ChatCards.Card? {
+    ) -> ChatCard.Card? {
         guard let toolResult, !toolsWithoutCard.contains(call.name) else { return nil }
         let result = toolResult.output
-        let status: ChatCards.CardStatus =
+        let status: ChatCard.CardStatus =
             !toolResult.isError ? .completed : record?.denied == true ? .cancelled : .failed
         // Claude Code wraps a tool's error as `<tool_use_error>…</tool_use_error>`; the card shows the message.
         let errorDescription = status == .failed
@@ -430,39 +430,39 @@ nonisolated extension ClaudeProvider {
             guard let path = call.stringInput("file_path") else { break }
             let lines = status == .completed
                 ? readOutputLinePattern.numberOfMatches(in: result, range: NSRange(result.startIndex..., in: result)) : 0
-            return ChatCards.fileCard(
+            return ChatCard.fileCard(
                 toolID: call.id, path: path, kind: .read, added: lines, removed: 0, source: "",
                 status: status, errorDescription: errorDescription)
         case "Edit":
             guard let path = call.stringInput("file_path") else { break }
             let new = call.stringInput("new_string") ?? ""
-            let changes = ChatCards.lineChanges(old: call.stringInput("old_string") ?? "", new: new)
-            return ChatCards.fileCard(
+            let changes = ChatCard.lineChanges(old: call.stringInput("old_string") ?? "", new: new)
+            return ChatCard.fileCard(
                 toolID: call.id, path: path, kind: .modified, added: changes.added, removed: changes.removed,
                 source: changes.addedText.isEmpty ? new : changes.addedText,
                 before: record?.fileBefore, after: record?.fileAfter, status: status, errorDescription: errorDescription)
         case "Write":
             guard let path = call.stringInput("file_path") else { break }
-            let changes = ChatCards.lineChanges(old: record?.fileBefore ?? "", new: call.stringInput("content") ?? "")
-            return ChatCards.fileCard(
+            let changes = ChatCard.lineChanges(old: record?.fileBefore ?? "", new: call.stringInput("content") ?? "")
+            return ChatCard.fileCard(
                 toolID: call.id, path: path, kind: record?.fileBefore == nil ? .added : .modified,
                 added: changes.added, removed: changes.removed, source: changes.addedText,
                 before: record?.fileBefore, after: record?.fileAfter, status: status, errorDescription: errorDescription)
         case "Bash":
             guard let command = call.stringInput("command"), !command.isEmpty else { break }
-            return ChatCards.terminalCard(toolID: call.id, command: command, output: result, status: status)
+            return ChatCard.terminalCard(toolID: call.id, command: command, output: result, status: status)
         case "WebFetch":
             guard let url = call.stringInput("url") else { break }
-            return ChatCards.webFetchCard(toolID: call.id, url: url, status: status)
+            return ChatCard.webFetchCard(toolID: call.id, url: url, status: status)
         case "WebSearch":
             guard let query = call.stringInput("query") else { break }
-            return ChatCards.webSearchCard(
+            return ChatCard.webSearchCard(
                 toolID: call.id, tool: call.name, query: query, titles: searchResultTitles(result), status: status)
         case "ToolSearch":
-            return ChatCards.namedToolCard(
+            return ChatCard.namedToolCard(
                 toolID: call.id, name: toolSearchCard.name, icon: toolSearchCard.icon, status: status)
         case "Agent", "Task":
-            return ChatCards.namedToolCard(
+            return ChatCard.namedToolCard(
                 toolID: call.id, name: call.stringInput("description") ?? call.name, icon: agentIcon, status: status)
         default:
             break
@@ -471,7 +471,7 @@ nonisolated extension ClaudeProvider {
         // just the tool).
         let parts = call.name.components(separatedBy: "__")
         let title = call.name.hasPrefix("mcp__") && parts.count >= 3 ? parts.dropFirst(2).joined(separator: "__") : call.name
-        return ChatCards.genericCard(
+        return ChatCard.genericCard(
             toolID: call.id, title: title, summary: inputSummary(call), output: result, status: status)
     }
 

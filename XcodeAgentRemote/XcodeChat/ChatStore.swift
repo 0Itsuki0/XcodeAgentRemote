@@ -168,7 +168,7 @@ nonisolated enum ChatStore {
     private struct TurnRecord: Encodable {
         /// What the user sent in this turn.
         struct Prompt: Encodable {
-            var id: ChatCards.CardID
+            var id: ChatCard.CardID
             var rawMessageText: String
             var sentDate: Date
             var showDateSeparator: Bool
@@ -179,8 +179,8 @@ nonisolated enum ChatStore {
         var historyLogDate: Date
         var id: String
         var isModification: Bool
-        var responseContent: [ChatCards.Card]
-        var responseContentSequence: [ChatCards.CardID]
+        var responseContent: [ChatCard.Card]
+        var responseContentSequence: [ChatCard.CardID]
         var startDate: Date
         var userMessage: Prompt
         var snapshotIdBefore: String?
@@ -253,7 +253,7 @@ nonisolated enum ChatStore {
         /// Adds a finished turn: the prompt, the turn's cards and its git snapshots.
         mutating func appendTurn(
             prompt: String, startDate: Date, finishedDate: Date,
-            response: (content: [ChatCards.Card], sequence: [ChatCards.CardID], isModification: Bool),
+            response: (content: [ChatCard.Card], sequence: [ChatCard.CardID], isModification: Bool),
             snapshotBefore: String?, snapshotAfter: String?
         ) throws {
             let entryID = newUUID()
