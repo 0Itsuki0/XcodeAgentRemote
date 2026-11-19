@@ -10,7 +10,6 @@ import SwiftUI
 
 @main
 struct XcodeAgentRemoteApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     private let apiServerManager = APIServerManager()
     private let chatWatcher = ChatWatcher()

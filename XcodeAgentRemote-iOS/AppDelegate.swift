@@ -18,11 +18,7 @@ class AppDelegate: NSObject {
     /// perform set ups
     private func setupAppOnLaunch() {
 
-        #if os(iOS)
-            UIApplication.shared.registerForRemoteNotifications()
-        #else
-            NSApplication.shared.registerForRemoteNotifications()
-        #endif
+        UIApplication.shared.registerForRemoteNotifications()
 
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().setBadgeCount(0)
@@ -160,81 +156,46 @@ class AppDelegate: NSObject {
 
 }
 
-#if os(iOS)
+extension AppDelegate: UIApplicationDelegate {
 
-    extension AppDelegate: UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication
+            .LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
 
-        func application(
-            _ application: UIApplication,
-            didFinishLaunchingWithOptions launchOptions: [UIApplication
-                .LaunchOptionsKey: Any]? = nil
-        ) -> Bool {
-
-            setupAppOnLaunch()
-            return true
-        }
-
-        // didReceiveRemoteNotification do not trigger correctly on simulators
-        @MainActor
-        func application(
-            _ application: UIApplication,
-            didReceiveRemoteNotification userInfo: [AnyHashable: Any]
-        ) async -> UIBackgroundFetchResult {
-            didReceiveRemoteNotification(userInfo: userInfo)
-            return .newData
-        }
-
-        func application(
-            _ application: UIApplication,
-            didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-        ) {
-            didRegisterForRemoteNotificationsWithDeviceToken(
-                deviceToken: deviceToken
-            )
-        }
-
-        // Report the error if the app fails to register for remote notifications.
-        //
-        func application(
-            _ application: UIApplication,
-            didFailToRegisterForRemoteNotificationsWithError error: Error
-        ) {
-            didFailToRegisterForRemoteNotifications(error)
-        }
+        setupAppOnLaunch()
+        return true
     }
 
-#else
-
-    extension AppDelegate: NSApplicationDelegate {
-        func application(
-            _ application: NSApplication,
-            didFailToRegisterForRemoteNotificationsWithError error: any Error
-        ) {
-            didFailToRegisterForRemoteNotifications(error)
-        }
-
-        func application(
-            _ application: NSApplication,
-            didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-        ) {
-            didRegisterForRemoteNotificationsWithDeviceToken(
-                deviceToken: deviceToken
-            )
-        }
-
-        func application(
-            _ application: NSApplication,
-            didReceiveRemoteNotification userInfo: [String: Any]
-        ) {
-            didReceiveRemoteNotification(userInfo: userInfo)
-        }
-
-        func applicationDidFinishLaunching(_ notification: Notification) {
-            setupAppOnLaunch()
-        }
+    // didReceiveRemoteNotification do not trigger correctly on simulators
+    @MainActor
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any]
+    ) async -> UIBackgroundFetchResult {
+        didReceiveRemoteNotification(userInfo: userInfo)
+        return .newData
     }
-#endif
 
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        didRegisterForRemoteNotificationsWithDeviceToken(
+            deviceToken: deviceToken
+        )
+    }
+
+    // Report the error if the app fails to register for remote notifications.
+    //
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        didFailToRegisterForRemoteNotifications(error)
+    }
+}
 extension AppDelegate: UNUserNotificationCenterDelegate {
 
     // Request user permissions
