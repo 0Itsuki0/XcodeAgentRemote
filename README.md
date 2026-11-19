@@ -342,7 +342,7 @@ We need to tell it apart from other tool user so that we can have the user to an
 - every turn the app runs (`sendMessage`, and resuming a chat to answer a request) first closes the project in Xcode (`XcodeAutomation.closeProject`): once the user answers through the app, Xcode can no longer answer it, and its agent stops
 - a tool use of Xcode's chat is a request when it is the last message with no result, no mark (Xcode's agent never sets one), and
     - it is a question (AskUserQuestion) or a plan (ExitPlanMode), or
-    - Xcode would ask the user about it: `XcodePermissions.wouldAsk` (`XcodeChat/Permission.swift`) makes Xcode's own decision from Xcode's settings, read fresh on every check
+    - Xcode would ask the user about it: `PermissionRule.wouldAsk` (`XcodeChat/Permission.swift`) makes Xcode's own decision from Xcode's settings, read fresh on every check
         - mode (`IDEChatAgentPermissionMode`): Manual → decided as below. Auto → the agent decides, counted as asking. dontAsk / bypassPermissions → never asks
         - tools: allowed by name, by the tools Xcode passes the agent (`--allowedTools`) or `toolRules`
         - Bash: split into simple commands (pipelines, `&&`, `;`, subshells, `$(…)` also inside assignments and redirects, `find -exec`). every one needs an `allow` rule (`shellCommandRules`): exact command name, the rule's other words in order with only options between them, leading `VAR=value` ignored, the longest matching pattern decides

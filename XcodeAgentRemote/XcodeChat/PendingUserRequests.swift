@@ -7,7 +7,7 @@ import Foundation
 import Synchronization
 
 /// The sessions whose agent the app is running now (by session id). A tool use with no result in one of them is the
-/// app's own: its requests are marked (`WaitingMarks`), so Xcode's permission check (`XcodePermissions`) is not used.
+/// app's own: its requests are marked (`WaitingMarks`), so Xcode's permission check (`PermissionRule`) is not used.
 nonisolated enum RunningSessions {
     private static let ids = Mutex<Set<String>>([])
 

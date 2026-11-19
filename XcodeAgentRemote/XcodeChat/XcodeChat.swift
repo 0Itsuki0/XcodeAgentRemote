@@ -162,7 +162,7 @@ nonisolated enum XcodeChat {
             switch permissionModeOverride {
             case .manual: .manual
             case .auto: .auto
-            case nil: XcodeAgentConfiguration.permissionMode
+            case nil: XcodeAgentConfiguration.PermissionMode.currentMode
             }
 
         // One turn, like Xcode: snapshot, run the agent, snapshot, record.

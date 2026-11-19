@@ -9,7 +9,7 @@
 //  - A waiting request: the tool use is in the transcript with no result yet (Claude writes it shortly after it asks,
 //    because a PreToolUse hook is registered). It is a request if it is a question or plan, or if it is still the
 //    session's last message and either the app marked it waiting (`WaitingMarks`; else the mark is stale) or, in a
-//    session the app isn't running, Xcode would ask about it (`XcodePermissions.wouldAsk`: Xcode's own agent sets no
+//    session the app isn't running, Xcode would ask about it (`PermissionRule.wouldAsk`: Xcode's own agent sets no
 //    mark); otherwise it is running.
 //  Both are decided in one place: `userRequest(for:decidedByUser:isLastMessage:)`, also used for a live turn.
 //
@@ -92,7 +92,7 @@ nonisolated extension ClaudeProvider {
             let request = userRequest(
                 for: toolUse, decidedByUser: nil, isLastMessage: lastMessage == .toolUse(toolUse),
                 xcodeWouldAsk: !RunningSessions.contains(sessionID)
-                    && XcodePermissions.wouldAsk(
+                && XcodeAgentConfiguration.wouldAsk(
                         toolUse, agentAllowedTools: xcodeAllowedTools, workingDirectory: workingDirectory(sessionID: sessionID)))
             if let request {
                 withRequests.append(.userRequest(request))
