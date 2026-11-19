@@ -319,7 +319,7 @@ extension TestScenarios {
             if case .toolResult(let result) = event, result.toolUseID == toolUse.id { result } else { nil }
         }.first
         try check(result?.output.contains("Tool call interrupted") == true, "the old tool use's result: \(result?.output ?? "none")")
-        try check(!WaitingMarks.contains(toolUse.id, agent: .claude), "the old tool use is still marked waiting")
+        try check(!PendingToolUses.contains(toolUse.id, agent: .claude), "the old tool use is still marked waiting")
         try check(waitingForUser(history).isEmpty, "the history still waits: \(waitingForUser(history))")
     }
 
@@ -343,7 +343,7 @@ extension TestScenarios {
                   "the old tool use is still in the history")
         try check(!history.contains { if case .toolResult(let result) = $0 { result.output.contains("Tool call interrupted") } else { false } },
                   "the history has an interrupted marker")
-        try check(!WaitingMarks.contains(toolUse.id, agent: .claude), "the old tool use is still marked waiting")
+        try check(!PendingToolUses.contains(toolUse.id, agent: .claude), "the old tool use is still marked waiting")
         try check(waitingForUser(history).isEmpty, "the history still waits: \(waitingForUser(history))")
     }
 
@@ -355,7 +355,7 @@ extension TestScenarios {
         else { throw CheckFailed(description: "no session for the chat") }
         let events = try await collect(sendMessage(prompt, to: target, permissionModeOverride: .manual, permissionTimeout: 120))
         guard let request = waitingForUser(events).last else { throw CheckFailed(description: "the agent made no request") }
-        try check(WaitingMarks.contains(request.toolUseID, agent: .claude), "the request is not marked waiting")
+        try check(PendingToolUses.contains(request.toolUseID, agent: .claude), "the request is not marked waiting")
         // Claude writes the tool use to the `.jsonl` shortly after it asks: kill only once it's there.
         var inFile = false
         for _ in 0..<50 where !inFile {

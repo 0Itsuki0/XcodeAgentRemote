@@ -8,7 +8,7 @@
 //    answered / approved) or `user_reject` (denied / declined / rejected).
 //  - A waiting request: the tool use is in the transcript with no result yet (Claude writes it shortly after it asks,
 //    because a PreToolUse hook is registered). It is a request if it is a question or plan, or if it is still the
-//    session's last message and either the app marked it waiting (`WaitingMarks`; else the mark is stale) or, in a
+//    session's last message and either the app marked it waiting (`PendingToolUses`; else the mark is stale) or, in a
 //    session the app isn't running, Xcode would ask about it (`PermissionRule.wouldAsk`: Xcode's own agent sets no
 //    mark); otherwise it is running.
 //  Both are decided in one place: `userRequest(for:decidedByUser:isLastMessage:)`, also used for a live turn.
@@ -26,7 +26,7 @@ nonisolated extension ClaudeProvider {
     /// - it has a result (`decidedByUser` not nil): if the user decided it (`permissionDecision.source`);
     /// - it has none yet (`decidedByUser` nil): if it is a question or a plan, which always waits for the user, or if it
     ///   is still the session's last message (else the agent went on without the answer) and either the app marked it
-    ///   waiting (`WaitingMarks`, set when the app's agent asks) or `xcodeWouldAsk` (a session Xcode runs: its agent
+    ///   waiting (`PendingToolUses`, set when the app's agent asks) or `xcodeWouldAsk` (a session Xcode runs: its agent
     ///   sets no mark, so Xcode's own permission decision tells a waiting tool use from a running one).
     /// The kind follows the tool: questions for AskUserQuestion, a plan for ExitPlanMode, else permission.
     static func userRequest(
@@ -41,7 +41,7 @@ nonisolated extension ClaudeProvider {
             return nil
         case nil:
             if case .permission = request {
-                return isLastMessage && (WaitingMarks.contains(toolUse.id, agent: agent) || xcodeWouldAsk()) ? request : nil
+                return isLastMessage && (PendingToolUses.contains(toolUse.id, agent: agent) || xcodeWouldAsk()) ? request : nil
             }
             return request
         }
@@ -150,7 +150,7 @@ nonisolated extension ClaudeProvider {
     /// other blocks).
     static func removeToolUse(_ toolUseID: String, sessionID: String) throws {
         _ = try removeBlocks(sessionID: sessionID) { _, block in isBlock(block, of: toolUseID) }
-        WaitingMarks.remove(toolUseID, agent: agent)
+        PendingToolUses.remove(toolUseID, agent: agent)
     }
 
     /// The text Claude adds after a tool use's "rejected" result when the user stops it in Xcode (the close button).

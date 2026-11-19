@@ -110,7 +110,7 @@ nonisolated extension ClaudeProvider {
             ) {
                 RunningSessions.remove(sessionID)
                 Task {
-                    if let toolUseID = await waitingOn.toolUseID { await PendingUserRequests.shared.unregister(toolUseID) }
+                    if let toolUseID = await waitingOn.toolUseID { await PendingUserRequestHandler.shared.unregister(toolUseID) }
                 }
             }
         } catch {
@@ -132,7 +132,7 @@ nonisolated extension ClaudeProvider {
             // The earlier answer to give again, once, when the agent repeats the tool use it was given for.
             var repeatedAnswer = request.repeatedAnswer
             // That earlier request is answered by this turn: it no longer waits.
-            if let earlier = request.repeatedAnswer { WaitingMarks.remove(earlier.toolUse.id, agent: agent) }
+            if let earlier = request.repeatedAnswer { PendingToolUses.remove(earlier.toolUse.id, agent: agent) }
 
             var toolUses: [String: ChatEvent.ToolUse] = [:]
             var agentError: String?
@@ -165,7 +165,7 @@ nonisolated extension ClaudeProvider {
                 case "user":
                     for case .toolResult(let result) in message.message?.content ?? [] {
                         guard let toolUse = toolUses[result.toolUseID] else { continue }
-                        WaitingMarks.remove(toolUse.id, agent: agent)
+                        PendingToolUses.remove(toolUse.id, agent: agent)
                         if fileChangingTools.contains(toolUse.name), let path = toolUse.stringInput("file_path") {
                             await request.records.setFileAfter(
                                 try? String(contentsOfFile: path, encoding: .utf8), toolUseID: toolUse.id)
@@ -189,7 +189,7 @@ nonisolated extension ClaudeProvider {
                         let toolUse = toolUses[toolUseID] ?? ChatEvent.ToolUse(
                             id: toolUseID, name: permissionRequest.toolName ?? "?", input: permissionRequest.input ?? [:])
                         // The agent asked the user: mark it waiting, and stream the request it is (`userRequest`).
-                        WaitingMarks.add(toolUseID, agent: agent)
+                        PendingToolUses.add(toolUseID, agent: agent)
                         if let userRequest = userRequest(for: toolUse, decidedByUser: nil, isLastMessage: true) {
                             continuation.yield(.userRequest(userRequest))
                         }
@@ -200,11 +200,11 @@ nonisolated extension ClaudeProvider {
                             await request.records.setRepeatedEarlierToolUse()
                         } else {
                             await waitingOn.set(toolUseID)
-                            answer = await PendingUserRequests.shared.waitForAnswer(
+                            answer = await PendingUserRequestHandler.shared.waitForAnswer(
                                 toolUseID: toolUseID, timeout: request.permissionTimeout)
                             await waitingOn.set(nil)
                         }
-                        if answer != nil { WaitingMarks.remove(toolUseID, agent: agent) }
+                        if answer != nil { PendingToolUses.remove(toolUseID, agent: agent) }
                         let decision = permissionDecision(for: permissionRequest, answer: answer, timeout: request.permissionTimeout)
                         if decision.behavior == "deny" {
                             await request.records.setDenied(toolUseID: toolUseID)

@@ -1,70 +1,16 @@
 //
-//  PendingUserRequests.swift
+//  PendingUserRequestHandler.swift
 //  XcodeAgentRemote
 //
 
 import Foundation
-import Synchronization
-
-/// The sessions whose agent the app is running now (by session id). A tool use with no result in one of them is the
-/// app's own: its requests are marked (`WaitingMarks`), so Xcode's permission check (`PermissionRule`) is not used.
-nonisolated enum RunningSessions {
-    private static let ids = Mutex<Set<String>>([])
-
-    // Kept lowercased, and looked up lowercased (`ChatStore.sameID`): the id may be cased differently.
-    static func insert(_ sessionID: String) {
-        ids.withLock { _ = $0.insert(sessionID.lowercased()) }
-    }
-    static func remove(_ sessionID: String) {
-        ids.withLock { _ = $0.remove(sessionID.lowercased()) }
-    }
-    static func contains(_ sessionID: String) -> Bool {
-        ids.withLock { $0.contains(sessionID.lowercased()) }
-    }
-}
-
-/// The tool uses the agent waits on the user for, by id, kept across launches (`UserDefaults`).
-/// The `.jsonl` shows a tool use with no result both while it runs and while it waits for the user; this mark tells
-/// them apart. Kept per agent, and only by the agent's provider: set when the agent asks the user, removed once the
-/// provider has the answer or the tool use has a result.
-/// A mark counts only while its tool use is the session's last message (`ClaudeProvider.userRequest`): if the
-/// agent was killed before it settled the request, the request can still be answered (`answerUserRequest`); if the app quit
-/// instead, the agent settles it itself (as failed) and goes on, and the mark left behind is stale.
-nonisolated enum WaitingMarks {
-
-    private static var marks: [String: [String]] {
-        get {
-            UserDefaultsKey.pendingToolUseIdMap.getValue()
-                as? [String: [String]] ?? [:]
-        }
-        set {
-            UserDefaultsKey.pendingToolUseIdMap.setValue(value: newValue)
-        }
-    }
-
-    static func contains(_ toolUseID: String, agent: AgentProviderName) -> Bool {
-        marks[agent.rawValue]?.contains(toolUseID) ?? false
-    }
-
-    static func add(_ toolUseID: String, agent: AgentProviderName) {
-        var ids = marks[agent.rawValue] ?? []
-        if !ids.contains(toolUseID) { ids.append(toolUseID) }
-        marks[agent.rawValue] = ids
-    }
-
-    static func remove(_ toolUseID: String, agent: AgentProviderName) {
-        marks[agent.rawValue] = (marks[agent.rawValue] ?? []).filter {
-            $0 != toolUseID
-        }
-    }
-}
 
 /// The requests to the user in running turns (permission, questions, a plan: `UserRequest`), and their answers.
 /// A tool use is answerable from when it is streamed until its result (`register` / `unregister`, by `sendMessage`); the answer
 /// may arrive before the agent asks for it (it is kept until the provider waits for it) and is taken once.
-actor PendingUserRequests {
+actor PendingUserRequestHandler {
     /// One for the app: answers come from the server, waits from the running turns.
-    static let shared = PendingUserRequests()
+    static let shared = PendingUserRequestHandler()
 
     /// Where a tool use is: answerable, answered before the agent asked, or the agent waiting for the answer.
     private enum State {

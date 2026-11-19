@@ -62,7 +62,7 @@ nonisolated func answerUserRequest(_ answer: UserAnswer, permissionTimeout: Time
                 let events: AsyncThrowingStream<ChatEvent, Error>
                 if let turn = await RunningTurns.shared.take(waitingFor: answer.toolUseID) {
                     // If the wait timed out meanwhile, the turn went on without this answer; it still continues here.
-                    try? await PendingUserRequests.shared.answer(answer)
+                    try? await PendingUserRequestHandler.shared.answer(answer)
                     events = turn.untilWaitingForUser()
                 } else if XcodeChat.unansweredRequest(toolUseID: answer.toolUseID) != nil {
                     events = RunningTurn.start(XcodeChat.resume(
@@ -89,7 +89,7 @@ nonisolated func isWaitingForUser(toolUseID: String) async -> Bool {
 
 /// A turn running on its own, its events saved so a chain of streams reads them in order: `sendMessage`'s until the
 /// turn waits for the user, `answerUserRequest`'s from there until the next request, and so on to the end.
-/// Its tool uses are answerable (`PendingUserRequests`) until they have a result.
+/// Its tool uses are answerable (`PendingUserRequestHandler`) until they have a result.
 private actor RunningTurn {
     /// One event, the point where the turn waits for the user (a stream ends there), or the turn's error.
     private enum Item {
@@ -113,17 +113,17 @@ private actor RunningTurn {
                     switch event {
                     case .toolUse(let toolUse):
                         open.insert(toolUse.id)
-                        await PendingUserRequests.shared.register(toolUse.id)
+                        await PendingUserRequestHandler.shared.register(toolUse.id)
                     case .toolResult(let result):
                         open.remove(result.toolUseID)
-                        await PendingUserRequests.shared.unregister(result.toolUseID)
+                        await PendingUserRequestHandler.shared.unregister(result.toolUseID)
                     default:
                         break
                     }
                     await turn.push(.event(event))
                     if case .userRequest(let request) = event {
                         // Once the agent waits on it, the turn waits for that answer (`answerUserRequest`).
-                        await PendingUserRequests.shared.whenWaiting(for: request.toolUseID) {
+                        await PendingUserRequestHandler.shared.whenWaiting(for: request.toolUseID) {
                             await RunningTurns.shared.save(turn, waitingFor: request.toolUseID)
                             await turn.push(.waiting)
                         }
@@ -132,7 +132,7 @@ private actor RunningTurn {
             } catch {
                 await turn.push(.failed(error))
             }
-            await PendingUserRequests.shared.unregister(open)
+            await PendingUserRequestHandler.shared.unregister(open)
             await RunningTurns.shared.remove(turn)
             await turn.end()
         }
