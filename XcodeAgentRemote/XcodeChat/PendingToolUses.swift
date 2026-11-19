@@ -6,43 +6,29 @@
 //
 
 import Foundation
+import Synchronization
 
-// TODO: - should clear on app launch? if yes, maybe switch to using Mutex like RunningSessions
-
-/// The tool uses the agent waits on the user for, by id, kept across launches (`UserDefaults`).
+/// The tool uses the agent waits on the user for, by id, while the app runs (in memory: an app that quits closes the
+/// agent's input, and the agent then settles the request itself).
 /// The `.jsonl` shows a tool use with no result both while it runs and while it waits for the user; this mark tells
 /// them apart. Kept per agent, and only by the agent's provider: set when the agent asks the user, removed once the
 /// provider has the answer or the tool use has a result.
 /// A mark counts only while its tool use is the session's last message (`ClaudeProvider.userRequest`): if the
-/// agent was killed before it settled the request, the request can still be answered (`answerUserRequest`); if the app quit
-/// instead, the agent settles it itself (as failed) and goes on, and the mark left behind is stale.
+/// agent was killed before it settled the request, the request can still be answered (`answerUserRequest`).
 nonisolated enum PendingToolUses {
 
-    private static var pendingUsesMap: [String: [String]] {
-        get {
-            UserDefaultsKey.pendingToolUseIdMap.getValue()
-                as? [String: [String]] ?? [:]
-        }
-        set {
-            UserDefaultsKey.pendingToolUseIdMap.setValue(value: newValue)
-        }
-    }
+    /// Tool use ids by agent: tool use ids are an agent's own, and only that agent's provider reads them.
+    private static let idsByAgent = Mutex<[AgentProviderName: Set<String>]>([:])
 
-    static func contains(_ toolUseID: String, agent: AgentProviderName) -> Bool
-    {
-        pendingUsesMap[agent.rawValue]?.contains(toolUseID) ?? false
+    static func contains(_ toolUseID: String, agent: AgentProviderName) -> Bool {
+        idsByAgent.withLock { $0[agent]?.contains(toolUseID) ?? false }
     }
 
     static func add(_ toolUseID: String, agent: AgentProviderName) {
-        var ids = pendingUsesMap[agent.rawValue] ?? []
-        if !ids.contains(toolUseID) { ids.append(toolUseID) }
-        pendingUsesMap[agent.rawValue] = ids
+        idsByAgent.withLock { _ = $0[agent, default: []].insert(toolUseID) }
     }
 
     static func remove(_ toolUseID: String, agent: AgentProviderName) {
-        pendingUsesMap[agent.rawValue] = (pendingUsesMap[agent.rawValue] ?? [])
-            .filter {
-                $0 != toolUseID
-            }
+        idsByAgent.withLock { _ = $0[agent]?.remove(toolUseID) }
     }
 }

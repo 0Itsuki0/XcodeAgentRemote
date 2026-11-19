@@ -101,7 +101,6 @@ EXAMPLES:
 - Xcode's permission mode: defaults `com.apple.dt.Xcode`, key `IDEChatAgentPermissionMode` (`standard` = Manual, `auto`, `dontAsk`, `bypassPermissions`)
 - Xcode's file access supervisor (Endpoint Security client, asks / refuses when the agent opens a file): `/Applications/Xcode-beta.app/Contents/Developer/usr/libexec/agentfileaccesssupervisor`, preferences domain `com.apple.dt.CodeIntelligence.agentfileaccesssupervisor`
 - Xcode's permission decisions in the unified log (values `<private>`): process `Xcode`, subsystem `com.apple.IDEIntelligenceChat` (`AgentToolUseCallbackDelegate`: "approved" / "requesting permission", rule specificity), and process `agentfileaccesssupervisor` ("Authorization Request" / "Authorization resolved"). e.g. `log stream --level debug --style compact --predicate 'process == "Xcode" OR process == "agentfileaccesssupervisor"'`
-- the app's marks of waiting tool uses: the app's `UserDefaults`, key `WaitingForUserToolUseIDsByAgent` (`[agent: [tool use id]]`)
 
 
 ### Sample Jsonl (Claude history)
@@ -292,7 +291,7 @@ We need to tell it apart from other tool user so that we can have the user to an
     - The write happens shortly after it asks, not at the same moment.
         - If `claude` is terminated, for example, due to a crash or a test's pkill, within a second of the request, the tool use is lost, aka: no entry is written to `.jsonl`.
     - without any `PreToolUse` hook, the tool use is only written after the answer
-- when the agent asks, the app marks the tool use waiting (stored in `UserDefaults`, per agent: `[agent: [tool use id]]`). removed once the answer arrives or the tool use has a result
+- when the agent asks, the app marks the tool use waiting (in memory while the app runs, per agent: `[agent: [tool use id]]`). removed once the answer arrives or the tool use has a result
 - a tool use is a request **initiated by THIS App** when all three are `true` (Logic: `ClaudeProvider.userRequest`)
     - it has a result decided by the user: `permissionDecision.source` `user_temporary` (allowed / answered / approved) or `user_reject` (denied / declined / rejected)
     - it has no result yet, and it is a question or a plan

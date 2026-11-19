@@ -8,9 +8,6 @@
 import Foundation
 
 nonisolated enum UserDefaultsKey: String, CaseIterable {
-    /// Tool user Id that are requests waiting for user response. By agent.
-    /// `[agent: [tool use id]]`: tool use ids are an agent's own, and only that agent's provider reads them.
-    case pendingToolUseIdMap
     case apiServerPort
 
     static var userDefaults: UserDefaults { .standard }
