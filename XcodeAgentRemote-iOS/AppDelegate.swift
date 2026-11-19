@@ -9,8 +9,9 @@ import CloudKit
 import SwiftUI
 import UserNotifications
 
-private let logger = Logger.shared
-private let category = Logger.category(#fileID)
+// Used from callbacks off the main actor too (e.g. the notification permission's).
+nonisolated private let logger = Logger.shared
+nonisolated private let category = Logger.category(#fileID)
 
 class AppDelegate: NSObject {
     let iCloudManager = ICloudManager()

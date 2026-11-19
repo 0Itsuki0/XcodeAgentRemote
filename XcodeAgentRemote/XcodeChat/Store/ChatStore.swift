@@ -159,7 +159,7 @@ nonisolated enum ChatStore {
         -> String?
     {
         guard
-            let top = runCommand(
+            let top = CommandExecutor.runCommand(
                 ["git", "rev-parse", "--show-toplevel"],
                 in: workingDirectory
             )?
@@ -167,7 +167,7 @@ nonisolated enum ChatStore {
             !top.isEmpty
         else { return nil }
         let repository = URL(filePath: top, directoryHint: .isDirectory)
-        let revision = runCommand(
+        let revision = CommandExecutor.runCommand(
             ["git", "rev-parse", "HEAD"],
             in: repository
         )?
@@ -175,9 +175,9 @@ nonisolated enum ChatStore {
         let snapshot = GitSnapshotFile.GitState(
             id: newUUID(),
             date: Date(),
-            diffStaged: runCommand(["git", "diff", "--cached"], in: repository)
+            diffStaged: CommandExecutor.runCommand(["git", "diff", "--cached"], in: repository)
                 ?? "",
-            diffUnstaged: runCommand(["git", "diff"], in: repository) ?? "",
+            diffUnstaged: CommandExecutor.runCommand(["git", "diff"], in: repository) ?? "",
             revision: revision?.isEmpty == false ? revision : nil
         )
         var root = top

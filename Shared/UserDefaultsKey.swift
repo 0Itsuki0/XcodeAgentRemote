@@ -13,7 +13,7 @@ nonisolated enum UserDefaultsKey: String, CaseIterable {
     case pendingToolUseIdMap
     case apiServerPort
 
-    static let userDefaults = UserDefaults.standard
+    static var userDefaults: UserDefaults { .standard }
 
     var key: String {
         return "XcodeAgentRemote_\(self.rawValue)"

@@ -7,6 +7,7 @@
 
 import Foundation
 import Network
+import Synchronization
 
 nonisolated
     struct NetworkConnectivityDidChange: NotificationCenter.AsyncMessage
@@ -26,15 +27,23 @@ where
 }
 
 // MARK: - NetworkMonitor for monitoring network change.
-nonisolated class NetworkMonitor {
+/// Not tied to an actor: its state is read on request from any thread, and changes are posted as notifications
+/// (`NetworkConnectivityDidChange`). The state is kept behind a lock.
+nonisolated final class NetworkMonitor: Sendable {
 
-    private(set) var isConnected = true
-    private(set) var connectionType: ConnectionType = .unknown
+    private struct State {
+        var isConnected = true
+        var connectionType: ConnectionType = .unknown
+    }
+
+    private let state = Mutex(State())
+    var isConnected: Bool { state.withLock { $0.isConnected } }
+    var connectionType: ConnectionType { state.withLock { $0.connectionType } }
 
     private let monitor = NWPathMonitor()
-    private var monitorTask: Task<Void, Error>?
+    private let monitorTask = Mutex<Task<Void, Never>?>(nil)
 
-    enum ConnectionType: String {
+    enum ConnectionType: String, Sendable {
         case wifi, cellular, ethernet, unknown
     }
 
@@ -43,12 +52,19 @@ nonisolated class NetworkMonitor {
     deinit { self.stopMonitoring() }
 
     private func startMonitoring() {
-        self.monitorTask = Task {
-            for await path in self.monitor {
+        // `self` weakly: the task runs until it is cancelled, which `deinit` does, so holding `self` would keep both
+        // alive forever.
+        let task = Task { [weak self, monitor] in
+            for await path in monitor {
+                guard let self else { return }
                 let nowConnected = path.status == .satisfied
-                let previous = self.isConnected
-                self.isConnected = nowConnected
-                self.connectionType = self.resolve(path)
+                let connectionType = self.resolve(path)
+                let previous = self.state.withLock { state in
+                    let previous = state.isConnected
+                    state.isConnected = nowConnected
+                    state.connectionType = connectionType
+                    return previous
+                }
                 if previous != nowConnected {
                     NotificationCenter.default.post(
                         NetworkConnectivityDidChange(isConnected: nowConnected)
@@ -56,6 +72,7 @@ nonisolated class NetworkMonitor {
                 }
             }
         }
+        self.monitorTask.withLock { $0 = task }
     }
 
     private func resolve(_ path: NWPath) -> ConnectionType {
@@ -66,7 +83,9 @@ nonisolated class NetworkMonitor {
     }
 
     func stopMonitoring() {
-        self.monitorTask?.cancel()
-        self.monitorTask = nil
+        self.monitorTask.withLock { task in
+            task?.cancel()
+            task = nil
+        }
     }
 }

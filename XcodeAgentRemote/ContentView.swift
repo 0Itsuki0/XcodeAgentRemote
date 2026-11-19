@@ -13,6 +13,7 @@ struct ContentView: View {
 //    @Environment(\.modelContext) private var modelContext
 //    @Query private var items: [ItemModel]
     @State private var sendMessageOutput: [String] = []
+    @State private var runningCommand: CommandExecutor.RunningCommand?
     private let server = APIServer()
     private let iCloudManager = ICloudManager()
 
@@ -48,15 +49,38 @@ struct ContentView: View {
                 Button("test command") {
                     Task {
                         print(
-                            runCommand(["ngrok", "http", "-h"])
+                            CommandExecutor.runCommand(["ngrok", "http", "-h"])
                                 ?? "fail to get a result"
                         )
                         print(
-                            runCommand(["ngrok", "http", "80"])
+                            CommandExecutor.runCommand(["ngrok", "http", "80"])
                                 ?? "fail to get a result"
                         )
 
                     }
+                }
+
+                Button("test command stream") {
+                    Task {
+                        do {
+                            let command = try CommandExecutor.runCommandStream(
+                                ["sh", "-c", "for i in 1 2 3 4 5 6 7 8 9 10; do echo \"line $i\"; sleep 1; done"]
+                            )
+                            runningCommand = command
+                            for try await line in command.outputLines {
+                                print(String(decoding: line, as: UTF8.self))
+                            }
+                            await command.waitUntilExit()
+                            print("exited")
+                        } catch {
+                            print("error: ", error)
+                        }
+                        runningCommand = nil
+                    }
+                }
+
+                Button("terminate command") {
+                    runningCommand?.terminate()
                 }
 
                 #if os(macOS)

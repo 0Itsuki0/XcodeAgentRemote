@@ -47,7 +47,7 @@ struct SessionHistoryTests {
 
         // Xcode's bundled Claude, run directly; Bash allowed so nothing asks.
         let output = try #require(
-            runCommand(
+            CommandExecutor.runCommand(
                 ["xcrun", "mcpbridge", "run-agent", "claude", "-p", prompt, "--output-format", "json",
                  "--allowedTools", "Bash"],
                 in: folder),

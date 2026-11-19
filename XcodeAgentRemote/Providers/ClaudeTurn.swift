@@ -39,7 +39,7 @@ nonisolated extension ClaudeProvider {
 
     /// Xcode's system prompt addition, rendered from its template inside Xcode.
     private static func xcodeSystemPrompt() -> String? {
-        guard let developer = runCommand(["xcode-select", "-p"])?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let developer = CommandExecutor.runCommand(["xcode-select", "-p"])?.trimmingCharacters(in: .whitespacesAndNewlines)
         else { return nil }
         let path = (developer as NSString).appendingPathComponent(
             "../PlugIns/IDEIntelligenceChat.framework/Resources/AgentSystemPromptAddition.idechatprompttemplate")
@@ -67,7 +67,7 @@ nonisolated extension ClaudeProvider {
         if let prompt = xcodeSystemPrompt() {
             arguments += ["--append-system-prompt", prompt]
         }
-        if let pluginDirectory = runCommand(["xcrun", "mcpbridge", "run-agent", "plugin", "path", "--plugin-format", agent.rawValue])?
+        if let pluginDirectory = CommandExecutor.runCommand(["xcrun", "mcpbridge", "run-agent", "plugin", "path", "--plugin-format", agent.rawValue])?
             .trimmingCharacters(in: .whitespacesAndNewlines), !pluginDirectory.isEmpty
         {
             arguments += ["--plugin-dir", pluginDirectory]
@@ -97,43 +97,32 @@ nonisolated extension ClaudeProvider {
     private static func runAgent(
         _ request: TurnRequest, continuation: AsyncThrowingStream<ChatEvent, Error>.Continuation
     ) async throws {
-        let process = Process()
-        process.executableURL = URL(filePath: "/usr/bin/env")
-        process.arguments = ["xcrun"] + launchArguments(
-            sessionID: request.sessionID, resume: request.resume, permissionMode: request.permissionMode)
-        process.currentDirectoryURL = request.workingDirectory
-        let input = Pipe()
-        let output = Pipe()
-        process.standardInput = input
-        process.standardOutput = output
-        let (exited, exitedContinuation) = AsyncStream<Void>.makeStream()
         // The request the turn waits on: if the agent exits meanwhile (e.g. it is killed), nothing will come of it,
         // so the wait ends right away (the request is left waiting in the transcript, still answerable).
         let waitingOn = WaitingToolUse()
         let sessionID = request.sessionID
-        process.terminationHandler = { _ in
-            RunningSessions.remove(sessionID)
-            exitedContinuation.finish()
-            Task {
-                if let toolUseID = await waitingOn.toolUseID { await PendingUserRequests.shared.unregister(toolUseID) }
-            }
-        }
-
-        let stdin = input.fileHandleForWriting
-        // Writing after the agent exited fails instead of killing the app with SIGPIPE.
-        _ = fcntl(stdin.fileDescriptor, F_SETNOSIGPIPE, 1)
-        /// Writes one JSON line to the agent's input.
-        func sendToAgent<Message: Encodable>(_ message: Message) {
-            guard var line = try? JSONEncoder().encode(message) else { return }
-            line.append(UInt8(ascii: "\n"))
-            try? stdin.write(contentsOf: line)
-        }
-
         RunningSessions.insert(sessionID)
-        do { try process.run() } catch {
+        let agentProcess: CommandExecutor.RunningCommand
+        do {
+            agentProcess = try CommandExecutor.runCommandStream(
+                ["xcrun"] + launchArguments(sessionID: sessionID, resume: request.resume, permissionMode: request.permissionMode),
+                in: request.workingDirectory
+            ) {
+                RunningSessions.remove(sessionID)
+                Task {
+                    if let toolUseID = await waitingOn.toolUseID { await PendingUserRequests.shared.unregister(toolUseID) }
+                }
+            }
+        } catch {
             RunningSessions.remove(sessionID)
             throw error
         }
+        /// Writes one JSON line to the agent's input.
+        func sendToAgent<Message: Encodable>(_ message: Message) {
+            guard let line = try? JSONEncoder().encode(message) else { return }
+            agentProcess.writeLine(line)
+        }
+
         try await withTaskCancellationHandler {
             // A pass-through PreToolUse hook, like the one Xcode registers: with any PreToolUse hook, Claude writes a
             // tool use to the session's transcript before it asks the user about it, so a waiting request is in the
@@ -148,14 +137,7 @@ nonisolated extension ClaudeProvider {
             var toolUses: [String: ChatEvent.ToolUse] = [:]
             var agentError: String?
             let decoder = JSONDecoder()
-            var line = Data()
-            // Lines split on "\n" only: a JSON string can contain other line separators (U+2028).
-            reading: for try await byte in output.fileHandleForReading.bytes {
-                guard byte == UInt8(ascii: "\n") else {
-                    line.append(byte)
-                    continue
-                }
-                defer { line.removeAll(keepingCapacity: true) }
+            reading: for try await line in agentProcess.outputLines {
                 guard let message = try? decoder.decode(AgentOutputLine.self, from: line) else { continue }
 
                 switch message.type {
@@ -238,7 +220,7 @@ nonisolated extension ClaudeProvider {
 
                 case "result":
                     if message.isError == true { agentError = message.result ?? "unknown error" }
-                    try? stdin.close()
+                    agentProcess.closeInput()
                     break reading
 
                 default:
@@ -246,11 +228,11 @@ nonisolated extension ClaudeProvider {
                 }
             }
 
-            for await _ in exited {}
+            await agentProcess.waitUntilExit()
             try Task.checkCancellation()
             if let agentError { throw XcodeChatError.agentFailed(message: agentError) }
         } onCancel: {
-            process.terminate()
+            agentProcess.terminate()
         }
     }
 
