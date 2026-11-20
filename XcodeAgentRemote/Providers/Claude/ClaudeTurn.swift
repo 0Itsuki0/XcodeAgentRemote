@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import Synchronization
 
 nonisolated extension ClaudeProvider {
     /// Xcode's model identifier for its Claude agent's chats.
@@ -109,8 +110,8 @@ nonisolated extension ClaudeProvider {
                 in: request.workingDirectory
             ) {
                 RunningSessions.remove(sessionID)
-                Task {
-                    if let toolUseID = await waitingOn.toolUseID { await PendingUserRequestHandler.shared.unregister(toolUseID) }
+                if let toolUseID = waitingOn.toolUseID {
+                    Task { await PendingUserRequestHandler.shared.unregister(toolUseID) }
                 }
             }
         } catch {
@@ -152,7 +153,7 @@ nonisolated extension ClaudeProvider {
                             var toolUse = ChatEvent.ToolUse(id: block.id, name: block.name, input: [:])
                             if case .object(let input) = block.input { toolUse.input = input }
                             if fileChangingTools.contains(toolUse.name), let path = toolUse.stringInput("file_path") {
-                                await request.records.setFileBefore(
+                                request.records.setFileBefore(
                                     try? String(contentsOfFile: path, encoding: .utf8), toolUseID: toolUse.id)
                             }
                             toolUses[toolUse.id] = toolUse
@@ -167,7 +168,7 @@ nonisolated extension ClaudeProvider {
                         guard let toolUse = toolUses[result.toolUseID] else { continue }
                         PendingToolUses.remove(toolUse.id, agent: agent)
                         if fileChangingTools.contains(toolUse.name), let path = toolUse.stringInput("file_path") {
-                            await request.records.setFileAfter(
+                            request.records.setFileAfter(
                                 try? String(contentsOfFile: path, encoding: .utf8), toolUseID: toolUse.id)
                         }
                         continuation.yield(.toolResult(ChatEvent.ToolResult(
@@ -197,17 +198,17 @@ nonisolated extension ClaudeProvider {
                         if let repeated = repeatedAnswer, !repeated.answer.isDeny, isSameCall(repeated.toolUse, toolUse) {
                             repeatedAnswer = nil
                             answer = repeated.answer.answering(toolUseID)
-                            await request.records.setRepeatedEarlierToolUse()
+                            request.records.setRepeatedEarlierToolUse()
                         } else {
-                            await waitingOn.set(toolUseID)
+                            waitingOn.set(toolUseID)
                             answer = await PendingUserRequestHandler.shared.waitForAnswer(
                                 toolUseID: toolUseID, timeout: request.permissionTimeout)
-                            await waitingOn.set(nil)
+                            waitingOn.set(nil)
                         }
                         if answer != nil { PendingToolUses.remove(toolUseID, agent: agent) }
                         let decision = permissionDecision(for: permissionRequest, answer: answer, timeout: request.permissionTimeout)
                         if decision.behavior == "deny" {
-                            await request.records.setDenied(toolUseID: toolUseID)
+                            request.records.setDenied(toolUseID: toolUseID)
                         }
                         sendToAgent(ControlResponse(response: .init(subtype: "success", requestID: requestID, response: decision)))
                     case "hook_callback":
@@ -316,10 +317,12 @@ nonisolated extension ClaudeProvider {
         var message: String?
     }
 
-    /// The tool use a turn waits on for the user's answer, if any.
-    private actor WaitingToolUse {
-        private(set) var toolUseID: String?
-        func set(_ toolUseID: String?) { self.toolUseID = toolUseID }
+    /// The tool use a turn waits on for the user's answer, if any. Set by the turn, read when the agent exits (behind a
+    /// lock: only set and read, never waited on).
+    private final class WaitingToolUse: Sendable {
+        private let id = Mutex<String?>(nil)
+        var toolUseID: String? { id.withLock { $0 } }
+        func set(_ toolUseID: String?) { id.withLock { $0 = toolUseID } }
     }
 
     /// `{}`: a hook's output with no decision.

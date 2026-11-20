@@ -7,13 +7,16 @@
 
 import OSLog
 import SwiftUI
+import Synchronization
 
 nonisolated private let logger = os.Logger(
     subsystem: Logger.subsystem,
     category: "ApplicationLog"
 )
 
-actor Logger {
+/// Logs to the console (`os.Logger`) and to a file. Each line is written as it is logged, in the order it is logged:
+/// the file is kept behind a lock (writing a line never waits on anything).
+nonisolated final class Logger: Sendable {
     nonisolated static let subsystem = "itsuki.enjoy.XcodeAgentRemote"
 
     static let shared = Logger()
@@ -26,7 +29,8 @@ actor Logger {
     private static let fileExtension = "txt"
     let filePath: URL
 
-    private let fileHandle: FileHandle?
+    /// The log file; nil if it could not be opened (then each line is written to `filePath` directly).
+    private let fileHandle: Mutex<FileHandle?>
 
     private init() {
         let fileManager = FileManager.default
@@ -59,10 +63,10 @@ actor Logger {
 
         logger.info("Log file written to \(self.filePath, privacy: .public)")
         do {
-            self.fileHandle = try FileHandle(forWritingTo: self.filePath)
+            self.fileHandle = Mutex(try FileHandle(forWritingTo: self.filePath))
         } catch (let error) {
             logger.error("\(error.localizedDescription)")
-            self.fileHandle = nil
+            self.fileHandle = Mutex(nil)
         }
 
         Task.detached {
@@ -72,40 +76,22 @@ actor Logger {
     }
 
     deinit {
-        try? self.fileHandle?.close()
+        fileHandle.withLock { try? $0?.close() }
     }
 
-    nonisolated
-        func info(category: String, message: String)
-    {
+    func info(category: String, message: String) {
         logger.info(
             "\(Date().formatted()) info [\(category, privacy: .public)] \(message, privacy: .public)"
         )
-
-        Task { @MainActor [weak self] in
-            await self?.writeLog(
-                category: category,
-                message: message,
-                level: .info
-            )
-        }
+        writeLog(category: category, message: message, level: .info)
     }
 
-    nonisolated
-        func error(category: String, error: Error)
-    {
+    func error(category: String, error: Error) {
         let message = error.localizedDescription
         logger.error(
             "\(Date().formatted()) error [\(category, privacy: .public)] \(message, privacy: .public)"
         )
-
-        Task { @MainActor [weak self] in
-            await self?.writeLog(
-                category: category,
-                message: message,
-                level: .error
-            )
-        }
+        writeLog(category: category, message: message, level: .error)
     }
 
     private func writeLog(
@@ -126,11 +112,13 @@ actor Logger {
         }
         message = message + "\n"
 
-        if let fileHandle {
-            fileHandle.seekToEndOfFile()
-            fileHandle.write(message.data)
-        } else {
-            try? message.data.write(to: self.filePath, options: .atomicWrite)
+        fileHandle.withLock { fileHandle in
+            if let fileHandle {
+                fileHandle.seekToEndOfFile()
+                fileHandle.write(message.data)
+            } else {
+                try? message.data.write(to: self.filePath, options: .atomicWrite)
+            }
         }
     }
 
@@ -146,7 +134,7 @@ actor Logger {
     }
 }
 
-extension Logger {
+nonisolated extension Logger {
     static func category(_ fileId: String) -> String {
         return fileId.split(separator: "/").last.map(String.init) ?? fileId
     }

@@ -6,7 +6,8 @@
 //
 //  End-to-end test scenarios, in two parts:
 //  1. on the Mac: calling the Mac app's functions directly (`TestScenarios.runDirect`)
-//  2. on iOS: sending through the server with the iOS app's client (`TestScenarios.runThroughServer`)
+//  2. through the server with the iOS app's client (`TestScenarios.runThroughServer`): from iOS, or on the Mac
+//     against the Mac app's server (`ScenarioTests`)
 //  Each runs real agent turns: they create chats named "Test scenario …" in Xcode's chat store of the project.
 //
 
@@ -397,9 +398,8 @@ extension TestScenarios {
 }
 #endif
 
-// MARK: - Part 2: on iOS, through the server
+// MARK: - Part 2: through the server (the iOS app's client)
 
-#if os(iOS)
 extension TestScenarios {
 
     /// Runs the scenarios from iOS through the Mac's server (`APIServerClient`), against the chats of `project`
@@ -515,4 +515,3 @@ extension TestScenarios {
         }
     }
 }
-#endif

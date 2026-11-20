@@ -9,6 +9,7 @@
 /// Input: new conversation / conversationId / project (whatever is required by the script)
 
 import Foundation
+import Synchronization
 
 /// Why the user's answer to a request could not be delivered.
 nonisolated enum SendMessageError: LocalizedError {
@@ -60,7 +61,7 @@ nonisolated func answerUserRequest(_ answer: UserAnswer, permissionTimeout: Time
         let task = Task {
             do {
                 let events: AsyncThrowingStream<ChatEvent, Error>
-                if let turn = await RunningTurns.shared.take(waitingFor: answer.toolUseID) {
+                if let turn = RunningTurns.take(waitingFor: answer.toolUseID) {
                     // If the wait timed out meanwhile, the turn went on without this answer; it still continues here.
                     try? await PendingUserRequestHandler.shared.answer(answer)
                     events = turn.untilWaitingForUser()
@@ -81,8 +82,8 @@ nonisolated func answerUserRequest(_ answer: UserAnswer, permissionTimeout: Time
 }
 
 /// Whether a chat waits for the user's answer to this tool use (`answerUserRequest` would deliver it).
-nonisolated func isWaitingForUser(toolUseID: String) async -> Bool {
-    await RunningTurns.shared.isWaiting(for: toolUseID) || XcodeChat.unansweredRequest(toolUseID: toolUseID) != nil
+nonisolated func isWaitingForUser(toolUseID: String) -> Bool {
+    RunningTurns.isWaiting(for: toolUseID) || XcodeChat.unansweredRequest(toolUseID: toolUseID) != nil
 }
 
 // MARK: - Running turns
@@ -124,7 +125,7 @@ private actor RunningTurn {
                     if case .userRequest(let request) = event {
                         // Once the agent waits on it, the turn waits for that answer (`answerUserRequest`).
                         await PendingUserRequestHandler.shared.whenWaiting(for: request.toolUseID) {
-                            await RunningTurns.shared.save(turn, waitingFor: request.toolUseID)
+                            RunningTurns.save(turn, waitingFor: request.toolUseID)
                             await turn.push(.waiting)
                         }
                     }
@@ -133,7 +134,7 @@ private actor RunningTurn {
                 await turn.push(.failed(error))
             }
             await PendingUserRequestHandler.shared.unregister(open)
-            await RunningTurns.shared.remove(turn)
+            RunningTurns.remove(turn)
             await turn.end()
         }
         return turn
@@ -186,27 +187,26 @@ private actor RunningTurn {
     }
 }
 
-/// The running turns that wait for the user, by the tool use they wait for (what an answer names).
-private actor RunningTurns {
-    static let shared = RunningTurns()
+/// The running turns that wait for the user, by the tool use they wait for (what an answer names). Only set and read,
+/// never waited on: kept behind a lock.
+private nonisolated enum RunningTurns {
+    private static let byToolUseID = Mutex<[String: RunningTurn]>([:])
 
-    private var byToolUseID: [String: RunningTurn] = [:]
-
-    func save(_ turn: RunningTurn, waitingFor toolUseID: String) {
-        byToolUseID[toolUseID] = turn
+    static func save(_ turn: RunningTurn, waitingFor toolUseID: String) {
+        byToolUseID.withLock { $0[toolUseID] = turn }
     }
 
     /// The turn waiting for the answer to this tool use, removed (an answer continues it once).
-    func take(waitingFor toolUseID: String) -> RunningTurn? {
-        byToolUseID.removeValue(forKey: toolUseID)
+    static func take(waitingFor toolUseID: String) -> RunningTurn? {
+        byToolUseID.withLock { $0.removeValue(forKey: toolUseID) }
     }
 
-    func isWaiting(for toolUseID: String) -> Bool {
-        byToolUseID[toolUseID] != nil
+    static func isWaiting(for toolUseID: String) -> Bool {
+        byToolUseID.withLock { $0[toolUseID] != nil }
     }
 
     /// Forgets a turn that ended.
-    func remove(_ turn: RunningTurn) {
-        byToolUseID = byToolUseID.filter { $0.value !== turn }
+    static func remove(_ turn: RunningTurn) {
+        byToolUseID.withLock { $0 = $0.filter { $0.value !== turn } }
     }
 }

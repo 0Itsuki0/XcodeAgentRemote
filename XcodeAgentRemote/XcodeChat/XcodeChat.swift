@@ -194,7 +194,7 @@ nonisolated enum XcodeChat {
         let finishedDate = Date()
         let snapshotAfter = try ChatStore.writeGitSnapshot(store: store, workingDirectory: workingDirectory)
 
-        let toolUseRecords = await records.byToolUseID
+        let toolUseRecords = records.byToolUseID
         let response = ChatCard.turnCards(for: events) { toolUse, result in
             provider.card(for: toolUse, result: result, record: toolUseRecords[toolUse.id])
         }
@@ -205,7 +205,7 @@ nonisolated enum XcodeChat {
 
         // The agent repeated the earlier tool use and was given its answer: the earlier one (left without a result
         // when its agent was stopped, then marked interrupted on resume) is replaced by the repeat, so remove it.
-        if let repeatedAnswer, await records.repeatedEarlierToolUse {
+        if let repeatedAnswer, records.repeatedEarlierToolUse {
             try provider.removeToolUse(repeatedAnswer.toolUse.id, sessionID: sessionID)
         }
 
