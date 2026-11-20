@@ -54,7 +54,25 @@ class APIServerManager {
             UserDefaultsKey.apiServerPort.setValue(value: self.port)
         }
     }
-    var serverState: ServerState = .stopped
+
+    var authHeader: AuthHeader {
+        didSet {
+            UserDefaultsKey.apiServerAuthHeaderName.setValue(
+                value: self.authHeader.name
+            )
+            UserDefaultsKey.apiServerAuthHeaderValue.setValue(
+                value: self.authHeader.value
+            )
+        }
+    }
+
+    var useAuth: Bool {
+        didSet {
+            UserDefaultsKey.apiServerUseAuth.setValue(value: self.useAuth)
+        }
+    }
+
+    private(set) var serverState: ServerState = .stopped
     var error: Error? {
         didSet {
             guard let error else { return }
@@ -66,6 +84,19 @@ class APIServerManager {
         self.port =
             UserDefaultsKey.apiServerPort.getValue() as? Int
             ?? APIServerConstant.defaultPort
+
+        self.useAuth =
+            UserDefaultsKey.apiServerUseAuth.getValue() as? Bool ?? false
+
+        let authHeaderName =
+            UserDefaultsKey.apiServerAuthHeaderName.getValue() as? String ?? ""
+        let authHeaderValue =
+            UserDefaultsKey.apiServerAuthHeaderValue.getValue() as? String ?? ""
+
+        self.authHeader = AuthHeader(
+            name: authHeaderName,
+            value: authHeaderValue
+        )
     }
 
     func startServer() {
@@ -73,7 +104,10 @@ class APIServerManager {
         self.serverState = .starting
         Task {
             do {
-                try await server.start(port: self.port)
+                try await server.start(
+                    port: self.port,
+                    authHeader: self.authHeader
+                )
                 self.serverState = .running
             } catch {
                 self.serverState = .stopped

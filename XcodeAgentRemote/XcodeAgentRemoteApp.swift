@@ -15,12 +15,14 @@ struct XcodeAgentRemoteApp: App {
     private let chatWatcher = ChatWatcher()
 
     var body: some Scene {
-        MenuBarExtra {
-            AppMenu()
-        } label: {
-            Image(systemName: "cloud.fill")
-        }
-        .menuBarExtraStyle(.window)
+        // TODO: comment out for testing purpose
+        // when ready, put it back in as well as setting `Application is agent (UIElement)` in info.plist back to false
+//        MenuBarExtra {
+//            AppMenu()
+//        } label: {
+//            Image(systemName: "cloud.fill")
+//        }
+//        .menuBarExtraStyle(.window)
 
         Window("Dashboard", id: DashboardWindow.identifier) {
             DashboardWindow()

@@ -34,7 +34,9 @@
         @Test func throughServer() async throws {
             let server = APIServer()
             let port = try await server.start(port: 0)
-            let client = try APIServerClient(host: "127.0.0.1", port: port)
+            guard let client = APIServerClient(host: "127.0.0.1", port: port) else {
+                return
+            }
             let results = await TestScenarios.runThroughServer(
                 client: client,
                 project: Self.project

@@ -54,15 +54,23 @@ actor APIServer {
     /// Starts listening on `127.0.0.1:<port>` and returns the port once the server is running
     /// (port 0 picks a free one). If the server is already running (or starting), returns its port.
     /// Throws only if the server cannot run, e.g. the port is in use.
+    ///
+    /// `authHeader`:
+    /// Optional header every request must carry, e.g. `AuthHeader(name: "Authorization", value: "Bearer <secret>")`.
+    /// When set, the server rejects requests without it (401) and the iOS client sends it with every request.
+    /// `nil`: no check.
     @discardableResult
-    func start(port: Int = APIServerConstant.defaultPort) async throws -> Int {
+    func start(
+        port: Int = APIServerConstant.defaultPort,
+        authHeader: AuthHeader? = nil
+    ) async throws -> Int {
         if let runningPort {
             return try await runningPort.value
         }
 
         let (running, runningContinuation) = AsyncStream<Int>.makeStream()
         let app = Application(
-            router: Self.router(),
+            router: Self.router(authHeader: authHeader),
             configuration: .init(address: .hostname("127.0.0.1", port: port)),
             onServerRunning: { channel in
                 runningContinuation.yield(channel.localAddress?.port ?? port)
@@ -123,10 +131,12 @@ actor APIServer {
 
     // MARK: - Routes
 
-    private static func router() -> Router<BasicRequestContext> {
+    private static func router(authHeader: AuthHeader?) -> Router<
+        BasicRequestContext
+    > {
         let router = Router()
 
-        if let authHeader = APIServerConstant.authHeader {
+        if let authHeader {
             router.add(middleware: AuthHeaderMiddleware(authHeader))
         }
 

@@ -15,15 +15,12 @@ nonisolated extension HTTPURLResponse {
 
 
 nonisolated enum NetworkError: Error, LocalizedError {
-    case failToCreateURL
     /// Non-2xx response; `message` is the server's error message, if it sent one.
     case badResponse(code: Int, message: String?)
     case dataTaskError(Error)
 
     var errorDescription: String? {
         switch self {
-        case .failToCreateURL:
-            "Fail to create URL."
         case .badResponse(let code, let message):
             "Network failed. Code:\(code)." + (message.map { " \($0)" } ?? "")
         case .dataTaskError(let error):

@@ -24,7 +24,7 @@ enum DashboardOption: String, Hashable, CaseIterable {
 struct DashboardWindow: View {
     static let identifier = "DashboardWindow"
 
-    @State private var selection: DashboardOption = .watcher
+    @State private var selection: DashboardOption = .server
 
     var body: some View {
         NavigationSplitView {
@@ -52,6 +52,8 @@ struct DashboardWindow: View {
 
 struct ChatWatcherConfigurationView: View {
     @Environment(ChatWatcher.self) private var chatWatcher
+    
+    // TODO: - add iCloud account state, add project / conversation list
 
     var body: some View {
         Button("watch") {
@@ -138,11 +140,14 @@ struct APIServerView: View {
                         value: $serverManager.port,
                         format: portFormatStyle
                     )
+                    
+                    // TODO: - add auth configuration
                 } footer: {
                     Text("Restart the server to apply any changes.")
                         .font(.caption)
                 }
             }
+            .contentMargins(.top, -12)
             .formStyle(.grouped)
             .scrollBounceBehavior(.basedOnSize)
             .frame(

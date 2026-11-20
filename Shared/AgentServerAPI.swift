@@ -25,10 +25,6 @@ nonisolated enum APIServerConstant {
     /// SSE event name sent instead of the remaining events when a turn fails; data is `ErrorResponse.Body`.
     static let errorEvent = "error"
 
-    /// Optional header every request must carry, e.g. `AuthHeader(name: "Authorization", value: "Bearer <secret>")`.
-    /// When set, the server rejects requests without it (401) and the iOS client sends it with every request.
-    /// `nil`: no check.
-    static let authHeader: AuthHeader? = nil
 }
 
 /// A header name and the exact value required (`APIServerConstant.authHeader`).

@@ -1,5 +1,5 @@
 //
-//  ServerRequest.swift
+//  APIServerClient.swift
 //  XcodeAgentRemote
 //
 //  Created by Itsuki on 2026/11/15.
@@ -22,15 +22,24 @@ nonisolated enum ServerRequestError: Error, LocalizedError {
 nonisolated struct APIServerClient: Sendable {
     /// The server, e.g. `http://192.168.0.4:8765`.
     var baseURL: URL
+    var authHeader: AuthHeader? = nil
 
-    init(baseURL: URL) {
+    init(baseURL: URL, authHeader: AuthHeader? = nil) {
         self.baseURL = baseURL
+        self.authHeader = authHeader
     }
 
     /// The server at `http://<host>:<port>`.
-    init(host: String, port: Int = APIServerConstant.defaultPort) throws {
-        guard let url = URL(string: "http://\(host):\(port)") else { throw NetworkError.failToCreateURL }
+    init?(
+        host: String,
+        port: Int = APIServerConstant.defaultPort,
+        authHeader: AuthHeader? = nil
+    ) {
+        guard let url = URL(string: "http://\(host):\(port)") else {
+            return nil
+        }
         self.baseURL = url
+        self.authHeader = authHeader
     }
 
     /// `GET /health`
@@ -38,7 +47,10 @@ nonisolated struct APIServerClient: Sendable {
         let data = try await NetworkService.sendURLRequest(
             url: baseURL.appending(path: APIServerConstant.healthPath),
             method: "GET",
-            headers: Self.headers(["Accept": "application/json"]),
+            headers: Self.headers(
+                ["Accept": "application/json"],
+                authHeader: authHeader
+            ),
             body: nil
         )
         return try NetworkService.decode(SuccessResponse.self, from: data)
@@ -49,7 +61,10 @@ nonisolated struct APIServerClient: Sendable {
         let data = try await NetworkService.sendURLRequest(
             url: baseURL.appending(path: APIServerConstant.projectsPath),
             method: "GET",
-            headers: Self.headers(["Accept": "application/json"]),
+            headers: Self.headers(
+                ["Accept": "application/json"],
+                authHeader: authHeader
+            ),
             body: nil
         )
         return try NetworkService.decode([XcodeProject].self, from: data)
@@ -60,12 +75,19 @@ nonisolated struct APIServerClient: Sendable {
     /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
     func conversation(id: String) async throws -> XcodeConversationDetail {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: APIServerConstant.conversationPath).appending(path: id),
+            url: baseURL.appending(path: APIServerConstant.conversationPath)
+                .appending(path: id),
             method: "GET",
-            headers: Self.headers(["Accept": "application/json"]),
+            headers: Self.headers(
+                ["Accept": "application/json"],
+                authHeader: authHeader
+            ),
             body: nil
         )
-        return try NetworkService.decode(XcodeConversationDetail.self, from: data)
+        return try NetworkService.decode(
+            XcodeConversationDetail.self,
+            from: data
+        )
     }
 
     /// `POST /message` (`.prompt`): sends one message, the same parameters as the macOS app's `sendMessage`, and
@@ -82,12 +104,14 @@ nonisolated struct APIServerClient: Sendable {
         permissionModeOverride: PermissionMode? = nil,
         permissionTimeout: TimeInterval? = nil
     ) -> AsyncThrowingStream<ChatEvent, Error> {
-        events(for: .prompt(
-            prompt: prompt,
-            target: target,
-            permissionModeOverride: permissionModeOverride,
-            permissionTimeout: permissionTimeout
-        ))
+        events(
+            for: .prompt(
+                prompt: prompt,
+                target: target,
+                permissionModeOverride: permissionModeOverride,
+                permissionTimeout: permissionTimeout
+            )
+        )
     }
 
     /// `POST /message` (`.answer`): answers the request the turn waits for (`waitingForUser`), and continues the
@@ -99,7 +123,9 @@ nonisolated struct APIServerClient: Sendable {
     }
 
     /// Sends a `POST /message` and streams the turn's events from its SSE response.
-    private func events(for request: MessageRequest) -> AsyncThrowingStream<ChatEvent, Error> {
+    private func events(for request: MessageRequest) -> AsyncThrowingStream<
+        ChatEvent, Error
+    > {
         let url = baseURL.appending(path: APIServerConstant.messagePath)
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -107,7 +133,13 @@ nonisolated struct APIServerClient: Sendable {
                     let bytes = try await NetworkService.streamURLRequest(
                         url: url,
                         method: "POST",
-                        headers: Self.headers(["Content-Type": "application/json", "Accept": "text/event-stream"]),
+                        headers: Self.headers(
+                            [
+                                "Content-Type": "application/json",
+                                "Accept": "text/event-stream",
+                            ],
+                            authHeader: authHeader
+                        ),
                         body: try NetworkService.encode(request)
                     )
                     // SSE: `event: <name>` then `data: <json>` per event. The server sends one data line per event,
@@ -118,10 +150,20 @@ nonisolated struct APIServerClient: Sendable {
                             eventName = name
                         } else if let data = Self.field("data", in: line) {
                             if eventName == APIServerConstant.errorEvent {
-                                let error = try NetworkService.decode(ErrorResponse.Body.self, from: data)
-                                throw ServerRequestError.turnFailed(message: error.message)
+                                let error = try NetworkService.decode(
+                                    ErrorResponse.Body.self,
+                                    from: data
+                                )
+                                throw ServerRequestError.turnFailed(
+                                    message: error.message
+                                )
                             }
-                            continuation.yield(try NetworkService.decode(ChatEvent.self, from: data))
+                            continuation.yield(
+                                try NetworkService.decode(
+                                    ChatEvent.self,
+                                    from: data
+                                )
+                            )
                             eventName = nil
                         }
                     }
@@ -135,9 +177,16 @@ nonisolated struct APIServerClient: Sendable {
     }
 
     /// The request's headers, plus `APIServerConstant.authHeader` if it is set.
-    private static func headers(_ headers: [String: String]) -> [String: String] {
-        guard let authHeader = APIServerConstant.authHeader else { return headers }
-        return headers.merging([authHeader.name: authHeader.value]) { _, auth in auth }
+    private static func headers(
+        _ headers: [String: String],
+        authHeader: AuthHeader?
+    ) -> [String: String] {
+        guard let authHeader else {
+            return headers
+        }
+        return headers.merging([authHeader.name: authHeader.value]) { _, auth in
+            auth
+        }
     }
 
     /// The value of an SSE field line `<name>: <value>` (one optional space after the colon), or nil.

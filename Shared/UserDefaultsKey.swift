@@ -9,6 +9,12 @@ import Foundation
 
 nonisolated enum UserDefaultsKey: String, CaseIterable {
     case apiServerPort
+    case apiServerAuthHeaderName
+    case apiServerAuthHeaderValue
+    case apiServerUseAuth
+    
+    case apiServerURL
+
 
     static var userDefaults: UserDefaults { .standard }
 

@@ -4,7 +4,14 @@
 
 ## Base Approach
 
-<!-- TODO -->
+1. Local server to receive request from IOS (ping, list projects, get conversation, send message and stream response)
+    - no unified server to avoid unnecessary hosting on itsuki's side which includes cloud hosting, authorization, database and etc.
+    - each user is responsible for starting their own tunnel, for example, with ngrok. ([ngrok supports Static dev domains for all users](https://ngrok.com/blog/free-static-domains-ngrok-users))
+    local server started from the mac app instead of a unified server 
+1. Run Xcode Agent Programmatically to process the message and get response
+2. Send Push notification with CloudKit on watched conversations to notify iOS changes on (almost) real time.
+    - using CloudKit to avoid hosting a unified server for all users or bundling itsuki's own developer certificate within the app
+
 
 ## Run Xcode Agent Programmatically
 
