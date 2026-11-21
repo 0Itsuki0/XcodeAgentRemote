@@ -61,7 +61,7 @@ struct SendMessageTests {
 
         #expect(!answered.isEmpty)
         let denied = events.contains { event in
-            if case .toolResult(let result) = event { answered.contains(result.toolUseID) && result.isError } else { false }
+            if case .userResponse(.permission(let toolUseID, false, _)) = event { answered.contains(toolUseID) } else { false }
         }
         #expect(denied)
         #expect(waitingForUser(events).isEmpty)

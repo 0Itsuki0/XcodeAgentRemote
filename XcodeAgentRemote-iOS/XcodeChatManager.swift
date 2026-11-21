@@ -110,10 +110,10 @@ enum RequestState: Equatable, Hashable, Sendable {
     func waitingForUser(_ events: [ChatEvent]) -> [UserRequest] {
         let answered = Set(
             events.compactMap { event -> String? in
-                if case .toolResult(let result) = event {
-                    result.toolUseID
-                } else {
-                    nil
+                switch event {
+                case .toolResult(let result): result.toolUseID
+                case .userResponse(let answer): answer.toolUseID
+                default: nil
                 }
             }
         )

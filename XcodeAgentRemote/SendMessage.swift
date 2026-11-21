@@ -27,8 +27,8 @@ nonisolated enum SendMessageError: LocalizedError {
 // MARK: - Send
 
 /// Runs one turn and streams its events as they happen: the prompt (`.userMessage`), then `.intermediate`,
-/// `.assistantMessage`, `.toolUse`, `.toolResult` and `.userRequest` events. The turn is recorded in Xcode's chat store
-/// when it ends.
+/// `.assistantMessage`, `.toolUse`, `.toolResult`, `.userRequest` and `.userResponse` events. The turn is recorded in
+/// Xcode's chat store when it ends.
 ///
 /// The stream ends when the turn ends, or when the agent waits for the user (permission to use a tool, questions, a
 /// plan): then it ends with that `.userRequest` (`waitingForUser`), and `answerUserRequest(_:)` continues the turn's
@@ -118,6 +118,9 @@ private actor RunningTurn {
                     case .toolResult(let result):
                         open.remove(result.toolUseID)
                         await PendingUserRequestHandler.shared.unregister(result.toolUseID)
+                    case .userResponse(let answer):
+                        open.remove(answer.toolUseID)
+                        await PendingUserRequestHandler.shared.unregister(answer.toolUseID)
                     default:
                         break
                     }

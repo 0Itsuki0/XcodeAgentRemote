@@ -66,7 +66,8 @@ struct ChatView: View {
     @FocusState private var focused
 
     @State private var entry: String = ""
-    @State private var scrollPosition: ScrollPosition = .init(idType: UUID.self)
+//    @State private var scrollPosition: ScrollPosition = .init(idType: UUID.self)
+    @State private var scrollPositionID: UUID? = nil
 
     @State private var entryHeight: CGFloat = 24
 
@@ -74,185 +75,125 @@ struct ChatView: View {
 
     private let standardSpacing: CGFloat = 16
 
+    private let bottomSpacer = UUID()
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: standardSpacing) {
-                    // TODO: - add `ContentUnavailableView`
-                    /// 1. unsupported agent type
-                    /// 2. empty history
-                    /// 3. request error
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: standardSpacing) {
+                // TODO: - add `ContentUnavailableView`
+                /// 1. unsupported agent type
+                /// 2. empty history
+                /// 3. request error
 
-                    ForEach(history) { event in
-                        switch event.event {
-                        case .userMessage(let text):
-                            self.userMessage(text)
-                        default:
-                            Text("Event: \(event.event)")
-                        }
-                    }
-
-                    //                        Section {
-
-                    //                            ForEach(chatManager.messages) { message in
-                    //                                let isUser: Bool = message.isUserMessage
-                    //                                let messageContent: String = message.messageContent
-                    //                                self.messageView(messageContent, isUser: isUser)
-                    //                                    .id(message.id)
-                    //
-                    //                            }
-                    //
-                    //                            if let message = chatManager.streamingMessage {
-                    //                                self.messageView(message.isEmpty || message == "null" ? "..." : message, isUser: false)
-                    //                                    .id(streamingMessageID)
-                    //                            }
-
-                    //                        }
-                    //                        .listSectionMargins(.vertical, 0)
-                    //                        .listSectionMargins(.horizontal, 8)
-
-                }
-                .contentMargins(.top, 0)
-                .scrollTargetLayout()
-                .background(.background)
-                .onChange(of: history, initial: true) {
-                    if let last = history.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                ForEach(history) { event in
+                    switch event.event {
+                    case .userMessage(let text):
+                        self.userMessage(text)
+                    default:
+                        Text("Event: \(event.event)")
                     }
                 }
-                .padding(.all, standardSpacing)
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity,
-                    alignment: .top
-                )
+
+                EmptyView()
+                    .id(bottomSpacer)
+
+                //                        Section {
+
+                //                            ForEach(chatManager.messages) { message in
+                //                                let isUser: Bool = message.isUserMessage
+                //                                let messageContent: String = message.messageContent
+                //                                self.messageView(messageContent, isUser: isUser)
+                //                                    .id(message.id)
+                //
+                //                            }
+                //
+                //                            if let message = chatManager.streamingMessage {
+                //                                self.messageView(message.isEmpty || message == "null" ? "..." : message, isUser: false)
+                //                                    .id(streamingMessageID)
+                //                            }
+
+                //                        }
+                //                        .listSectionMargins(.vertical, 0)
+                //                        .listSectionMargins(.horizontal, 8)
+
             }
-            .scrollPosition($scrollPosition, anchor: .bottom)
-            .defaultScrollAnchor(.bottom, for: .alignment)
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .safeAreaBar(edge: .bottom) {
-                VStack(spacing: standardSpacing) {
-                    if let lastId = history.last?.id,
-                        scrollPosition.viewID(type: UUID.self) != lastId
-                    {
-                        // TODO: - image not centered
-                        Button("", systemImage: "arrow.down") {
-                            proxy.scrollTo(lastId, anchor: .bottom)
-                        }
-                        .buttonBorderShape(.circle)
-                        .buttonStyle(.glass)
-                    }
-                    HStack(spacing: standardSpacing) {
-                        TextField("", text: $entry, axis: .vertical)
-                            .focused($focused)
-                            //                            .onSubmit({
-                            //                                self.sendPrompt()
-                            //                            })
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(.gray, style: .init(lineWidth: 1))
-                                    .fill(.white.opacity(0.8))
-                            )
-
-                        Button(
-                            action: {
-                                //                            self.sendPrompt()
-                            },
-                            label: {
-                                Image(systemName: "paperplane.fill")
-                            }
-                        )
-                        //                        .disabled(chatManager.isResponding)
-
-                    }
-                    .padding(.all, 4)
-                    .glassEffect()
-                    .padding(.horizontal, standardSpacing)
-
-                }
+            .contentMargins(.top, 0)
+            .scrollTargetLayout()
+            .background(.background)
+            .onChange(of: history, initial: true) {
+                //                    if let last = history.last {
+                //                        proxy.scrollTo(last.id, anchor: .bottom)
+                //                    }
+                //                    proxy.scrollTo(bottomSpacer, anchor: .bottom)
+                scrollPositionID = bottomSpacer
             }
-
-            //                    .onChange(of: chatManager.streamingMessage, initial: true, {
-            //                        guard chatManager.streamingMessage != nil else {
-            //                            return
-            //                        }
-            //                        proxy.scrollTo(self.streamingMessageID, anchor: .bottom)
-            //                    })
+            .padding(.all, standardSpacing)
+            .padding(.bottom, standardSpacing)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .top
+            )
         }
-        //        .safeAreaBar(edge: .bottom) {
-        //            VStack(spacing: 12) {
-        //                if scrollPosition.viewID(type: UUID.self) != history.last?.id {
-        //                    Button("", systemImage: "arrow.down") {
-        //                        proxy.scrollTo(history.last?.id, anchor: .bottom)
-        //                    }
-        //                }
-        //            }
-        //            HStack(spacing: 12) {
-        //                TextField("", text: $entry, axis: .vertical)
-        //                    .focused($focused)
-        //                    //                            .onSubmit({
-        //                    //                                self.sendPrompt()
-        //                    //                            })
-        //                    .padding(.vertical, 4)
-        //                    .padding(.horizontal, 8)
-        //                    .background(
-        //                        RoundedRectangle(cornerRadius: 8)
-        //                            .stroke(.gray, style: .init(lineWidth: 1))
-        //                            .fill(.white.opacity(0.8))
-        //                    )
-        //
-        //                Button(
-        //                    action: {
-        //                        //                            self.sendPrompt()
-        //                    },
-        //                    label: {
-        //                        Image(systemName: "paperplane.fill")
-        //                    }
-        //                )
-        //                //                        .disabled(chatManager.isResponding)
-        //
-        //            }
-        //            .padding(.vertical, 16)
-        //            .padding(.horizontal, 24)
-        //            .glassEffect()
-        //            .padding(.horizontal, horizontalPadding)
-        //        }
-        //        .safeAreaInset(
-        //            edge: .bottom,
-        //            content: {
-        //                HStack(spacing: 12) {
-        //                    TextField("", text: $entry, axis: .vertical)
-        //                        .focused($focused)
-        //                        //                            .onSubmit({
-        //                        //                                self.sendPrompt()
-        //                        //                            })
-        //                        .padding(.vertical, 4)
-        //                        .padding(.horizontal, 8)
-        //                        .background(
-        //                            RoundedRectangle(cornerRadius: 8)
-        //                                .stroke(.gray, style: .init(lineWidth: 1))
-        //                                .fill(.white.opacity(0.8))
-        //                        )
-        //
-        //                    Button(
-        //                        action: {
-        //                            //                            self.sendPrompt()
-        //                        },
-        //                        label: {
-        //                            Image(systemName: "paperplane.fill")
+        .scrollPosition(id: $scrollPositionID, anchor: .bottom)
+        .defaultScrollAnchor(.bottom, for: .alignment)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .bottom) {
+            let ids = history.suffix(1).map(\.id) + [bottomSpacer]
+            if let scrollPositionID, !ids.contains(scrollPositionID) {
+                Button("", systemImage: "arrow.down") {
+                    self.scrollPositionID = bottomSpacer
+                }
+                .buttonBorderShape(.circle)
+                .buttonStyle(.glass)
+                .padding(.all, standardSpacing)
+            }
+        }
+        .safeAreaBar(edge: .bottom) {
+            VStack(spacing: standardSpacing) {
+                HStack(spacing: standardSpacing) {
+                    TextField("", text: $entry, axis: .vertical)
+                        .focused($focused)
+                        //                            .onSubmit({
+                        //                                self.sendPrompt()
+                        //                            })
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(.gray, style: .init(lineWidth: 1))
+                                .fill(.white.opacity(0.8))
+                        )
+
+                    Button(
+                        action: {
+                            //                            self.sendPrompt()
+                        },
+                        label: {
+                            Image(systemName: "paperplane.fill")
+                        }
+                    )
+                    //                        .disabled(chatManager.isResponding)
+
+                }
+                .padding(.all, 4)
+                .glassEffect()
+                .padding(.horizontal, standardSpacing)
+
+            }
+        }
+
+        //                    .onChange(of: chatManager.streamingMessage, initial: true, {
+        //                        guard chatManager.streamingMessage != nil else {
+        //                            return
         //                        }
-        //                    )
-        //                    //                        .disabled(chatManager.isResponding)
-        //
-        //                }
-        //                .padding(.vertical, 16)
-        //                .padding(.horizontal, 24)
-        //                .glassEffect()
-        //            }
-        //        )
+        //                        proxy.scrollTo(self.streamingMessageID, anchor: .bottom)
+        //                    })
+        //        }
+        .labelsHidden()
+        .labelStyle(.iconOnly)
         .multilineTextAlignment(.leading)
         .navigationTitle(conversationName)
         .navigationSubtitle(projectName)

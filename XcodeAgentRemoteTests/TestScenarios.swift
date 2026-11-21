@@ -74,11 +74,14 @@ nonisolated enum TestScenarios {
     fileprivate static func toolResults(of tool: String, in events: [ChatEvent])
         -> [ChatEvent.ToolResult]
     {
+        // A tool use the user was asked about is its request (`.userRequest(.permission)`) in a history.
         let ids = Set(
             events.compactMap { event -> String? in
-                if case .toolUse(let toolUse) = event, toolUse.name == tool {
+                switch event {
+                case .toolUse(let toolUse) where toolUse.name == tool,
+                    .userRequest(.permission(let toolUse)) where toolUse.name == tool:
                     toolUse.id
-                } else {
+                default:
                     nil
                 }
             }
@@ -91,6 +94,13 @@ nonisolated enum TestScenarios {
             } else {
                 nil
             }
+        }
+    }
+
+    /// The user's answers to the requests (`.userResponse`).
+    fileprivate static func userResponses(in events: [ChatEvent]) -> [UserAnswer] {
+        events.compactMap { event in
+            if case .userResponse(let answer) = event { answer } else { nil }
         }
     }
 
@@ -175,11 +185,10 @@ nonisolated enum TestScenarios {
                     "Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose.",
                     choosing { _ in ["Green"] }
                 )
-                let asked = toolResults(of: "AskUserQuestion", in: events)
-                try check(
-                    asked.count == 1 && !asked[0].isError,
-                    "AskUserQuestion: \(asked.map(\.output))"
-                )
+                let answered = userResponses(in: events)
+                guard answered.count == 1, case .questions(_, let answers) = answered[0],
+                    answers.values.first == ["Green"]
+                else { throw CheckFailed(description: "AskUserQuestion: \(answered)") }
                 try check(
                     reply(events).contains("Green"),
                     "reply: \(reply(events))"
@@ -194,11 +203,10 @@ nonisolated enum TestScenarios {
                     "Use the AskUserQuestion tool to ask me which colors I like, multiSelect true, options exactly: Red, Green, Blue. Then reply with only the colors I chose.",
                     choosing { _ in ["Red", "Blue"] }
                 )
-                let asked = toolResults(of: "AskUserQuestion", in: events)
-                try check(
-                    asked.count == 1 && asked[0].output.contains("Red, Blue"),
-                    "AskUserQuestion: \(asked.map(\.output))"
-                )
+                let answered = userResponses(in: events)
+                guard answered.count == 1, case .questions(_, let answers) = answered[0],
+                    answers.values.first == ["Red", "Blue"]
+                else { throw CheckFailed(description: "AskUserQuestion: \(answered)") }
                 try check(
                     reply(events).contains("Red")
                         && reply(events).contains("Blue"),
@@ -214,11 +222,10 @@ nonisolated enum TestScenarios {
                     "Use the AskUserQuestion tool to ask me which size I want: Small, Large. Then reply with what happened.",
                     decliningQuestions
                 )
-                let asked = toolResults(of: "AskUserQuestion", in: events)
-                try check(
-                    asked.count == 1 && asked[0].isError,
-                    "AskUserQuestion was not declined: \(asked.map(\.output))"
-                )
+                let answered = userResponses(in: events)
+                guard answered.count == 1, case .declineQuestions = answered[0] else {
+                    throw CheckFailed(description: "AskUserQuestion was not declined: \(answered)")
+                }
                 return "declined; reply: \(reply(events))"
             }
         )
@@ -229,11 +236,10 @@ nonisolated enum TestScenarios {
                     "Enter plan mode with the EnterPlanMode tool, then present a one-step plan to run `echo planned` with the ExitPlanMode tool. After it is approved, run it with Bash and reply with the output.",
                     plan(approve: true)
                 )
-                let plans = toolResults(of: "ExitPlanMode", in: events)
-                try check(
-                    plans.count == 1 && !plans[0].isError,
-                    "ExitPlanMode: \(plans.map(\.output))"
-                )
+                let answered = userResponses(in: events)
+                guard answered.count == 1, case .planApproval(_, true, _) = answered[0] else {
+                    throw CheckFailed(description: "ExitPlanMode: \(answered)")
+                }
                 try check(
                     toolResults(of: "Bash", in: events).contains {
                         $0.output.contains("planned")
@@ -250,12 +256,10 @@ nonisolated enum TestScenarios {
                     "Enter plan mode with the EnterPlanMode tool, then present a one-step plan to run `echo first` with the ExitPlanMode tool. If the plan is rejected, do not run anything; reply with the feedback you got.",
                     plan(approve: false, feedback: "Run `echo second` instead.")
                 )
-                let plans = toolResults(of: "ExitPlanMode", in: events)
-                try check(
-                    plans.count == 1 && plans[0].isError
-                        && plans[0].output.contains("echo second"),
-                    "ExitPlanMode was not rejected with the feedback: \(plans.map(\.output))"
-                )
+                let answered = userResponses(in: events)
+                guard answered.count == 1, case .planApproval(_, false, let feedback?) = answered[0],
+                    feedback.contains("echo second")
+                else { throw CheckFailed(description: "ExitPlanMode was not rejected with the feedback: \(answered)") }
                 try check(
                     toolResults(of: "Bash", in: events).isEmpty,
                     "something ran after the rejection"
@@ -344,19 +348,17 @@ nonisolated enum TestScenarios {
                         to: .conversation(id: chatID, project: project),
                         answering: permission(allow: false)
                     )
-                    let bash = toolResults(of: "Bash", in: events)
-                    try check(!bash.isEmpty, "no Bash tool use")
-                    try check(
-                        bash.allSatisfy(\.isError),
-                        "Bash was not denied: \(bash.map(\.output))"
-                    )
+                    let denied = userResponses(in: events)
+                    guard denied.count == 1, case .permission(_, false, _) = denied[0],
+                        toolResults(of: "Bash", in: events).isEmpty
+                    else { throw CheckFailed(description: "Bash was not denied: \(events)") }
                     try check(
                         !FileManager.default.fileExists(
                             atPath: deniedFile.path
                         ),
                         "the denied command ran"
                     )
-                    return "denied: \(bash.first?.output ?? "")"
+                    return "denied"
                 }
             )
 
@@ -398,8 +400,15 @@ nonisolated enum TestScenarios {
                         "\(promptCount(history)) prompts in the history, expected 3"
                     )
                     try check(
-                        toolResults(of: "Bash", in: history).count == 2,
-                        "expected 2 Bash results in the history"
+                        toolResults(of: "Bash", in: history).count == 1,
+                        "expected 1 Bash result in the history (the allowed one)"
+                    )
+                    let responses = userResponses(in: history).filter {
+                        if case .permission = $0 { true } else { false }
+                    }.count
+                    try check(
+                        responses == 2,
+                        "\(responses) permission responses in the history, expected 2 (allowed, denied)"
                     )
                     let requests = history.filter {
                         if case .userRequest(.permission) = $0 {
@@ -858,14 +867,12 @@ nonisolated enum TestScenarios {
                         to: .conversation(id: chatID, project: project),
                         answering: permission(allow: false)
                     )
-                    let bash = toolResults(of: "Bash", in: events)
-                    try check(!bash.isEmpty, "no Bash tool use")
-                    try check(
-                        bash.allSatisfy(\.isError),
-                        "Bash was not denied: \(bash.map(\.output))"
-                    )
+                    let denied = userResponses(in: events)
+                    guard denied.count == 1, case .permission(_, false, _) = denied[0],
+                        toolResults(of: "Bash", in: events).isEmpty
+                    else { throw CheckFailed(description: "Bash was not denied: \(events)") }
                     return
-                        "denied: \(bash.first?.output ?? ""); \(responses) responses"
+                        "denied; \(responses) responses"
                 }
             )
 
@@ -932,8 +939,15 @@ nonisolated enum TestScenarios {
                         "\(promptCount(history)) prompts in the history, expected 3"
                     )
                     try check(
-                        toolResults(of: "Bash", in: history).count == 2,
-                        "expected 2 Bash results in the history"
+                        toolResults(of: "Bash", in: history).count == 1,
+                        "expected 1 Bash result in the history (the allowed one)"
+                    )
+                    let responses = userResponses(in: history).filter {
+                        if case .permission = $0 { true } else { false }
+                    }.count
+                    try check(
+                        responses == 2,
+                        "\(responses) permission responses in the history, expected 2 (allowed, denied)"
                     )
                     let requests = history.filter {
                         if case .userRequest(.permission) = $0 {

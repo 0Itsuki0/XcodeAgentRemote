@@ -196,7 +196,8 @@ nonisolated enum XcodeChat {
 
         let toolUseRecords = records.byToolUseID
         let response = ChatCard.turnCards(for: events) { toolUse, result in
-            provider.card(for: toolUse, result: result, record: toolUseRecords[toolUse.id])
+            provider.card(
+                for: toolUse, result: result ?? toolUseRecords[toolUse.id]?.result, record: toolUseRecords[toolUse.id])
         }
         try conversation.appendTurn(
             prompt: prompt, startDate: startDate, finishedDate: finishedDate, response: response,

@@ -51,8 +51,13 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
     /// `"type": "tool_result"`
     case toolResult(ToolResult)
     /// The agent asks the user about a tool use it made (permission, questions, a plan); it waits for the answer
-    /// (`UserAnswer`) until the tool use has a result. `"type": "user_request"`, `"request": {...}`
+    /// (`UserAnswer`) until the tool use has a response (`userResponse`). In the history it replaces the tool use;
+    /// a live turn streams it after the tool use. `"type": "user_request"`, `"request": {...}`
     case userRequest(UserRequest)
+    /// The user's answer to a request (`userRequest`). It replaces the tool use's result, which is only the agent's
+    /// record of that answer (denied, declined, the answers, the plan approved or rejected); an allowed permission is
+    /// followed by the tool's result, its output. `"type": "user_response"`, `"response": {...}`
+    case userResponse(UserAnswer)
 
     struct ToolUse: Codable, Hashable, Sendable {
         var id: String
@@ -82,10 +87,11 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
         case .toolUse: "tool_use"
         case .toolResult: "tool_result"
         case .userRequest: "user_request"
+        case .userResponse: "user_response"
         }
     }
 
-    private enum Keys: String, CodingKey { case type, text, request }
+    private enum Keys: String, CodingKey { case type, text, request, response }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
@@ -96,6 +102,7 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
         case "tool_use": self = .toolUse(try ToolUse(from: decoder))
         case "tool_result": self = .toolResult(try ToolResult(from: decoder))
         case "user_request": self = .userRequest(try container.decode(UserRequest.self, forKey: .request))
+        case "user_response": self = .userResponse(try container.decode(UserAnswer.self, forKey: .response))
         case let type:
             throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "unknown event type \(type)")
         }
@@ -113,6 +120,8 @@ nonisolated enum ChatEvent: Codable, Hashable, Sendable {
             try toolResult.encode(to: encoder)
         case .userRequest(let request):
             try container.encode(request, forKey: .request)
+        case .userResponse(let answer):
+            try container.encode(answer, forKey: .response)
         }
     }
 }
@@ -157,10 +166,14 @@ nonisolated enum UserRequest: Codable, Hashable, Sendable {
     }
 }
 
-/// The requests the events end waiting for: `userRequest`s whose tool use has no result yet.
+/// The requests the events end waiting for: `userRequest`s whose tool use has no result or response yet.
 nonisolated func waitingForUser(_ events: [ChatEvent]) -> [UserRequest] {
     let answered = Set(events.compactMap { event -> String? in
-        if case .toolResult(let result) = event { result.toolUseID } else { nil }
+        switch event {
+        case .toolResult(let result): result.toolUseID
+        case .userResponse(let answer): answer.toolUseID
+        default: nil
+        }
     })
     return events.compactMap { event -> UserRequest? in
         if case .userRequest(let request) = event, !answered.contains(request.toolUseID) { request } else { nil }
@@ -168,7 +181,7 @@ nonisolated func waitingForUser(_ events: [ChatEvent]) -> [UserRequest] {
 }
 
 /// The user's answer to a request a turn waits for (`UserRequest`), by its tool use id.
-nonisolated enum UserAnswer: Codable, Sendable {
+nonisolated enum UserAnswer: Codable, Hashable, Sendable {
     /// Allow or deny a tool use; `message`: deny only, why (shown to the agent).
     case permission(toolUseID: String, allow: Bool, message: String? = nil)
     /// The chosen option labels of each question, by the question's text: several for a multi-select question,

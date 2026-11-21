@@ -136,6 +136,8 @@ nonisolated extension ClaudeProvider {
             if let earlier = request.repeatedAnswer { PendingToolUses.remove(earlier.toolUse.id, agent: agent) }
 
             var toolUses: [String: ChatEvent.ToolUse] = [:]
+            // The user's answers to this turn's requests, by tool use id: streamed in place of their results.
+            var answers: [String: UserAnswer] = [:]
             var agentError: String?
             let decoder = JSONDecoder()
             reading: for try await line in agentProcess.outputLines {
@@ -171,10 +173,20 @@ nonisolated extension ClaudeProvider {
                             request.records.setFileAfter(
                                 try? String(contentsOfFile: path, encoding: .utf8), toolUseID: toolUse.id)
                         }
-                        continuation.yield(.toolResult(ChatEvent.ToolResult(
+                        let toolResult = ChatEvent.ToolResult(
                             toolUseID: toolUse.id,
                             output: SessionMessage.text(of: result.content ?? []),
-                            isError: result.isError ?? false)))
+                            isError: result.isError ?? false)
+                        // A request's result: the user's answer instead (an allowed permission's result, the tool's
+                        // output, follows it). The card still needs the result: recorded.
+                        if let answer = answers[toolUse.id] {
+                            continuation.yield(.userResponse(answer))
+                            guard case .permission(_, true, _) = answer else {
+                                request.records.setResult(toolResult, toolUseID: toolUse.id)
+                                continue
+                            }
+                        }
+                        continuation.yield(.toolResult(toolResult))
                     }
 
                 case "control_request":
@@ -205,7 +217,10 @@ nonisolated extension ClaudeProvider {
                                 toolUseID: toolUseID, timeout: request.permissionTimeout)
                             waitingOn.set(nil)
                         }
-                        if answer != nil { PendingToolUses.remove(toolUseID, agent: agent) }
+                        if let answer {
+                            PendingToolUses.remove(toolUseID, agent: agent)
+                            answers[toolUseID] = answer
+                        }
                         let decision = permissionDecision(for: permissionRequest, answer: answer, timeout: request.permissionTimeout)
                         if decision.behavior == "deny" {
                             request.records.setDenied(toolUseID: toolUseID)
@@ -251,15 +266,15 @@ nonisolated extension ClaudeProvider {
         case .permission(_, true, _), .planApproval(_, true, _):
             return PermissionDecision(behavior: "allow", updatedInput: input)
         case .permission(_, false, let message):
-            return PermissionDecision(behavior: "deny", message: message ?? "The user denied this tool use.")
+            return PermissionDecision(behavior: "deny", message: message ?? deniedMessage)
         case .questions(_, let answers):
             var answered = input
             answered["answers"] = .object(answers.mapValues { .string($0.joined(separator: ", ")) })
             return PermissionDecision(behavior: "allow", updatedInput: answered)
         case .declineQuestions(_, let message):
-            return PermissionDecision(behavior: "deny", message: message ?? "The user declined to answer.")
+            return PermissionDecision(behavior: "deny", message: message ?? declinedMessage)
         case .planApproval(_, false, let feedback):
-            return PermissionDecision(behavior: "deny", message: feedback ?? "The user rejected the plan.")
+            return PermissionDecision(behavior: "deny", message: feedback ?? rejectedPlanMessage)
         case nil:
             return PermissionDecision(behavior: "deny", message: "No answer to this request within \(Int(timeout)) seconds.")
         }

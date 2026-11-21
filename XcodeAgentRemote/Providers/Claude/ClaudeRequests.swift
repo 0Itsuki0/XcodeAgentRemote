@@ -5,7 +5,8 @@
 //  Claude's requests to the user (permission, questions, plans) as its session transcript (`.jsonl`) holds them.
 //
 //  - An answered request: the tool result's line has `permissionDecision.source` `user_temporary` (allowed /
-//    answered / approved) or `user_reject` (denied / declined / rejected).
+//    answered / approved) or `user_reject` (denied / declined / rejected). That result is the user's answer
+//    (`ChatEvent.userResponse`).
 //  - A waiting request: the tool use is in the transcript with no result yet (Claude writes it shortly after it asks,
 //    because a PreToolUse hook is registered). It is a request if it is a question or plan, or if it is still the
 //    session's last message and either the app marked it waiting (`PendingToolUses`; else the mark is stale) or, in a
@@ -63,55 +64,100 @@ nonisolated extension ClaudeProvider {
         return .permission(toolUse)
     }
 
-    /// History events with the requests added (`ChatEvent.userRequest`, where a live turn streams them): before the
-    /// result of each tool use that was a request, and at the end for a tool use that still waits for the user.
+    /// History events with the requests and responses in them (`ChatEvent.userRequest` / `.userResponse`, as a live
+    /// turn streams them): a request in place of its tool use, and the user's answer in place of its result (an
+    /// allowed permission's result, the tool's output, stays after it).
     static func addingUserRequests(to events: [ChatEvent], transcript: Data, sessionID: String) -> [ChatEvent] {
-        let answeredByUser = userAnsweredToolUseIDs(transcript)
+        let decisions = userDecisions(transcript)
+        let resulted = Set(events.compactMap { event -> String? in
+            if case .toolResult(let result) = event { result.toolUseID } else { nil }
+        })
         var toolUses: [String: ChatEvent.ToolUse] = [:]
         var withRequests: [ChatEvent] = []
         for event in events {
             switch event {
             case .toolUse(let toolUse):
                 toolUses[toolUse.id] = toolUse
+                let request =
+                    resulted.contains(toolUse.id)
+                    ? userRequest(for: toolUse, decidedByUser: decisions[toolUse.id] != nil, isLastMessage: false)
+                    : userRequest(
+                        for: toolUse, decidedByUser: nil, isLastMessage: events.last == event,
+                        xcodeWouldAsk: !RunningSessions.contains(sessionID)
+                        && XcodeAgentConfiguration.wouldAsk(
+                                toolUse, agentAllowedTools: xcodeAllowedTools,
+                                workingDirectory: workingDirectory(sessionID: sessionID)))
+                withRequests.append(request.map { .userRequest($0) } ?? event)
             case .toolResult(let result):
-                if let toolUse = toolUses[result.toolUseID],
-                   let request = userRequest(
-                       for: toolUse, decidedByUser: answeredByUser.contains(result.toolUseID), isLastMessage: false)
-                {
-                    withRequests.append(.userRequest(request))
+                guard let toolUse = toolUses[result.toolUseID], let decision = decisions[result.toolUseID] else {
+                    withRequests.append(event)
+                    continue
                 }
+                let answer = userAnswer(to: toolUse, result: result, decision: decision)
+                withRequests.append(.userResponse(answer))
+                if case .permission(_, true, _) = answer { withRequests.append(event) }
             default:
-                break
+                withRequests.append(event)
             }
-            withRequests.append(event)
-        }
-        if case .toolUse(let toolUse)? = withRequests.last {
-            withRequests.removeLast()
-            let request = userRequest(
-                for: toolUse, decidedByUser: nil, isLastMessage: true,
-                xcodeWouldAsk: !RunningSessions.contains(sessionID)
-                && XcodeAgentConfiguration.wouldAsk(
-                        toolUse, agentAllowedTools: xcodeAllowedTools, workingDirectory: workingDirectory(sessionID: sessionID)))
-            withRequests.append(request.map { .userRequest($0) } ?? .toolUse(toolUse))
         }
         return withRequests
     }
 
-    /// The tool uses whose result line says the user decided them (`permissionDecision.source`).
-    private static func userAnsweredToolUseIDs(_ transcript: Data) -> Set<String> {
-        var ids = Set<String>()
+    /// The messages Claude is given for a deny without the user's own (`UserAnswer`'s `message` / `feedback` nil).
+    static let deniedMessage = "The user denied this tool use."
+    static let declinedMessage = "The user declined to answer."
+    static let rejectedPlanMessage = "The user rejected the plan."
+
+    /// The user's answer to a request, from its result: allowed (`user_temporary`) or not (`user_reject`); a deny's
+    /// message is the result (nil if it is Claude's default one), the answers are the result line's `toolUseResult`.
+    private static func userAnswer(
+        to toolUse: ChatEvent.ToolUse, result: ChatEvent.ToolResult, decision: UserDecision
+    ) -> UserAnswer {
+        let allowed = decision.source == "user_temporary"
+        func message(unless defaultMessage: String) -> String? {
+            allowed || result.output == defaultMessage ? nil : result.output
+        }
+        switch toolUse.name {
+        case "AskUserQuestion":
+            return allowed
+                ? .questions(toolUseID: toolUse.id, answers: decision.answers)
+                : .declineQuestions(toolUseID: toolUse.id, message: message(unless: declinedMessage))
+        case "ExitPlanMode":
+            return .planApproval(toolUseID: toolUse.id, approve: allowed, feedback: message(unless: rejectedPlanMessage))
+        default:
+            return .permission(toolUseID: toolUse.id, allow: allowed, message: message(unless: deniedMessage))
+        }
+    }
+
+    /// What a result line says about the user's decision.
+    private struct UserDecision {
+        /// `permissionDecision.source`.
+        var source: String
+        /// The answers to questions (`toolUseResult.answers`, `{"<question>": "<label>, <label>"}`), by question.
+        var answers: [String: [String]]
+    }
+
+    /// The tool uses whose result line says the user decided them (`permissionDecision.source`), with that decision.
+    private static func userDecisions(_ transcript: Data) -> [String: UserDecision] {
+        var decisions: [String: UserDecision] = [:]
         for line in transcript.split(separator: UInt8(ascii: "\n")) {
             guard let entry = try? JSONDecoder().decode(DecidedResultLine.self, from: Data(line)),
                   let source = entry.permissionDecision?.source, userDecisionSources.contains(source)
             else { continue }
+            var answers: [String: [String]] = [:]
+            if case .object(let result)? = entry.toolUseResult, case .object(let answered)? = result["answers"] {
+                for case (let question, .string(let labels)) in answered {
+                    answers[question] = labels.components(separatedBy: ", ")
+                }
+            }
             for block in entry.message?.content ?? [] {
-                if let toolUseID = block.toolUseID { ids.insert(toolUseID) }
+                if let toolUseID = block.toolUseID { decisions[toolUseID] = UserDecision(source: source, answers: answers) }
             }
         }
-        return ids
+        return decisions
     }
 
-    /// A transcript line's tool results and its `permissionDecision` (only the fields read here).
+    /// A transcript line's tool results, its `permissionDecision` and `toolUseResult` (only the fields read here).
     private struct DecidedResultLine: Decodable {
         struct Decision: Decodable { var source: String? }
         struct Message: Decodable {
@@ -129,14 +175,18 @@ nonisolated extension ClaudeProvider {
         }
         var permissionDecision: Decision?
         var message: Message?
+        var toolUseResult: JSONValue?
     }
 
     // MARK: The waiting tool use
 
     static func pendingToolUse(sessionID: String) -> ChatEvent.ToolUse? {
-        guard let events = try? history(sessionID: sessionID), let request = waitingForUser(events).last else {
-            return nil
-        }
+        // The history has the request in place of its tool use: the tool use is found in the transcript's own events.
+        guard let transcript = try? transcriptFile(sessionID: sessionID),
+              let events = try? SessionHistory.load(contentsOf: transcript).flatMap(\.chatEvents),
+              let data = try? Data(contentsOf: transcript),
+              let request = waitingForUser(addingUserRequests(to: events, transcript: data, sessionID: sessionID)).last
+        else { return nil }
         return events.lazy.compactMap { event -> ChatEvent.ToolUse? in
             if case .toolUse(let toolUse) = event, toolUse.id == request.toolUseID { toolUse } else { nil }
         }.first
