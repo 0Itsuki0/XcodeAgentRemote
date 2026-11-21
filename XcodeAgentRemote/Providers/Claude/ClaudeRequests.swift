@@ -68,14 +68,12 @@ nonisolated extension ClaudeProvider {
     static func addingUserRequests(to events: [ChatEvent], transcript: Data, sessionID: String) -> [ChatEvent] {
         let answeredByUser = userAnsweredToolUseIDs(transcript)
         var toolUses: [String: ChatEvent.ToolUse] = [:]
-        var resulted = Set<String>()
         var withRequests: [ChatEvent] = []
         for event in events {
             switch event {
             case .toolUse(let toolUse):
                 toolUses[toolUse.id] = toolUse
             case .toolResult(let result):
-                resulted.insert(result.toolUseID)
                 if let toolUse = toolUses[result.toolUseID],
                    let request = userRequest(
                        for: toolUse, decidedByUser: answeredByUser.contains(result.toolUseID), isLastMessage: false)
@@ -87,16 +85,14 @@ nonisolated extension ClaudeProvider {
             }
             withRequests.append(event)
         }
-        let lastMessage = events.last
-        for case .toolUse(let toolUse) in events where !resulted.contains(toolUse.id) {
+        if case .toolUse(let toolUse)? = withRequests.last {
+            withRequests.removeLast()
             let request = userRequest(
-                for: toolUse, decidedByUser: nil, isLastMessage: lastMessage == .toolUse(toolUse),
+                for: toolUse, decidedByUser: nil, isLastMessage: true,
                 xcodeWouldAsk: !RunningSessions.contains(sessionID)
                 && XcodeAgentConfiguration.wouldAsk(
                         toolUse, agentAllowedTools: xcodeAllowedTools, workingDirectory: workingDirectory(sessionID: sessionID)))
-            if let request {
-                withRequests.append(.userRequest(request))
-            }
+            withRequests.append(request.map { .userRequest($0) } ?? .toolUse(toolUse))
         }
         return withRequests
     }
