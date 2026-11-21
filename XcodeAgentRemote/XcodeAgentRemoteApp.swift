@@ -25,6 +25,7 @@ struct XcodeAgentRemoteApp: App {
 //        .menuBarExtraStyle(.window)
 
         Window("Dashboard", id: DashboardWindow.identifier) {
+            // ContentView()
             DashboardWindow()
                 .environment(apiServerManager)
                 .environment(chatWatcher)

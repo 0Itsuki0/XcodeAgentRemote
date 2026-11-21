@@ -1,5 +1,5 @@
 //
-//  Chats.swift
+//  ChatTypes.swift
 //  XcodeAgentRemote
 //
 //  The Xcode projects and conversations listed by the macOS app (`XcodeChat.listProjects`, `GET /projects`), and one

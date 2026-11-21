@@ -1,0 +1,502 @@
+[
+    {
+        "type": "user_message",
+        "text":
+            "Use the Bash tool to run: touch \/var\/folders\/9j\/_lzmzx0953n0zxsx21gvbn_00000gn\/T\/test-scenarios-377C623E\/allowed. Then reply DONE."
+    },
+    {
+        "name": "Bash",
+        "id": "toolu_01BHgJZhDr4L8rZ84RNK8xxH",
+        "type": "tool_use",
+        "input": {
+            "command":
+                "touch \/var\/folders\/9j\/_lzmzx0953n0zxsx21gvbn_00000gn\/T\/test-scenarios-377C623E\/allowed",
+            "description": "Create the allowed marker file"
+        }
+    },
+    {
+        "type": "user_request",
+        "request": {
+            "permission": {
+                "_0": {
+                    "name": "Bash",
+                    "id": "toolu_01BHgJZhDr4L8rZ84RNK8xxH",
+                    "input": {
+                        "command":
+                            "touch \/var\/folders\/9j\/_lzmzx0953n0zxsx21gvbn_00000gn\/T\/test-scenarios-377C623E\/allowed",
+                        "description": "Create the allowed marker file"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "is_error": false,
+        "output": "(Bash completed with no output)",
+        "tool_use_id": "toolu_01BHgJZhDr4L8rZ84RNK8xxH",
+        "type": "tool_result"
+    },
+    {
+        "type": "assistant_message",
+        "text": "DONE"
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Use the Bash tool to run: touch \/var\/folders\/9j\/_lzmzx0953n0zxsx21gvbn_00000gn\/T\/test-scenarios-377C623E\/denied. If it is denied, reply DENIED."
+    },
+    {
+        "name": "Bash",
+        "id": "toolu_01HiA9JjcyRxuhXRKFnv5NVp",
+        "type": "tool_use",
+        "input": {
+            "command":
+                "touch \/var\/folders\/9j\/_lzmzx0953n0zxsx21gvbn_00000gn\/T\/test-scenarios-377C623E\/denied",
+            "description": "Create the denied marker file"
+        }
+    },
+    {
+        "type": "user_request",
+        "request": {
+            "permission": {
+                "_0": {
+                    "name": "Bash",
+                    "id": "toolu_01HiA9JjcyRxuhXRKFnv5NVp",
+                    "input": {
+                        "command":
+                            "touch \/var\/folders\/9j\/_lzmzx0953n0zxsx21gvbn_00000gn\/T\/test-scenarios-377C623E\/denied",
+                        "description": "Create the denied marker file"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "is_error": true,
+        "output": "The user denied this tool use.",
+        "tool_use_id": "toolu_01HiA9JjcyRxuhXRKFnv5NVp",
+        "type": "tool_result"
+    },
+    {
+        "type": "assistant_message",
+        "text": "DENIED"
+    },
+    {
+        "type": "user_message",
+        "text": "Reply with only the word pong."
+    },
+    {
+        "type": "assistant_message",
+        "text": "pong"
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose."
+    },
+    {
+        "name": "AskUserQuestion",
+        "id": "toolu_01TLCQLcUxModDCQDHcbE7GP",
+        "type": "tool_use",
+        "input": {
+            "questions": [
+                {
+                    "options": [
+                        {
+                            "label": "Red",
+                            "description": "The color red"
+                        },
+                        {
+                            "label": "Green",
+                            "description": "The color green"
+                        },
+                        {
+                            "label": "Blue",
+                            "description": "The color blue"
+                        }
+                    ],
+                    "multiSelect": false,
+                    "header": "Color",
+                    "question": "Which color do you prefer?"
+                }
+            ]
+        }
+    },
+    {
+        "type": "user_request",
+        "request": {
+            "questions": {
+                "toolUseID": "toolu_01TLCQLcUxModDCQDHcbE7GP",
+                "_1": [
+                    {
+                        "options": [
+                            {
+                                "description": "The color red",
+                                "label": "Red"
+                            },
+                            {
+                                "description": "The color green",
+                                "label": "Green"
+                            },
+                            {
+                                "description": "The color blue",
+                                "label": "Blue"
+                            }
+                        ],
+                        "multiSelect": false,
+                        "header": "Color",
+                        "question": "Which color do you prefer?"
+                    }
+                ]
+            }
+        }
+    },
+    {
+        "is_error": false,
+        "output":
+            "Your questions have been answered: \"Which color do you prefer?\"=\"Green\". You can now continue with these answers in mind.",
+        "tool_use_id": "toolu_01TLCQLcUxModDCQDHcbE7GP",
+        "type": "tool_result"
+    },
+    {
+        "type": "assistant_message",
+        "text": "Green"
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Use the AskUserQuestion tool to ask me which colors I like, multiSelect true, options exactly: Red, Green, Blue. Then reply with only the colors I chose."
+    },
+    {
+        "name": "AskUserQuestion",
+        "id": "toolu_019tgMcwAEU2scKY4WW6DoHD",
+        "type": "tool_use",
+        "input": {
+            "questions": [
+                {
+                    "options": [
+                        {
+                            "description": "The color red",
+                            "label": "Red"
+                        },
+                        {
+                            "label": "Green",
+                            "description": "The color green"
+                        },
+                        {
+                            "label": "Blue",
+                            "description": "The color blue"
+                        }
+                    ],
+                    "multiSelect": true,
+                    "header": "Colors",
+                    "question": "Which colors do you like?"
+                }
+            ]
+        }
+    },
+    {
+        "type": "user_request",
+        "request": {
+            "questions": {
+                "toolUseID": "toolu_019tgMcwAEU2scKY4WW6DoHD",
+                "_1": [
+                    {
+                        "options": [
+                            {
+                                "description": "The color red",
+                                "label": "Red"
+                            },
+                            {
+                                "description": "The color green",
+                                "label": "Green"
+                            },
+                            {
+                                "description": "The color blue",
+                                "label": "Blue"
+                            }
+                        ],
+                        "multiSelect": true,
+                        "header": "Colors",
+                        "question": "Which colors do you like?"
+                    }
+                ]
+            }
+        }
+    },
+    {
+        "is_error": false,
+        "output":
+            "Your questions have been answered: \"Which colors do you like?\"=\"Red, Blue\". You can now continue with these answers in mind.",
+        "tool_use_id": "toolu_019tgMcwAEU2scKY4WW6DoHD",
+        "type": "tool_result"
+    },
+    {
+        "type": "assistant_message",
+        "text": "Red, Blue"
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Use the AskUserQuestion tool to ask me which size I want: Small, Large. Then reply with what happened."
+    },
+    {
+        "name": "AskUserQuestion",
+        "id": "toolu_01357fuUYmsHX6wJB5vYNohD",
+        "type": "tool_use",
+        "input": {
+            "questions": [
+                {
+                    "options": [
+                        {
+                            "description": "Small size",
+                            "label": "Small"
+                        },
+                        {
+                            "description": "Large size",
+                            "label": "Large"
+                        }
+                    ],
+                    "multiSelect": false,
+                    "header": "Size",
+                    "question": "Which size do you want?"
+                }
+            ]
+        }
+    },
+    {
+        "type": "user_request",
+        "request": {
+            "questions": {
+                "toolUseID": "toolu_01357fuUYmsHX6wJB5vYNohD",
+                "_1": [
+                    {
+                        "options": [
+                            {
+                                "description": "Small size",
+                                "label": "Small"
+                            },
+                            {
+                                "description": "Large size",
+                                "label": "Large"
+                            }
+                        ],
+                        "multiSelect": false,
+                        "header": "Size",
+                        "question": "Which size do you want?"
+                    }
+                ]
+            }
+        }
+    },
+    {
+        "is_error": true,
+        "output": "The user declined to answer.",
+        "tool_use_id": "toolu_01357fuUYmsHX6wJB5vYNohD",
+        "type": "tool_result"
+    },
+    {
+        "type": "intermediate",
+        "text":
+            "I've got the user's answer: they declined. So I'll report that back to them.\n\n"
+    },
+    {
+        "type": "assistant_message",
+        "text":
+            "I asked which size you want (Small or Large), but you declined to answer, so no size was chosen."
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Enter plan mode with the EnterPlanMode tool, then present a one-step plan to run `echo planned` with the ExitPlanMode tool. After it is approved, run it with Bash and reply with the output."
+    },
+    {
+        "name": "ToolSearch",
+        "id": "toolu_01KivbV1CvFL8BYX23h3KfZ7",
+        "type": "tool_use",
+        "input": {
+            "max_results": 2,
+            "query": "select:EnterPlanMode,ExitPlanMode"
+        }
+    },
+    {
+        "is_error": false,
+        "output": "",
+        "tool_use_id": "toolu_01KivbV1CvFL8BYX23h3KfZ7",
+        "type": "tool_result"
+    },
+    {
+        "name": "EnterPlanMode",
+        "id": "toolu_017cdJvsF9TAT89L3UWmGLts",
+        "type": "tool_use",
+        "input": {}
+    },
+    {
+        "is_error": false,
+        "output":
+            "Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.\n\nIn plan mode, you should:\n1. Thoroughly explore the codebase to understand existing patterns\n2. Identify similar features and architectural approaches\n3. Consider multiple approaches and their trade-offs\n4. Use AskUserQuestion if you need to clarify the approach\n5. Design a concrete implementation strategy\n6. When ready, use ExitPlanMode to present your plan for approval\n\nRemember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.",
+        "tool_use_id": "toolu_017cdJvsF9TAT89L3UWmGLts",
+        "type": "tool_result"
+    },
+    {
+        "name": "Write",
+        "id": "toolu_01FMUM97hxV6e8FdFpzvDom9",
+        "type": "tool_use",
+        "input": {
+            "file_path":
+                "\/Users\/itsuki\/Library\/Developer\/Xcode\/CodingAssistant\/ClaudeAgentConfig\/plans\/eager-singing-puffin.md",
+            "content":
+                "# Plan: run `echo planned`\n\n## Context\nYou asked for a one-step plan that runs `echo planned` and reports what it prints.\n\n## Steps\n1. Run `echo planned` with the Bash tool and report the output.\n\n## Verification\nThe output should be `planned`.\n"
+        }
+    },
+    {
+        "is_error": false,
+        "output":
+            "File created successfully at: \/Users\/itsuki\/Library\/Developer\/Xcode\/CodingAssistant\/ClaudeAgentConfig\/plans\/eager-singing-puffin.md (file state is current in your context — no need to Read it back)",
+        "tool_use_id": "toolu_01FMUM97hxV6e8FdFpzvDom9",
+        "type": "tool_result"
+    },
+    {
+        "name": "ExitPlanMode",
+        "id": "toolu_01RFsuHaN8HSpJTWc72tkvuu",
+        "type": "tool_use",
+        "input": {
+            "plan":
+                "# Plan: run `echo planned`\n\n## Context\nYou asked for a one-step plan that runs `echo planned` and reports what it prints.\n\n## Steps\n1. Run `echo planned` with the Bash tool and report the output.\n\n## Verification\nThe output should be `planned`.\n",
+            "planFilePath":
+                "\/Users\/itsuki\/Library\/Developer\/Xcode\/CodingAssistant\/ClaudeAgentConfig\/plans\/eager-singing-puffin.md"
+        }
+    },
+    {
+        "type": "user_request",
+        "request": {
+            "planApproval": {
+                "toolUseID": "toolu_01RFsuHaN8HSpJTWc72tkvuu",
+                "plan":
+                    "# Plan: run `echo planned`\n\n## Context\nYou asked for a one-step plan that runs `echo planned` and reports what it prints.\n\n## Steps\n1. Run `echo planned` with the Bash tool and report the output.\n\n## Verification\nThe output should be `planned`.\n"
+            }
+        }
+    },
+    {
+        "is_error": false,
+        "output":
+            "User has approved your plan. You can now start coding. Start with updating your todo list if applicable\n\nYour plan has been saved to: \/Users\/itsuki\/Library\/Developer\/Xcode\/CodingAssistant\/ClaudeAgentConfig\/plans\/eager-singing-puffin.md\nYou can refer back to it if needed during implementation.\n\n## Approved Plan:\n# Plan: run `echo planned`\n\n## Context\nYou asked for a one-step plan that runs `echo planned` and reports what it prints.\n\n## Steps\n1. Run `echo planned` with the Bash tool and report the output.\n\n## Verification\nThe output should be `planned`.\n",
+        "tool_use_id": "toolu_01RFsuHaN8HSpJTWc72tkvuu",
+        "type": "tool_result"
+    },
+    {
+        "name": "Bash",
+        "id": "toolu_01Nc5BV15KgVSKKrS34kk6vW",
+        "type": "tool_use",
+        "input": {
+            "command": "echo planned",
+            "description": "Print the word planned"
+        }
+    },
+    {
+        "is_error": false,
+        "output": "planned",
+        "tool_use_id": "toolu_01Nc5BV15KgVSKKrS34kk6vW",
+        "type": "tool_result"
+    },
+    {
+        "type": "assistant_message",
+        "text": "planned"
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Enter plan mode with the EnterPlanMode tool, then present a one-step plan to run `echo first` with the ExitPlanMode tool. If the plan is rejected, do not run anything; reply with the feedback you got."
+    },
+    {
+        "name": "EnterPlanMode",
+        "id": "toolu_01Re9ozyPbHtYD7zvU5qLmfK",
+        "type": "tool_use",
+        "input": {}
+    },
+    {
+        "is_error": false,
+        "output":
+            "Entered plan mode. You should now focus on exploring the codebase and designing an implementation approach.\n\nIn plan mode, you should:\n1. Thoroughly explore the codebase to understand existing patterns\n2. Identify similar features and architectural approaches\n3. Consider multiple approaches and their trade-offs\n4. Use AskUserQuestion if you need to clarify the approach\n5. Design a concrete implementation strategy\n6. When ready, use ExitPlanMode to present your plan for approval\n\nRemember: DO NOT write or edit any files yet. This is a read-only exploration and planning phase.",
+        "tool_use_id": "toolu_01Re9ozyPbHtYD7zvU5qLmfK",
+        "type": "tool_result"
+    },
+    {
+        "name": "Write",
+        "id": "toolu_01VFp792nBHSzkc4fRTd3WCe",
+        "type": "tool_use",
+        "input": {
+            "file_path":
+                "\/Users\/itsuki\/Library\/Developer\/Xcode\/CodingAssistant\/ClaudeAgentConfig\/plans\/eager-singing-puffin.md",
+            "content":
+                "# Plan: run `echo first`\n\n## Context\nYou asked for a one-step plan that runs `echo first`.\n\n## Steps\n1. Run `echo first` with the Bash tool and report the output.\n\n## Verification\nThe output should be `first`.\n"
+        }
+    },
+    {
+        "is_error": false,
+        "output":
+            "The file \/Users\/itsuki\/Library\/Developer\/Xcode\/CodingAssistant\/ClaudeAgentConfig\/plans\/eager-singing-puffin.md has been updated successfully. (file state is current in your context — no need to Read it back)",
+        "tool_use_id": "toolu_01VFp792nBHSzkc4fRTd3WCe",
+        "type": "tool_result"
+    },
+    {
+        "name": "ExitPlanMode",
+        "id": "toolu_015ZCBu59Z7ZDE81FDANaSjg",
+        "type": "tool_use",
+        "input": {
+            "plan":
+                "# Plan: run `echo first`\n\n## Context\nYou asked for a one-step plan that runs `echo first`.\n\n## Steps\n1. Run `echo first` with the Bash tool and report the output.\n\n## Verification\nThe output should be `first`.\n",
+            "planFilePath":
+                "\/Users\/itsuki\/Library\/Developer\/Xcode\/CodingAssistant\/ClaudeAgentConfig\/plans\/eager-singing-puffin.md"
+        }
+    },
+    {
+        "type": "user_request",
+        "request": {
+            "planApproval": {
+                "toolUseID": "toolu_015ZCBu59Z7ZDE81FDANaSjg",
+                "plan":
+                    "# Plan: run `echo first`\n\n## Context\nYou asked for a one-step plan that runs `echo first`.\n\n## Steps\n1. Run `echo first` with the Bash tool and report the output.\n\n## Verification\nThe output should be `first`.\n"
+            }
+        }
+    },
+    {
+        "is_error": true,
+        "output": "Run `echo second` instead.",
+        "tool_use_id": "toolu_015ZCBu59Z7ZDE81FDANaSjg",
+        "type": "tool_result"
+    },
+    {
+        "type": "intermediate",
+        "text":
+            "The plan was rejected with feedback, so I won't run anything and will just reply with the feedback. I'm probably still in plan mode.\n\n"
+    },
+    {
+        "type": "assistant_message",
+        "text":
+            "You rejected the plan with this feedback: \"Run `echo second` instead.\"\n\nI haven't run anything."
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Use the Bash tool to run: touch \/var\/folders\/9j\/_lzmzx0953n0zxsx21gvbn_00000gn\/T\/test-scenarios-377C623E\/left-waiting-allowed. Then reply DONE."
+    },
+    {
+        "type": "assistant_message",
+        "text": "No response requested."
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Use the Bash tool to run: touch \/var\/folders\/9j\/_lzmzx0953n0zxsx21gvbn_00000gn\/T\/test-scenarios-377C623E\/left-waiting-denied. If it is denied, reply DENIED."
+    },
+    {
+        "type": "assistant_message",
+        "text": "No response requested."
+    },
+    {
+        "type": "user_message",
+        "text":
+            "Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose."
+    }
+]

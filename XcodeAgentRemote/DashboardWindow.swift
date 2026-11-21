@@ -57,14 +57,14 @@ struct ChatWatcherConfigurationView: View {
 
     var body: some View {
         Button("watch") {
-            let url = URL.desktopDirectory.appending(path: "test.txt")
-            Task {
-                do {
-//                    try await chatWatcher.watchFile(at: url)
-                } catch {
-                    print(error)
-                }
-            }
+//            let url = URL.desktopDirectory.appending(path: "test.txt")
+//            Task {
+//                do {
+////                    try await chatWatcher.watchFile(at: url)
+//                } catch {
+//                    print(error)
+//                }
+//            }
         }
     }
 }

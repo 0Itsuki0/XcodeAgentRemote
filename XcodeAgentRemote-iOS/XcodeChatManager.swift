@@ -16,6 +16,11 @@ enum ServerConfigurationState: Equatable, Hashable, Sendable {
     case validated
 }
 
+enum RequestState: Equatable, Hashable, Sendable {
+    case idle
+    case requesting
+}
+
 @Observable class XcodeChatManager {
 
     private(set) var serverConfigurationState: ServerConfigurationState =

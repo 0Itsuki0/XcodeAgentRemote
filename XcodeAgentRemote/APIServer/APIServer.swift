@@ -11,6 +11,9 @@ import Hummingbird
 import Logging
 import ServiceLifecycle
 
+nonisolated private let logger = Logger.shared
+nonisolated private let category = Logger.category(#fileID)
+
 /// HTTP server (Hummingbird), listening on localhost only:
 /// `POST /message` runs an agent that can use tools on this Mac, so it is not exposed to the network.
 ///
@@ -141,17 +144,30 @@ actor APIServer {
         }
 
         router.get(RouterPath(APIServerConstants.healthPath)) { _, _ in
-            SuccessResponse()
+            logger.info(
+                category: category,
+                message: "GET /\(APIServerConstants.healthPath)"
+            )
+            return SuccessResponse()
         }
 
         // For when iCloud syncing fails: the chats and their histories, read directly from this Mac.
         router.get(RouterPath(APIServerConstants.projectsPath)) { _, _ in
-            ChatStore.listProjects()
+            logger.info(
+                category: category,
+                message: "GET /\(APIServerConstants.projectsPath)"
+            )
+            return ChatStore.listProjects()
         }
 
         router.get(
             RouterPath("\(APIServerConstants.conversationPath)/:conversation")
         ) { _, context -> XcodeConversationDetail in
+            logger.info(
+                category: category,
+                message:
+                    "GET /\(APIServerConstants.conversationPath)/:conversation"
+            )
             let conversationID = try context.parameters.require("conversation")
             do {
                 return try ChatStore.conversation(id: conversationID)
@@ -171,16 +187,22 @@ actor APIServer {
                 }
             }
         }
-        
+
         // TODO: - addd a POST /conversation/:conversation/watch
 
         router.post(RouterPath(APIServerConstants.messagePath)) {
             request,
             context -> Response in
+            logger.info(
+                category: category,
+                message: "POST /\(APIServerConstants.messagePath)"
+            )
+
             let body = try await request.decode(
                 as: MessageRequest.self,
                 context: context
             )
+
             switch body {
             case .answer(let answer):
                 guard isWaitingForUser(toolUseID: answer.toolUseID) else {

@@ -10,8 +10,8 @@ import SwiftData
 import SwiftUI
 
 struct ContentView: View {
-//    @Environment(\.modelContext) private var modelContext
-//    @Query private var items: [ItemModel]
+    //    @Environment(\.modelContext) private var modelContext
+    //    @Query private var items: [ItemModel]
     @State private var sendMessageOutput: [String] = []
     @State private var runningCommand: CommandExecutor.RunningCommand?
     private let server = APIServer()
@@ -59,12 +59,22 @@ struct ContentView: View {
 
                     }
                 }
+                Button("Save chat") {
+                    do {
+                        try saveHistoryAsChat()
+                    } catch {
+                        print(error)
+                    }
+                }
 
                 Button("test command stream") {
                     Task {
                         do {
                             let command = try CommandExecutor.runCommandStream(
-                                ["sh", "-c", "for i in 1 2 3 4 5 6 7 8 9 10; do echo \"line $i\"; sleep 1; done"]
+                                [
+                                    "sh", "-c",
+                                    "for i in 1 2 3 4 5 6 7 8 9 10; do echo \"line $i\"; sleep 1; done",
+                                ]
                             )
                             runningCommand = command
                             for try await line in command.outputLines {
@@ -103,57 +113,43 @@ struct ContentView: View {
 
     }
 
-    #if os(macOS)
-        /// Sends a test prompt to an existing chat of this project and lists the streamed events.
-        private func sendTestMessage() {
-            sendMessageOutput = []
-            let project = URL(
-                filePath:
-                    "/Users/itsuki/Desktop/XcodeAgentRemote/XcodeAgentRemote.xcodeproj"
-            )
-            let target = MessageTarget.conversation(
-                id: "D868CB20-1251-4ECC-9047-041C449419CB",
-                project: project
-            )
-            Task {
-                do {
-                    for try await event in sendMessage(
-                        "Reply with only the word pong.",
-                        to: target
-                    ) {
-                        sendMessageOutput.append(String(describing: event))
-                    }
-                    print(sendMessageOutput.joined())
-                } catch {
-                    sendMessageOutput.append(
-                        "error: \(error.localizedDescription)"
-                    )
+    func saveHistoryAsChat() throws {
+        let history = try ClaudeProvider.history(
+            sessionID: "97abcbf0-d84f-4c81-9d19-79922546203c"
+        )
+        let data = try JSONEncoder().encode(history)
+        try data.write(
+            to: URL.desktopDirectory.appending(path: "sample.json")
+        )
+
+    }
+
+    /// Sends a test prompt to an existing chat of this project and lists the streamed events.
+    private func sendTestMessage() {
+        sendMessageOutput = []
+        let project = URL(
+            filePath:
+                "/Users/itsuki/Desktop/XcodeAgentRemote/XcodeAgentRemote.xcodeproj"
+        )
+        let target = MessageTarget.conversation(
+            id: "D868CB20-1251-4ECC-9047-041C449419CB",
+            project: project
+        )
+        Task {
+            do {
+                for try await event in sendMessage(
+                    "Reply with only the word pong.",
+                    to: target
+                ) {
+                    sendMessageOutput.append(String(describing: event))
                 }
+                print(sendMessageOutput.joined())
+            } catch {
+                sendMessageOutput.append(
+                    "error: \(error.localizedDescription)"
+                )
             }
         }
-    #endif
-
-}
-
-private struct NavigationViewWrapper<Content: View>: View {
-    let content: () -> Content
-
-    var body: some View {
-        #if os(macOS)
-            NavigationSplitView {
-                content()
-            } detail: {
-                Text("Select an item")
-            }
-        #else
-            NavigationStack {
-                content()
-            }
-        #endif
     }
-}
 
-//#Preview {
-//    ContentView()
-//        .modelContainer(for: Item.self, inMemory: true)
-//}
+}

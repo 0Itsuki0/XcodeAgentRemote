@@ -12,9 +12,8 @@ nonisolated enum UserDefaultsKey: String, CaseIterable {
     case apiServerAuthHeaderName
     case apiServerAuthHeaderValue
     case apiServerUseAuth
-    
-    case apiServerURL
 
+    case apiServerURL
 
     static var userDefaults: UserDefaults { .standard }
 
