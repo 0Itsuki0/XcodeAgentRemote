@@ -66,4 +66,17 @@ nonisolated enum AgentProviders {
     )? {
         all.first { $0.agent == agent }
     }
+
+    /// Every provider name, whether this app supports it, and the models the provider offers (Xcode's cache).
+    static func infos() -> [AgentProviderInfo] {
+        AgentProviderName.allCases.map { name in
+            let models = XcodeAgentConfiguration.gatewayModels(of: name)
+            return AgentProviderInfo(
+                name: name,
+                supported: provider(for: name) != nil,
+                models: models?.models ?? [],
+                defaultModel: models?.defaultModel,
+                supportsCustomModelIdentifier: models?.supportsCustomModelIdentifier ?? false)
+        }
+    }
 }

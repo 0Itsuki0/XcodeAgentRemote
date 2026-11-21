@@ -22,6 +22,9 @@ nonisolated enum APIServerConstants {
     /// and its project (`XcodeChat.conversation(id:)`). 404 if there is no such chat (or its session is missing), 501
     /// if history is not implemented for its agent.
     static let conversationPath = "conversation"
+    /// `GET /providers` → `[AgentProviderInfo]`: every agent provider, whether this app supports it, and the models
+    /// the provider offers (`AgentProviders.infos`).
+    static let providersPath = "providers"
     /// SSE event name sent instead of the remaining events when a turn fails; data is `ErrorResponse.Body`.
     static let errorEvent = "error"
 

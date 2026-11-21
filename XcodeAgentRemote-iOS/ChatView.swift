@@ -206,26 +206,6 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func messageView(_ text: String, isUser: Bool) -> some View {
-        Text(text)
-            .listRowBackground(Color.clear)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8).fill(
-                    isUser ? .yellow.opacity(0.3) : .green.opacity(0.3)
-                )
-            )
-            .padding(isUser ? .leading : .trailing, 64)
-            .padding(.vertical, 8)
-            .listRowInsets(.vertical, 0)
-            .listRowInsets(.horizontal, 8)
-            .listRowSeparator(.hidden)
-
-    }
-
-    @ViewBuilder
     private func eventView(_ event: ChatEvent) -> some View {
         //        Text(text)
         //            .listRowBackground(Color.clear)
@@ -247,6 +227,19 @@ struct ChatView: View {
 
     @ContentBuilder
     private func userMessage(_ text: String) -> some View {
+        Text(text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.all, standardSpacing / 2)
+            .background(
+                RoundedRectangle(cornerRadius: standardSpacing / 2).fill(
+                    .secondary.opacity(0.5)
+                )
+            )
+            .padding(.leading, standardSpacing * 3)
+    }
+    
+    @ContentBuilder
+    private func toolUse(_ text: String) -> some View {
         Text(text)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.all, standardSpacing / 2)

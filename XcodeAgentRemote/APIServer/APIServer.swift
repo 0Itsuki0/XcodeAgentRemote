@@ -188,6 +188,14 @@ actor APIServer {
             }
         }
 
+        router.get(RouterPath(APIServerConstants.providersPath)) { _, _ in
+            logger.info(
+                category: category,
+                message: "GET /\(APIServerConstants.providersPath)"
+            )
+            return AgentProviders.infos()
+        }
+
         // TODO: - addd a POST /conversation/:conversation/watch
 
         router.post(RouterPath(APIServerConstants.messagePath)) {
@@ -285,6 +293,7 @@ actor APIServer {
 extension SuccessResponse: ResponseEncodable {}
 extension XcodeProject: ResponseEncodable {}
 extension XcodeConversationDetail: ResponseEncodable {}
+extension AgentProviderInfo: ResponseEncodable {}
 extension ChatEvent: ResponseEncodable {}
 
 /// Rejects (401) every request that does not carry `APIServerConstants.authHeader` with its exact value.

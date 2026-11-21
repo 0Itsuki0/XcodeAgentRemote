@@ -31,3 +31,29 @@ nonisolated struct ErrorResponse: Codable, Sendable {
     }
     var error: Body
 }
+
+/// One agent provider (`GET /providers`): whether this app supports it, and the models the provider itself offers.
+nonisolated struct AgentProviderInfo: Codable, Sendable {
+    var name: AgentProviderName
+    /// This app can run its chats (it has a provider for it).
+    var supported: Bool
+    /// The models the provider offers, as Xcode last got them from its agent; empty if Xcode has none for it.
+    var models: [AgentModel]
+    /// The model used when none is chosen.
+    var defaultModel: AgentModel?
+    /// A model id other than the listed ones can be given.
+    var supportsCustomModelIdentifier: Bool
+}
+
+/// One model of a provider, as its agent reports it.
+nonisolated struct AgentModel: Codable, Hashable, Sendable {
+    /// The id the agent is given, e.g. "opus", "default".
+    var id: String
+    /// Its display name, e.g. "Opus 5.5".
+    var name: String
+    /// The model the id stands for, e.g. "claude-opus-5-5".
+    var resolvedModel: String
+    var isAvailable: Bool
+    /// It can run in Auto permission mode.
+    var supportsAutoMode: Bool
+}

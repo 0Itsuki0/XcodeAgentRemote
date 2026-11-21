@@ -70,6 +70,20 @@ nonisolated struct APIServerClient: Sendable {
         return try NetworkService.decode([XcodeProject].self, from: data)
     }
 
+    /// `GET /providers`
+    func providers() async throws(NetworkError) -> [AgentProviderInfo] {
+        let data = try await NetworkService.sendURLRequest(
+            url: baseURL.appending(path: APIServerConstants.providersPath),
+            method: "GET",
+            headers: Self.headers(
+                ["Accept": "application/json"],
+                authHeader: authHeader
+            ),
+            body: nil
+        )
+        return try NetworkService.decode([AgentProviderInfo].self, from: data)
+    }
+
     /// `GET /conversation/<Xcode chat UUID>`: one conversation in full, with its history and its project (for when
     /// iCloud syncing fails).
     /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
