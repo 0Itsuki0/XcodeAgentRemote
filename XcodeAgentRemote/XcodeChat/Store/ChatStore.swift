@@ -25,10 +25,10 @@ import Foundation
 /// Layout (one store per workspace / project file):
 ///
 /// ```
-/// ~/Library/Developer/Xcode/UserData/CodingAssistant/<ProjectName>-<hash>/
+/// ~/Library/Developer/Xcode/UserData/CodingAssistant/<ProjectName>-<hash>/ (`store`)
 ///     CodingAssistantManifest.plist      list of every chat's metadata
 ///     Snapshots/<UUID>.plist             git state before / after each turn
-///     <chat UUID>
+///     <chat UUID>/ (`chatFolder`)
 ///         conversation.plist     the chat: its turns and their cards, provider, assistantConfiguration
 ///         metadata.plist         name, dates, provider
 /// ```
@@ -175,9 +175,15 @@ nonisolated enum ChatStore {
         let snapshot = GitSnapshotFile.GitState(
             id: newUUID(),
             date: Date(),
-            diffStaged: CommandExecutor.runCommand(["git", "diff", "--cached"], in: repository)
+            diffStaged: CommandExecutor.runCommand(
+                ["git", "diff", "--cached"],
+                in: repository
+            )
                 ?? "",
-            diffUnstaged: CommandExecutor.runCommand(["git", "diff"], in: repository) ?? "",
+            diffUnstaged: CommandExecutor.runCommand(
+                ["git", "diff"],
+                in: repository
+            ) ?? "",
             revision: revision?.isEmpty == false ? revision : nil
         )
         var root = top
@@ -458,7 +464,7 @@ nonisolated extension ChatStore {
                 .providerIdentifier?.builtIn?._0.keys.first.flatMap(
                     AgentProviderName.init(rawValue:)
                 )
-            let sessionID = providerSessionID(
+            let sessionID = try? providerSessionID(
                 store: store,
                 conversationID: entry.id
             )
@@ -510,18 +516,16 @@ nonisolated extension ChatStore {
     // MARK: A conversation
 
     /// One conversation in full, given Xcode's chat UUID: its fields, its history (`history(conversationID:)`) and its
-    /// project. Throws `ChatHistoryError` like `history(conversationID:)`.
+    /// project. Throws `ChatStoreError` like `history(conversationID:)`.
     static func conversation(id: String) throws -> XcodeConversationDetail {
         let history = try history(conversationID: id)
-        guard let folder = chatFolder(conversationID: id) else {
-            throw ChatHistoryError.chatNotFound(conversationID: id)
-        }
-        let project = project(store: folder.deletingLastPathComponent())
+        let store = try chatStore(conversationID: id)
+        let project = project(store: store)
         guard
             let conversation = project.conversations.first(where: {
                 ChatStore.sameID($0.id, id)
             })
-        else { throw ChatHistoryError.chatNotFound(conversationID: id) }
+        else { throw ChatStoreError.chatNotFound(conversationID: id) }
         return XcodeConversationDetail(
             id: conversation.id,
             name: conversation.name,
@@ -544,13 +548,15 @@ nonisolated extension ChatStore {
     }
 
     /// The chat's folder (`<store>/<chat UUID>`), in whichever store has it.
-    private static func chatFolder(conversationID: String) -> URL? {
+    static func chatFolder(conversationID: String)
+        throws(ChatStoreError) -> URL
+    {
         let stores =
             (try? FileManager.default.contentsOfDirectory(
                 at: storeRoot,
                 includingPropertiesForKeys: nil
             )) ?? []
-        return stores.lazy.compactMap {
+        let folder = stores.lazy.compactMap {
             ChatStore.item(named: conversationID, in: $0)
         }
         .first {
@@ -558,6 +564,17 @@ nonisolated extension ChatStore {
                 atPath: $0.appending(path: "conversation.plist").path
             )
         }
+
+        guard let folder else {
+            throw ChatStoreError.chatNotFound(conversationID: conversationID)
+        }
+        return folder
+    }
+
+    static func chatStore(conversationID: String) throws(ChatStoreError) -> URL
+    {
+        return try chatFolder(conversationID: conversationID)
+            .deletingLastPathComponent()
     }
 
     // MARK: History
@@ -565,47 +582,61 @@ nonisolated extension ChatStore {
     /// loaded from the agent's own session: the same events a live turn streams (`sendMessage`).
     static func history(conversationID: String) throws -> [ChatEvent] {
         let id = conversationID
-        guard let folder = chatFolder(conversationID: id) else {
-            throw ChatHistoryError.chatNotFound(conversationID: id)
-        }
+        let store = try chatStore(conversationID: id)
+        let provider = try provider(
+            store: store,
+            conversationID: conversationID
+        )
+        let sessionID = try providerSessionID(
+            store: store,
+            conversationID: id
+        )
+        return try provider.history(sessionID: sessionID)
+    }
 
+    static func provider(store: URL, conversationID: String)
+        throws(ChatStoreError)
+        -> AgentProvider.Type
+    {
         let metadata = decode(
             ManifestEntry.self,
-            from: folder.appending(path: "metadata.plist")
+            from: store.appending(path: "metadata.plist")
         )
         guard
             let agent = metadata?.chatModelDefinitionIdentifier?
                 .providerIdentifier?.builtIn?._0.keys.first.flatMap(
                     AgentProviderName.init(rawValue:)
                 )
-        else { throw ChatHistoryError.unknownProvider(conversationID: id) }
-        guard let provider = AgentProviders.provider(for: agent) else {
-            throw ChatHistoryError.notImplemented(agent: agent)
-        }
-        guard
-            let sessionID = providerSessionID(
-                store: folder.deletingLastPathComponent(),
-                conversationID: id
-            )
         else {
-            throw ChatHistoryError.sessionMissing(conversationID: id)
+            throw ChatStoreError.unknownProvider(conversationID: conversationID)
         }
-        return try provider.history(sessionID: sessionID)
+        guard let provider = AgentProviders.provider(for: agent) else {
+            throw ChatStoreError.notImplemented(agent: agent)
+        }
+        return provider
     }
 
     /// The agent's session id of a chat: `conversation.plist` → `assistantConfiguration`.
-    static func providerSessionID(store: URL, conversationID: String) -> String?
+    static func providerSessionID(store: URL, conversationID: String)
+        throws(ChatStoreError) -> String
     {
-        guard let folder = ChatStore.item(named: conversationID, in: store)
-        else { return nil }
+        guard let folder = item(named: conversationID, in: store)
+        else {
+            throw ChatStoreError.chatNotFound(conversationID: conversationID)
+        }
         let conversation = decode(
-            ConversationFile.self,
+            ConversationPlist.self,
             from: folder.appending(path: "conversation.plist")
         )
-        return conversation?.assistantConfiguration
+        let sessionId = conversation?.assistantConfiguration
             .flatMap {
                 try? JSONDecoder().decode(AssistantConfiguration.self, from: $0)
             }?.agent._0.sessionID
+
+        guard let sessionId else {
+            throw ChatStoreError.sessionMissing(conversationID: conversationID)
+        }
+        return sessionId
     }
 
     // MARK: Finding the project file
@@ -716,7 +747,7 @@ nonisolated extension ChatStore {
     }
 
     /// The part of `conversation.plist` read here.
-    struct ConversationFile: Decodable {
+    private struct ConversationPlist: Decodable {
         var assistantConfiguration: Data?
     }
 

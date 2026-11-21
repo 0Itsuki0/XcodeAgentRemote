@@ -806,31 +806,55 @@ nonisolated extension ClaudeProvider: AgentProvider {
 
     /// Xcode's config folder for its Claude agent (`CLAUDE_CONFIG_DIR`).
     static let configDirectory = FileManager.default.homeDirectoryForCurrentUser
-        .appending(path: "Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig")
+        .appending(
+            path: "Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig"
+        )
 
     /// `<config>/projects/<project-dir>/<sessionID>.jsonl`
-    static func transcript(sessionID: String) -> URL? {
+    static func transcriptFile(sessionID: String) throws(ChatStoreError) -> URL
+    {
         let projects = configDirectory.appending(path: "projects")
-        let folders = (try? FileManager.default.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil)) ?? []
-        return folders.lazy.compactMap { ChatStore.item(named: sessionID, suffix: ".jsonl", in: $0) }.first
+        let folders =
+            (try? FileManager.default.contentsOfDirectory(
+                at: projects,
+                includingPropertiesForKeys: nil
+            )) ?? []
+
+        let url = folders.lazy.compactMap {
+            ChatStore.item(named: sessionID, suffix: ".jsonl", in: $0)
+        }.first
+
+        guard let url else {
+            throw ChatStoreError.transcriptMissing(sessionID: sessionID)
+        }
+        return url
+
     }
 
     /// A session's events, with the requests to the user (`ChatEvent.userRequest`) the transcript shows.
-    static func history(sessionID: String) throws -> [ChatEvent] {
-        guard let transcript = transcript(sessionID: sessionID) else {
-            throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
-        }
-        let events = try SessionHistory.load(contentsOf: transcript).flatMap(\.chatEvents)
-        return addingUserRequests(to: events, transcript: try Data(contentsOf: transcript), sessionID: sessionID)
+    static func history(sessionID: String) throws -> [ChatEvent]
+    {
+        let transcript = try transcriptFile(sessionID: sessionID)
+        let events = try SessionHistory.load(contentsOf: transcript).flatMap(
+            \.chatEvents
+        )
+        return addingUserRequests(
+            to: events,
+            transcript: try Data(contentsOf: transcript),
+            sessionID: sessionID
+        )
     }
 
     /// The `cwd` recorded in the session's transcript.
     static func workingDirectory(sessionID: String) -> URL? {
-        guard let transcript = transcript(sessionID: sessionID),
-              let data = try? Data(contentsOf: transcript)
+        guard let transcript = try? transcriptFile(sessionID: sessionID),
+            let data = try? Data(contentsOf: transcript)
         else { return nil }
         for line in data.split(separator: UInt8(ascii: "\n")) {
-            if let cwd = (try? JSONDecoder().decode(TranscriptCWD.self, from: Data(line)))?.cwd {
+            if let cwd =
+                (try? JSONDecoder().decode(TranscriptCWD.self, from: Data(line)))?
+                .cwd
+            {
                 return URL(filePath: cwd, directoryHint: .isDirectory)
             }
         }
@@ -860,15 +884,29 @@ nonisolated extension ClaudeProvider.SessionMessage {
                 return .intermediate(thinking.thinking)
             case (_, .toolUse(let toolUse)):
                 guard case .object(let input) = toolUse.input else {
-                    return .toolUse(ChatEvent.ToolUse(id: toolUse.id, name: toolUse.name, input: [:]))
+                    return .toolUse(
+                        ChatEvent.ToolUse(
+                            id: toolUse.id,
+                            name: toolUse.name,
+                            input: [:]
+                        )
+                    )
                 }
-                return .toolUse(ChatEvent.ToolUse(id: toolUse.id, name: toolUse.name, input: input))
+                return .toolUse(
+                    ChatEvent.ToolUse(
+                        id: toolUse.id,
+                        name: toolUse.name,
+                        input: input
+                    )
+                )
             case (_, .toolResult(let result)):
-                return .toolResult(ChatEvent.ToolResult(
-                    toolUseID: result.toolUseID,
-                    output: Self.text(of: result.content ?? []),
-                    isError: result.isError ?? false
-                ))
+                return .toolResult(
+                    ChatEvent.ToolResult(
+                        toolUseID: result.toolUseID,
+                        output: Self.text(of: result.content ?? []),
+                        isError: result.isError ?? false
+                    )
+                )
             default:
                 return nil
             }

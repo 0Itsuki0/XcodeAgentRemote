@@ -7,7 +7,7 @@
 
 import Foundation
 
-nonisolated enum ChatHistoryError: LocalizedError {
+nonisolated enum ChatStoreError: LocalizedError {
     /// No chat store has a chat with this id.
     case chatNotFound(conversationID: String)
     /// The chat's agent could not be read from its metadata.

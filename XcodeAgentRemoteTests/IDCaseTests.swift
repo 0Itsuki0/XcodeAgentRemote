@@ -53,7 +53,7 @@ struct IDCaseTests {
     static func claudeChat() -> (project: XcodeProject, chat: XcodeChatConversation, sessionID: String)? {
         for project in ChatStore.listProjects() {
             for chat in project.conversations where chat.provider == .claude {
-                if let sessionID = chat.providerSessionID, ClaudeProvider.transcript(sessionID: sessionID) != nil {
+                if let sessionID = chat.providerSessionID, ClaudeProvider.transcriptFile(sessionID: sessionID) != nil {
                     return (project, chat, sessionID)
                 }
             }
@@ -74,14 +74,14 @@ struct IDCaseTests {
 
     @Test(arguments: [false, true]) func transcriptFoundWhateverTheCase(otherCase: Bool) throws {
         let (_, _, sessionID) = try #require(Self.claudeChat(), "no Claude chat with a transcript in Xcode's chat store")
-        let transcript = try #require(ClaudeProvider.transcript(sessionID: sessionID))
+        let transcript = try #require(ClaudeProvider.transcriptFile(sessionID: sessionID))
         let id = otherCase ? sessionID.uppercased() : sessionID  // Claude writes its session ids lowercase
 
-        #expect(ClaudeProvider.transcript(sessionID: id) == transcript)
+        #expect(ClaudeProvider.transcriptFile(sessionID: id) == transcript)
     }
 
     @Test func unknownConversationNotFound() {
-        #expect(throws: ChatHistoryError.self) {
+        #expect(throws: ChatStoreError.self) {
             try ChatStore.conversation(id: "00000000-0000-0000-0000-000000000000")
         }
     }

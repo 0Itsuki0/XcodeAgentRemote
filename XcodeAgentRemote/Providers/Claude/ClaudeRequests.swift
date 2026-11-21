@@ -167,9 +167,7 @@ nonisolated extension ClaudeProvider {
     /// - the user stopping it in Xcode (the close button): `"toolDenialKind": "user-rejected"`, then the interrupted
     ///   text.
     static func removeStoppedResult(of toolUseID: String, sessionID: String) throws -> Bool {
-        guard let transcript = transcript(sessionID: sessionID) else {
-            throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
-        }
+        let transcript = try transcriptFile(sessionID: sessionID)
         // The result's line, if it is one of those two.
         var resultLine: String?
         for line in try String(contentsOf: transcript, encoding: .utf8).split(separator: "\n") where line.contains(toolUseID) {
@@ -198,9 +196,7 @@ nonisolated extension ClaudeProvider {
     private static func removeBlocks(
         sessionID: String, where isRemoved: ([String: JSONValue], JSONValue) -> Bool
     ) throws -> Bool {
-        guard let transcript = transcript(sessionID: sessionID) else {
-            throw ChatHistoryError.transcriptMissing(sessionID: sessionID)
-        }
+        let transcript = try transcriptFile(sessionID: sessionID)
         let lines = try String(contentsOf: transcript, encoding: .utf8)
             .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var removedAny = false

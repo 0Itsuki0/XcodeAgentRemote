@@ -60,7 +60,7 @@ struct ChatWatcherConfigurationView: View {
             let url = URL.desktopDirectory.appending(path: "test.txt")
             Task {
                 do {
-                    try await chatWatcher.watchFile(at: url)
+//                    try await chatWatcher.watchFile(at: url)
                 } catch {
                     print(error)
                 }

@@ -155,7 +155,7 @@ actor APIServer {
             let conversationID = try context.parameters.require("conversation")
             do {
                 return try ChatStore.conversation(id: conversationID)
-            } catch let error as ChatHistoryError {
+            } catch let error as ChatStoreError {
                 switch error {
                 case .notImplemented:
                     throw HTTPError(

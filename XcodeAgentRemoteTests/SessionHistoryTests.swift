@@ -55,7 +55,7 @@ struct SessionHistoryTests {
         let messages = try JSONDecoder().decode([CLIMessage].self, from: Data(output.utf8))
         let result = try #require(messages.last { $0.type == "result" }, "no result message")
         let sessionID = try #require(result.session_id)
-        let transcript = try #require(ClaudeProvider.transcript(sessionID: sessionID), "no transcript for the session")
+        let transcript = try #require(ClaudeProvider.transcriptFile(sessionID: sessionID), "no transcript for the session")
         // Claude's folder for the test's temporary working directory (named after it): only this session, and its memory.
         let projectFolder = transcript.deletingLastPathComponent()
         defer {
