@@ -8,7 +8,7 @@
 import Foundation
 
 nonisolated enum APIServerConstant {
-    static let defaultPort = 8765
+    static let defaultPort = 8000
 
     /// `GET /health` → `SuccessResponse`
     static let healthPath = "health"

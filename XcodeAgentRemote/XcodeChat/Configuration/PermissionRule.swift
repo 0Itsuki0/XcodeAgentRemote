@@ -39,6 +39,10 @@ import Foundation
 ///
 ///  Settings are read fresh on every check. Xcode reads them when a chat's agent starts, so the two differ only if a
 ///  setting changed while that chat was open.
+///
+///  Not using `toolPermissions.json` here because
+///  it seems to be an older version / duplicate of `permissions.json` and
+///  Xcode doesn't seem to be reading/writing it (Nothing changed even when the permission settings changed)
 nonisolated extension XcodeAgentConfiguration {
 
     nonisolated enum PermissionRule {

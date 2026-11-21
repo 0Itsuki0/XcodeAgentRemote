@@ -171,6 +171,8 @@ actor APIServer {
                 }
             }
         }
+        
+        // TODO: - addd a POST /conversation/:conversation/watch
 
         router.post(RouterPath(APIServerConstant.messagePath)) {
             request,

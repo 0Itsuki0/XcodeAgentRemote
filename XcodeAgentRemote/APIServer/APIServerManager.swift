@@ -106,7 +106,7 @@ class APIServerManager {
             do {
                 try await server.start(
                     port: self.port,
-                    authHeader: self.authHeader
+                    authHeader: self.useAuth ? self.authHeader : nil
                 )
                 self.serverState = .running
             } catch {

@@ -43,7 +43,7 @@ nonisolated struct APIServerClient: Sendable {
     }
 
     /// `GET /health`
-    func health() async throws -> SuccessResponse {
+    func health() async throws(NetworkError) -> SuccessResponse {
         let data = try await NetworkService.sendURLRequest(
             url: baseURL.appending(path: APIServerConstant.healthPath),
             method: "GET",
@@ -57,7 +57,7 @@ nonisolated struct APIServerClient: Sendable {
     }
 
     /// `GET /projects`: every project with Xcode chats on the Mac, with its chats (for when iCloud syncing fails).
-    func projects() async throws -> [XcodeProject] {
+    func projects() async throws(NetworkError) -> [XcodeProject] {
         let data = try await NetworkService.sendURLRequest(
             url: baseURL.appending(path: APIServerConstant.projectsPath),
             method: "GET",
@@ -73,7 +73,7 @@ nonisolated struct APIServerClient: Sendable {
     /// `GET /conversation/<Xcode chat UUID>`: one conversation in full, with its history and its project (for when
     /// iCloud syncing fails).
     /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
-    func conversation(id: String) async throws -> XcodeConversationDetail {
+    func conversation(id: String) async throws(NetworkError) -> XcodeConversationDetail {
         let data = try await NetworkService.sendURLRequest(
             url: baseURL.appending(path: APIServerConstant.conversationPath)
                 .appending(path: id),

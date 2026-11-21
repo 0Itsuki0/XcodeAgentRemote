@@ -11,10 +11,12 @@ import SwiftUI
 @main
 struct XcodeAgentRemote_iOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-
+    private let chatManager = XcodeChatManager()
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(chatManager)
         }
     }
 }
