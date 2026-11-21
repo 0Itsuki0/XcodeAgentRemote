@@ -37,7 +37,7 @@ import ServiceLifecycle
 ///     ```
 ///   The turn does not depend on the client: if the connection closes, the turn still runs to completion and is saved.
 ///
-/// If `APIServerConstant.authHeader` is set, every request must carry that header with that exact value, or it is
+/// If `APIServerConstants.authHeader` is set, every request must carry that header with that exact value, or it is
 /// rejected with 401.
 actor APIServer {
 
@@ -61,7 +61,7 @@ actor APIServer {
     /// `nil`: no check.
     @discardableResult
     func start(
-        port: Int = APIServerConstant.defaultPort,
+        port: Int = APIServerConstants.defaultPort,
         authHeader: AuthHeader? = nil
     ) async throws -> Int {
         if let runningPort {
@@ -140,17 +140,17 @@ actor APIServer {
             router.add(middleware: AuthHeaderMiddleware(authHeader))
         }
 
-        router.get(RouterPath(APIServerConstant.healthPath)) { _, _ in
+        router.get(RouterPath(APIServerConstants.healthPath)) { _, _ in
             SuccessResponse()
         }
 
         // For when iCloud syncing fails: the chats and their histories, read directly from this Mac.
-        router.get(RouterPath(APIServerConstant.projectsPath)) { _, _ in
+        router.get(RouterPath(APIServerConstants.projectsPath)) { _, _ in
             ChatStore.listProjects()
         }
 
         router.get(
-            RouterPath("\(APIServerConstant.conversationPath)/:conversation")
+            RouterPath("\(APIServerConstants.conversationPath)/:conversation")
         ) { _, context -> XcodeConversationDetail in
             let conversationID = try context.parameters.require("conversation")
             do {
@@ -174,7 +174,7 @@ actor APIServer {
         
         // TODO: - addd a POST /conversation/:conversation/watch
 
-        router.post(RouterPath(APIServerConstant.messagePath)) {
+        router.post(RouterPath(APIServerConstants.messagePath)) {
             request,
             context -> Response in
             let body = try await request.decode(
@@ -234,7 +234,7 @@ actor APIServer {
                         ErrorResponse.Body(message: error.localizedDescription)
                     )) ?? Data("{}".utf8)
                 try await writer.write(
-                    serverSentEvent(APIServerConstant.errorEvent, message)
+                    serverSentEvent(APIServerConstants.errorEvent, message)
                 )
             }
             try await writer.finish(nil)
@@ -265,7 +265,7 @@ extension XcodeProject: ResponseEncodable {}
 extension XcodeConversationDetail: ResponseEncodable {}
 extension ChatEvent: ResponseEncodable {}
 
-/// Rejects (401) every request that does not carry `APIServerConstant.authHeader` with its exact value.
+/// Rejects (401) every request that does not carry `APIServerConstants.authHeader` with its exact value.
 /// An invalid header name rejects every request.
 nonisolated struct AuthHeaderMiddleware<Context: RequestContext>:
     RouterMiddleware

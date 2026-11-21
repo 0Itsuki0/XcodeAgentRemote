@@ -83,7 +83,7 @@ class APIServerManager {
     init() {
         self.port =
             UserDefaultsKey.apiServerPort.getValue() as? Int
-            ?? APIServerConstant.defaultPort
+            ?? APIServerConstants.defaultPort
 
         self.useAuth =
             UserDefaultsKey.apiServerUseAuth.getValue() as? Bool ?? false

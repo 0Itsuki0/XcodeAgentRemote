@@ -18,7 +18,7 @@ nonisolated enum ServerRequestError: Error, LocalizedError {
     }
 }
 
-/// Requests to the macOS app's server (`APIServer`, see `APIServerConstant`).
+/// Requests to the macOS app's server (`APIServer`, see `APIServerConstants`).
 nonisolated struct APIServerClient: Sendable {
     /// The server, e.g. `http://192.168.0.4:8765`.
     var baseURL: URL
@@ -32,7 +32,7 @@ nonisolated struct APIServerClient: Sendable {
     /// The server at `http://<host>:<port>`.
     init?(
         host: String,
-        port: Int = APIServerConstant.defaultPort,
+        port: Int = APIServerConstants.defaultPort,
         authHeader: AuthHeader? = nil
     ) {
         guard let url = URL(string: "http://\(host):\(port)") else {
@@ -45,7 +45,7 @@ nonisolated struct APIServerClient: Sendable {
     /// `GET /health`
     func health() async throws(NetworkError) -> SuccessResponse {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: APIServerConstant.healthPath),
+            url: baseURL.appending(path: APIServerConstants.healthPath),
             method: "GET",
             headers: Self.headers(
                 ["Accept": "application/json"],
@@ -59,7 +59,7 @@ nonisolated struct APIServerClient: Sendable {
     /// `GET /projects`: every project with Xcode chats on the Mac, with its chats (for when iCloud syncing fails).
     func projects() async throws(NetworkError) -> [XcodeProject] {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: APIServerConstant.projectsPath),
+            url: baseURL.appending(path: APIServerConstants.projectsPath),
             method: "GET",
             headers: Self.headers(
                 ["Accept": "application/json"],
@@ -75,7 +75,7 @@ nonisolated struct APIServerClient: Sendable {
     /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
     func conversation(id: String) async throws(NetworkError) -> XcodeConversationDetail {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: APIServerConstant.conversationPath)
+            url: baseURL.appending(path: APIServerConstants.conversationPath)
                 .appending(path: id),
             method: "GET",
             headers: Self.headers(
@@ -126,7 +126,7 @@ nonisolated struct APIServerClient: Sendable {
     private func events(for request: MessageRequest) -> AsyncThrowingStream<
         ChatEvent, Error
     > {
-        let url = baseURL.appending(path: APIServerConstant.messagePath)
+        let url = baseURL.appending(path: APIServerConstants.messagePath)
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -149,7 +149,7 @@ nonisolated struct APIServerClient: Sendable {
                         if let name = Self.field("event", in: line) {
                             eventName = name
                         } else if let data = Self.field("data", in: line) {
-                            if eventName == APIServerConstant.errorEvent {
+                            if eventName == APIServerConstants.errorEvent {
                                 let error = try NetworkService.decode(
                                     ErrorResponse.Body.self,
                                     from: data
@@ -176,7 +176,7 @@ nonisolated struct APIServerClient: Sendable {
         }
     }
 
-    /// The request's headers, plus `APIServerConstant.authHeader` if it is set.
+    /// The request's headers, plus `APIServerConstants.authHeader` if it is set.
     private static func headers(
         _ headers: [String: String],
         authHeader: AuthHeader?

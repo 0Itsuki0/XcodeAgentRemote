@@ -26,7 +26,8 @@ struct ContentView: View {
                 }
 
                 Button("Send message") {
-                    chatManager.sendMessage("hey")
+//                    chatManager.sendMessage("hey")
+                    chatManager.sendMessage("Use the Bash tool to run: touch /tmp/test-scenarios-CCECB3EE-allowed. Then reply DONE.")
                 }
             }
             .navigationTitle("Push Without Server")

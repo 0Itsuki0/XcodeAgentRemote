@@ -56,8 +56,7 @@ nonisolated enum NetworkError: Error, LocalizedError {
     }
 }
 
-nonisolated final class NetworkService {
-    private init() {}
+nonisolated enum NetworkService {
 
     /// For ordinary request / response calls.
     private static let urlSession: URLSession = {
