@@ -8,14 +8,14 @@
 import SwiftUI
 import Synchronization
 
-private let logger = Logger.shared
-private let category = Logger.category(#fileID)
+nonisolated private let logger = Logger.shared
+nonisolated private let category = Logger.category(#fileID)
 
 /// `ChatWatcher` managing a list of `FileWatcher`, one per chat.
 ///
 /// Notes:
 /// - Not preserving the watching URL between app launches to avoid watching unnecessary amount of chats simultaneously
-@Observable class ChatWatcher {
+@Observable nonisolated final class ChatWatcher: Sendable {
     private struct WatchingConversation: Sendable, Identifiable {
         var id: String { conversationId }
         var conversationId: String
@@ -138,7 +138,7 @@ private let category = Logger.category(#fileID)
     }
 }
 
-extension Error {
+nonisolated extension Error {
     var isCancellationError: Bool {
         return self is CancellationError
     }
