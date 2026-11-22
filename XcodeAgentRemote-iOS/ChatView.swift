@@ -33,7 +33,7 @@ private let category = Logger.category(#fileID)
 #endif
 
 struct ChatView: View {
-    @Environment(XcodeChatManager.self) private var chatManager
+//    @Environment(XcodeChatManager.self) private var chatManager
     @State private var chatViewModel: ChatViewModel
 
     private var conversationId: String {
@@ -60,7 +60,7 @@ struct ChatView: View {
 
     private let streamingMessageID = UUID()
 
-    private let standardSpacing: CGFloat = 16
+    private let standardSpacing: CGFloat = UIConstants.standardSpacing
 
     private let bottomSpacer = Int.max
 
@@ -127,7 +127,7 @@ struct ChatView: View {
             }
         }
         .safeAreaBar(edge: .bottom) {
-            EntryView(focused: $focused, standardSpacing: standardSpacing)
+            EntryView(focused: $focused)
         }
 
         //                    .onChange(of: chatManager.streamingMessage, initial: true, {
@@ -356,12 +356,13 @@ struct ChatView: View {
 }
 
 struct EntryView: View {
-    @Environment(XcodeChatManager.self) private var chatManager
+//    @Environment(XcodeChatManager.self) private var chatManager
 
     var focused: FocusState<Bool>.Binding
-    var standardSpacing: CGFloat
     @State private var selectedPermissionMode: PermissionMode = .auto
     @State private var text: String = ""
+
+    private let standardSpacing: CGFloat = UIConstants.standardSpacing
 
     var body: some View {
         VStack(alignment: .leading, spacing: standardSpacing / 2) {

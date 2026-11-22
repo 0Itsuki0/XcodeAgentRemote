@@ -9,30 +9,73 @@ import CloudKit
 import SwiftData
 import SwiftUI
 
+//@Observable class AppViewRouter {
+//
+//}
+
 struct ContentView: View {
-    @State private var sendMessageOutput: [String] = []
-    @Environment(XcodeChatManager.self) private var chatManager
+    @Environment(ServerSettingManager.self) private var serverSettingManager
+    @State private var showSettings: Bool = false
 
     var body: some View {
-        NavigationStack {
-            VStack {
-                Text("\(chatManager.serverConfigurationState)")
-//                Button("Configure") {
-//                    chatManager.updateServerConfiguration(
-//                        url:
-//                            "https://madison-vernal-unanecdotally.ngrok-free.dev",
-//                        authHeader: nil
-//                    )
-//                }
-
-                Button("Send message") {
-//                    chatManager.sendMessage("hey")
-//                    chatManager.sendMessage("Use the Bash tool to run: touch /tmp/test-scenarios-CCECB3EE-allowed. Then reply DONE.")
+        Group {
+            if let apiClient = serverSettingManager.apiClient {
+                ProjectListView(apiClient: apiClient)
+            } else {
+                ContentUnavailableView {
+                    Label("Server not configured", systemImage: "server.rack")
+                } description: {
+                    Text(
+                        "Please set up the configuration parameters for your Mac server."
+                    )
+                } actions: {
+                    Button("Settings") {
+                        // TODO: - show server settings directly instead of top settings
+                        showSettings = true
+                    }
                 }
             }
-            .navigationTitle("Push Without Server")
         }
-
+        .navigationTitle("Chat Projects")
+        .navigationSubtitle("Xcode projects with conversations")
+        .toolbarTitleDisplayMode(.inlineLarge)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Settings", systemImage: "gearshape") {
+                    showSettings = true
+                }
+            }
+        }
+        .labelStyle(.iconOnly)
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+                .environment(serverSettingManager)
+        }
     }
+}
 
+struct ProjectListView: View {
+    //    @Environment(XcodeChatManager.self) private var chatManager
+    init(apiClient: APIServerClient) {
+        self.projectViewModel = ProjectViewModel(apiClient: apiClient)
+    }
+    @State private var projectViewModel: ProjectViewModel
+    var body: some View {
+        List {
+            NavigationLink {
+                ChatView.debugUI()
+            } label: {
+                Text("Dummy chat")
+            }
+
+        }
+        .contentMargins(.top, UIConstants.standardTopMargin)
+        .task {
+            print("ProjectListView task")
+            //            await chatManager.loadProjects()
+        }
+        .refreshable {
+            //            await chatManager.loadProjects()
+        }
+    }
 }

@@ -9,156 +9,136 @@ import SwiftUI
 
 private let logger = Logger.shared
 private let category = Logger.category(#fileID)
+//
+//enum ServerConfigurationState: Equatable, Hashable, Sendable {
+//    case validationFailed(String)
+//    case validating
+//    case validated
+//}
+//
+//enum RequestState: Equatable, Hashable, Sendable {
+//    case idle
+//    case requesting
+//}
 
-enum ServerConfigurationState: Equatable, Hashable, Sendable {
-    case validationFailed(String)
-    case validating
-    case validated
-}
+@Observable class ServerSettingManager {
 
-enum RequestState: Equatable, Hashable, Sendable {
-    case idle
-    case requesting
-}
+    private(set) var apiClient: APIServerClient?
 
-@Observable class XcodeChatManager {
+    private(set) var validating: Bool = false
+    private(set) var validationError: String? = nil
 
-    private(set) var serverConfigurationState: ServerConfigurationState =
-        .validating
-
-    private var apiClient: APIServerClient?
+//    @ObservationIgnored
+//    private var observationToken: NotificationCenter.ObservationToken?
 
     init() {
-        let url = UserDefaultsKey.apiServerURL.getValue() as? String ?? ""
-        let useAuth =
-            UserDefaultsKey.apiServerUseAuth.getValue() as? Bool ?? false
-
-        let authHeaderName =
-            UserDefaultsKey.apiServerAuthHeaderName.getValue() as? String ?? ""
-        let authHeaderValue =
-            UserDefaultsKey.apiServerAuthHeaderValue.getValue() as? String ?? ""
-
-        let authHeader = AuthHeader(
-            name: authHeaderName,
-            value: authHeaderValue
-        )
-
-        updateServerConfiguration(
-            url: url,
-            useAuth: useAuth,
-            authHeader: authHeader
-        )
+        self.apiClient = .saved
+//        self.observationToken = NotificationCenter.default.addObserver(
+//            of: Never.self,
+//            for: .serverConfigurationDidChange
+//        ) { [weak self] message in
+//            guard let self else { return }
+//            logger.info(
+//                category: category,
+//                message: "API client updated."
+//            )
+//            self.apiClient = message.apiClient
+//        }
     }
 
-    func updateServerConfiguration(
-        url: String,
+    /// Test whether a server configuration is valid by pinging `/health` endpoint
+    func testConfiguration(
+        urlString: String,
         useAuth: Bool,
-        authHeader: AuthHeader?,
-        validate: Bool = true
+        authHeader: AuthHeader
     ) {
-        guard let url = URL(string: url) else {
-            self.serverConfigurationState = .validationFailed("Invalid URL")
-            logger.error(
-                category: category,
-                errorMessage: "Invalid server url."
-            )
-            return
-        }
+        guard !self.validating else { return }
+        self.validationError = nil
+        self.validating = true
 
-        let apiClient = APIServerClient(
-            baseURL: url,
-            authHeader: useAuth ? authHeader : nil
-        )
-        self.apiClient = apiClient
-        self.saveServerConfiguration(
-            url: url.absoluteString,
-            useAuth: useAuth,
-            authHeader: authHeader
-        )
-        guard validate else { return }
-        self.serverConfigurationState = .validating
-        Task { [weak self] in
-            guard let self else { return }
+        Task {
+            defer { self.validating = false }
+
+            guard let url = URL(string: urlString) else {
+                self.validationError = "Invalid URL"
+                return
+            }
+
+            let apiClient = APIServerClient(
+                baseURL: url,
+                authHeader: useAuth ? authHeader : nil
+            )
 
             do {
                 let _ = try await apiClient.health()
-                self.serverConfigurationState = .validated
-                logger.info(
-                    category: category,
-                    message: "Server configured successfully."
-                )
             } catch {
-                logger.error(category: category, error: error)
-                self.serverConfigurationState = .validationFailed(
-                    error.localizedDescription
-                )
+                self.validationError = error.localizedDescription
             }
         }
     }
 
-    private func saveServerConfiguration(
-        url: String,
+    func saveConfiguration(
+        urlString: String,
         useAuth: Bool,
-        authHeader: AuthHeader?,
+        authHeader: AuthHeader
     ) {
+
         UserDefaultsKey.apiServerURL.setValue(
-            value: url
+            value: urlString
         )
         UserDefaultsKey.apiServerUseAuth.setValue(value: useAuth)
         UserDefaultsKey.apiServerAuthHeaderName.setValue(
-            value: authHeader?.name ?? ""
+            value: authHeader.name
         )
         UserDefaultsKey.apiServerAuthHeaderValue.setValue(
-            value: authHeader?.value ?? ""
+            value: authHeader.value
+        )
+        self.apiClient = APIServerClient(
+            baseURLString: urlString,
+            authHeader: useAuth ? authHeader : nil
         )
     }
 
-    //
-    //    /// - `store`: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
-    //    func sendMessage(
-    //        _ prompt: String,
-    //        conversationId: String,
-    //        store: String,
-    //        permissionModeOverride: PermissionMode,
-    //        permissionTimeout: TimeInterval = 180
-    //    ) {
-    //        guard let apiClient else { return }
-    //        self.streamingEvents = []
-    //        let stream = apiClient.sendMessage(
-    //            prompt,
-    //            to: .conversationInStore(id: conversationId, store: store),
-    //            permissionModeOverride: permissionModeOverride,
-    //            permissionTimeout: permissionTimeout
-    //        )
-    //        Task {
-    //            defer {
-    //                self.streamingEvents = []
-    //            }
-    //            do {
-    //                for try await event in stream {
-    //                    logger.info(category: category, message: "Event: \(event)")
-    //                    self.streamingEvents?.append(event)
-    //                }
-    //            } catch {
-    //                logger.error(category: category, error: error)
-    //                self.error = error
-    //            }
-    //        }
-    //        //        var responses = 0
-    //        //        while true {
-    //        //            responses += 1
-    //        //            for try await event in stream { events.append(event) }
-    //        //            guard let waiting = waitingForUser(events).last else { return (events, responses) }
-    //        //            stream = client.answer(answering(waiting))
-    //        //        }
-    //
-    //    }
+}
+
+extension APIServerClient {
+
+}
+
+@Observable class ProjectViewModel {
+    private(set) var projects: [XcodeProject] = []
+
+    private(set) var error: Error?
+
+    private let apiClient: APIServerClient
+
+    private var isFetching: Bool = false
+
+    init(apiClient: APIServerClient) {
+        self.apiClient = apiClient
+    }
+
+    func loadProjects() async {
+        guard !isFetching else { return }
+        self.isFetching = true
+        defer { isFetching = false }
+        do {
+            self.projects = try await apiClient.projects()
+            logger.info(
+                category: category,
+                message: "Server configured successfully."
+            )
+            self.projects = projects
+        } catch {
+            logger.error(category: category, error: error)
+            self.error = error
+            self.projects = []
+        }
+    }
+
 }
 
 @Observable class ChatViewModel {
-    var isStreaming: Bool {
-        streamingEvents != nil
-    }
 
     let conversationId: String
     var conversationName: String {
@@ -172,9 +152,16 @@ enum RequestState: Equatable, Hashable, Sendable {
         conversationDetail?.history ?? []
     }
 
-    private(set) var streamingEvents: [ChatEvent]? = nil
+    var pendingUserRequest: [ChatEvent.UserRequest] {
+        self.history.waitingForUser
+    }
+
+    private(set) var isResponding: Bool = false
+    private var isFetching: Bool = false
+
+    //    private(set) var streamingEvents: [ChatEvent]? = nil
     private(set) var error: Error? = nil
-    private(set) var requestState: RequestState = .idle
+    //    private(set) var requestState: RequestState = .idle
 
     private var conversationDetail: XcodeConversationDetail? = nil
 
@@ -222,7 +209,9 @@ enum RequestState: Equatable, Hashable, Sendable {
     #endif
 
     func fetchConversationDetail() async {
-        guard self.requestState == .idle else { return }
+        guard !self.isFetching else { return }
+        self.isFetching = true
+        defer { self.isFetching = false }
         do {
             let conversationDetail = try await apiClient.conversation(
                 id: self.conversationId
@@ -234,6 +223,10 @@ enum RequestState: Equatable, Hashable, Sendable {
         }
     }
 
+    // TODO: -
+    // 1. with for try loop, if event is a user request, start a timer count down permissionTimeout
+    // 2. show a count down in the view
+    // 3. on timeout, cancel the task and reload the history
     /// - `store`: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
     func sendMessage(
         _ prompt: String,
@@ -242,7 +235,9 @@ enum RequestState: Equatable, Hashable, Sendable {
         permissionModeOverride: PermissionMode,
         permissionTimeout: TimeInterval = 180
     ) {
-        self.streamingEvents = []
+        guard !self.isResponding else { return }
+
+        self.isResponding = true
         let stream = apiClient.sendMessage(
             prompt,
             to: .conversationInStore(id: conversationId, store: store),
@@ -251,12 +246,12 @@ enum RequestState: Equatable, Hashable, Sendable {
         )
         Task {
             defer {
-                self.streamingEvents = []
+                self.isResponding = false
             }
             do {
                 for try await event in stream {
                     logger.info(category: category, message: "Event: \(event)")
-                    self.streamingEvents?.append(event)
+                    self.appendHistory(event)
                 }
             } catch {
                 logger.error(category: category, error: error)
@@ -264,5 +259,19 @@ enum RequestState: Equatable, Hashable, Sendable {
             }
         }
     }
+
+    private func appendHistory(_ event: ChatEvent) {
+        self.conversationDetail?.history.append(event)
+    }
+
+    //        //        var responses = 0
+    //        //        while true {
+    //        //            responses += 1
+    //        //            for try await event in stream { events.append(event) }
+    //        //            guard let waiting = waitingForUser(events).last else { return (events, responses) }
+    //        //            stream = client.answer(answering(waiting))
+    //        //        }
+    //
+    //    }
 
 }

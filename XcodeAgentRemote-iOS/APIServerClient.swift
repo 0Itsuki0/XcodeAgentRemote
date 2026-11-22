@@ -24,6 +24,34 @@ nonisolated struct APIServerClient: Sendable {
     var baseURL: URL
     var authHeader: AuthHeader? = nil
 
+    static var saved: APIServerClient? {
+        let url = UserDefaultsKey.apiServerURL.getValue() as? String ?? ""
+        let useAuth =
+            UserDefaultsKey.apiServerUseAuth.getValue() as? Bool ?? false
+
+        let authHeaderName =
+            UserDefaultsKey.apiServerAuthHeaderName.getValue() as? String ?? ""
+        let authHeaderValue =
+            UserDefaultsKey.apiServerAuthHeaderValue.getValue() as? String ?? ""
+
+        let authHeader = AuthHeader(
+            name: authHeaderName,
+            value: authHeaderValue
+        )
+
+        return APIServerClient(
+            baseURLString: url,
+            authHeader: useAuth ? authHeader : nil
+        )
+    }
+
+    init?(baseURLString: String, authHeader: AuthHeader? = nil) {
+        guard let baseURL = URL(string: baseURLString) else {
+            return nil
+        }
+        self.init(baseURL: baseURL, authHeader: authHeader)
+    }
+
     init(baseURL: URL, authHeader: AuthHeader? = nil) {
         self.baseURL = baseURL
         self.authHeader = authHeader
@@ -87,7 +115,9 @@ nonisolated struct APIServerClient: Sendable {
     /// `GET /conversation/<Xcode chat UUID>`: one conversation in full, with its history and its project (for when
     /// iCloud syncing fails).
     /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
-    func conversation(id: String) async throws(NetworkError) -> XcodeConversationDetail {
+    func conversation(id: String) async throws(NetworkError)
+        -> XcodeConversationDetail
+    {
         let data = try await NetworkService.sendURLRequest(
             url: baseURL.appending(path: APIServerConstants.conversationPath)
                 .appending(path: id),
@@ -132,7 +162,9 @@ nonisolated struct APIServerClient: Sendable {
     /// turn's stream from where the previous one (`sendMessage`, or the previous `answer`) ended: until the next
     /// request to the user or the end of the turn, like `sendMessage`.
     /// Throws `NetworkError.badResponse` with code 404 if no turn is waiting for tool use `answer.toolUseID`.
-    func answer(_ answer: ChatEvent.UserResponse) -> AsyncThrowingStream<ChatEvent, Error> {
+    func answer(_ answer: ChatEvent.UserResponse) -> AsyncThrowingStream<
+        ChatEvent, Error
+    > {
         events(for: .answer(answer))
     }
 
