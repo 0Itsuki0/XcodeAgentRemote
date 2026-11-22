@@ -213,7 +213,7 @@ actor APIServer {
 
             switch body {
             case .answer(let answer):
-                guard isWaitingForUser(toolUseID: answer.toolUseID) else {
+                guard RunningTurns.isWaitingForUser(toolUseID: answer.toolUseID) else {
                     throw HTTPError(
                         .notFound,
                         message: SendMessageError.noWaitingRequest(

@@ -63,8 +63,13 @@ nonisolated enum XcodeChat {
             let task = Task {
                 do {
                     try await runAndRecord(
-                        prompt, to: target, permissionModeOverride: permissionModeOverride,
-                        permissionTimeout: permissionTimeout, repeatedAnswer: repeatedAnswer, continuation: continuation)
+                        prompt,
+                        to: target,
+                        permissionModeOverride: permissionModeOverride,
+                        permissionTimeout: permissionTimeout,
+                        repeatedAnswer: repeatedAnswer,
+                        continuation: continuation
+                    )
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -89,20 +94,28 @@ nonisolated enum XcodeChat {
         let store: URL
         let conversationID: String?
         switch target {
-        case .newConversation(let projectFile, _, _), .conversation(_, let projectFile):
+        case .newConversation(let projectFile, _, _),
+            .conversation(_, let projectFile):
             let file = projectFile.absoluteURL.standardizedFileURL
-            guard FileManager.default.fileExists(atPath: file.path) else { throw XcodeChatError.projectNotFound(file) }
+            guard FileManager.default.fileExists(atPath: file.path) else {
+                throw XcodeChatError.projectNotFound(file)
+            }
             project = file
             store = ChatStore.storeDirectory(forProject: file)
         case .conversationInStore(_, let name):
             store = ChatStore.storeDirectory(named: name)
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: store.path, isDirectory: &isDirectory), isDirectory.boolValue
+            guard
+                FileManager.default.fileExists(
+                    atPath: store.path,
+                    isDirectory: &isDirectory
+                ), isDirectory.boolValue
             else { throw XcodeChatError.storeNotFound(store) }
         }
         switch target {
         case .newConversation: conversationID = nil
-        case .conversation(let id, _), .conversationInStore(let id, _): conversationID = id
+        case .conversation(let id, _), .conversationInStore(let id, _):
+            conversationID = id
         }
 
         // Provider and session: the chat's own for an existing chat, the given agent for a new one.
@@ -110,11 +123,22 @@ nonisolated enum XcodeChat {
         let sessionID: String
         var conversation: ChatStore.Chat
         if let conversationID {
-            guard let existing = ChatStore.Chat.load(store: store, id: conversationID) else {
-                throw XcodeChatError.conversationNotFound(id: conversationID, store: store)
+            guard
+                let existing = ChatStore.Chat.load(
+                    store: store,
+                    id: conversationID
+                )
+            else {
+                throw XcodeChatError.conversationNotFound(
+                    id: conversationID,
+                    store: store
+                )
             }
-            guard let agent = existing.agent else { throw XcodeChatError.unknownAgent(conversationID: existing.id) }
-            guard let existingProvider = AgentProviders.provider(for: agent) else { throw XcodeChatError.agentNotImplemented(agent) }
+            guard let agent = existing.agent else {
+                throw XcodeChatError.unknownAgent(conversationID: existing.id)
+            }
+            guard let existingProvider = AgentProviders.provider(for: agent)
+            else { throw XcodeChatError.agentNotImplemented(agent) }
             guard let existingSession = existing.sessionID else {
                 throw XcodeChatError.sessionMissing(conversationID: existing.id)
             }
@@ -122,7 +146,9 @@ nonisolated enum XcodeChat {
             sessionID = existingSession
             conversation = existing
         } else {
-            guard case .newConversation(_, let agent, let name) = target else { return }
+            guard case .newConversation(_, let agent, let name) = target else {
+                return
+            }
             guard let newProvider = AgentProviders.provider(for: agent) else {
                 throw XcodeChatError.agentNotImplemented(agent)
             }
@@ -130,15 +156,27 @@ nonisolated enum XcodeChat {
             sessionID = provider.newSessionID()
             conversation = try ChatStore.Chat.create(
                 store: store,
-                modelDefinition: .init(modelIdentifier: provider.modelIdentifier, agent: provider.agent),
+                modelDefinition: .init(
+                    modelIdentifier: provider.modelIdentifier,
+                    agent: provider.agent
+                ),
                 sessionID: sessionID,
-                name: name ?? String(prompt.prefix(40)))
+                name: name ?? String(prompt.prefix(40))
+            )
         }
 
         if project == nil {  // a store only: find the project from the session's folder and the snapshots
-            let folders = [provider.workingDirectory(sessionID: sessionID)].compactMap { $0 }
+            let folders =
+                [provider.workingDirectory(sessionID: sessionID)].compactMap {
+                    $0
+                }
                 + ChatStore.snapshotRoots(store: store)
-            guard let found = ChatStore.projectFile(store: store, folders: folders) else {
+            guard
+                let found = ChatStore.projectFile(
+                    store: store,
+                    folders: folders
+                )
+            else {
                 throw XcodeChatError.projectFileNotFound(store: store)
             }
             project = found
@@ -146,7 +184,9 @@ nonisolated enum XcodeChat {
         guard let project else { return }
         // Xcode keeps the project's chats in memory: it would write over what this turn records, and a request it
         // shows could still be answered there. Close the project in Xcode before the turn (nothing if it isn't open).
-        if try await MainActor.run(body: { try XcodeAutomation.closeProject(at: project) }) {
+        if try await MainActor.run(body: {
+            try XcodeAutomation.closeProject(at: project)
+        }) {
             // Its agent for this session writes what it settles as it stops: wait for it to be gone.
             await waitForAgentToStop(sessionID: sessionID)
         }
@@ -155,7 +195,10 @@ nonisolated enum XcodeChat {
         // waiting one, and the agent's repeat runs with the user's answer. (A tool that finished before the close keeps
         // its result.)
         if let repeatedAnswer {
-            _ = try provider.removeStoppedResult(of: repeatedAnswer.toolUse.id, sessionID: sessionID)
+            _ = try provider.removeStoppedResult(
+                of: repeatedAnswer.toolUse.id,
+                sessionID: sessionID
+            )
         }
         let workingDirectory = project.deletingLastPathComponent()
         let permissionMode: XcodeAgentConfiguration.PermissionMode =
@@ -166,7 +209,10 @@ nonisolated enum XcodeChat {
             }
 
         // One turn, like Xcode: snapshot, run the agent, snapshot, record.
-        let snapshotBefore = try ChatStore.writeGitSnapshot(store: store, workingDirectory: workingDirectory)
+        let snapshotBefore = try ChatStore.writeGitSnapshot(
+            store: store,
+            workingDirectory: workingDirectory
+        )
         let startDate = Date()
         continuation.yield(.userMessage(prompt))
         let records = ToolUseRecords()
@@ -178,7 +224,8 @@ nonisolated enum XcodeChat {
             permissionMode: permissionMode,
             permissionTimeout: permissionTimeout,
             records: records,
-            repeatedAnswer: repeatedAnswer)
+            repeatedAnswer: repeatedAnswer
+        )
         var events: [ChatEvent] = []
         // An agent error still records the turn, then is thrown; any other error (or cancelling) does not record it.
         var agentError: XcodeChatError?
@@ -192,22 +239,36 @@ nonisolated enum XcodeChat {
             agentError = error
         }
         let finishedDate = Date()
-        let snapshotAfter = try ChatStore.writeGitSnapshot(store: store, workingDirectory: workingDirectory)
+        let snapshotAfter = try ChatStore.writeGitSnapshot(
+            store: store,
+            workingDirectory: workingDirectory
+        )
 
         let toolUseRecords = records.byToolUseID
         let response = ChatCard.turnCards(for: events) { toolUse, result in
             provider.card(
-                for: toolUse, result: result ?? toolUseRecords[toolUse.id]?.result, record: toolUseRecords[toolUse.id])
+                for: toolUse,
+                result: result ?? toolUseRecords[toolUse.id]?.result,
+                record: toolUseRecords[toolUse.id]
+            )
         }
         try conversation.appendTurn(
-            prompt: prompt, startDate: startDate, finishedDate: finishedDate, response: response,
-            snapshotBefore: snapshotBefore, snapshotAfter: snapshotAfter)
+            prompt: prompt,
+            startDate: startDate,
+            finishedDate: finishedDate,
+            response: response,
+            snapshotBefore: snapshotBefore,
+            snapshotAfter: snapshotAfter
+        )
         try conversation.save()
 
         // The agent repeated the earlier tool use and was given its answer: the earlier one (left without a result
         // when its agent was stopped, then marked interrupted on resume) is replaced by the repeat, so remove it.
         if let repeatedAnswer, records.repeatedEarlierToolUse {
-            try provider.removeToolUse(repeatedAnswer.toolUse.id, sessionID: sessionID)
+            try provider.removeToolUse(
+                repeatedAnswer.toolUse.id,
+                sessionID: sessionID
+            )
         }
 
         if let agentError { throw agentError }
@@ -216,7 +277,9 @@ nonisolated enum XcodeChat {
     /// Waits (up to 10 seconds) until no process runs with the session id in its arguments: the agent Xcode ran it in.
     private static func waitForAgentToStop(sessionID: String) async {
         for _ in 0..<50 {
-            if CommandExecutor.runCommand(["pgrep", "-if", sessionID]) == nil { return }  // -i: the id may be cased differently
+            if CommandExecutor.runCommand(["pgrep", "-if", sessionID]) == nil {
+                return
+            }  // -i: the id may be cased differently
             try? await Task.sleep(for: .milliseconds(200))
         }
     }
@@ -238,13 +301,19 @@ nonisolated enum XcodeChat {
     static func unansweredRequest(toolUseID: String) -> UnansweredRequest? {
         for project in ChatStore.listProjects() {
             for chat in project.conversations {
-                guard let agent = chat.provider, let provider = AgentProviders.provider(for: agent),
-                      let sessionID = chat.providerSessionID,
-                      let toolUse = provider.pendingToolUse(sessionID: sessionID), toolUse.id == toolUseID
+                guard let agent = chat.provider,
+                    let provider = AgentProviders.provider(for: agent),
+                    let sessionID = chat.providerSessionID,
+                    let toolUse = provider.pendingToolUse(sessionID: sessionID),
+                    toolUse.id == toolUseID
                 else { continue }
                 return UnansweredRequest(
-                    store: project.store, conversationID: chat.id, provider: provider, sessionID: sessionID,
-                    toolUse: toolUse)
+                    store: project.store,
+                    conversationID: chat.id,
+                    provider: provider,
+                    sessionID: sessionID,
+                    toolUse: toolUse
+                )
             }
         }
         return nil
@@ -255,18 +324,35 @@ nonisolated enum XcodeChat {
     /// answer to the agent's repeat of that tool use without asking. Once the turn ended, if the agent did repeat it,
     /// the earlier tool use and its interrupted result are removed from the session: only the repeat remains.
     /// Throws `SendMessageError.noWaitingRequest` if no chat waits on that tool use.
-    static func resume(answering answer: ChatEvent.UserResponse, permissionTimeout: TimeInterval) -> AsyncThrowingStream<ChatEvent, Error> {
+    static func resume(
+        answering answer: ChatEvent.UserResponse,
+        permissionTimeout: TimeInterval
+    ) -> AsyncThrowingStream<ChatEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    guard let request = unansweredRequest(toolUseID: answer.toolUseID) else {
-                        throw SendMessageError.noWaitingRequest(toolUseID: answer.toolUseID)
+                    guard
+                        let request = unansweredRequest(
+                            toolUseID: answer.toolUseID
+                        )
+                    else {
+                        throw SendMessageError.noWaitingRequest(
+                            toolUseID: answer.toolUseID
+                        )
                     }
                     let events = runTurn(
                         prompt(answering: answer, about: request.toolUse),
-                        to: .conversationInStore(id: request.conversationID, store: request.store.path),
-                        permissionModeOverride: nil, permissionTimeout: permissionTimeout,
-                        repeatedAnswer: RepeatedAnswer(toolUse: request.toolUse, answer: answer))
+                        to: .conversationInStore(
+                            id: request.conversationID,
+                            store: request.store.path
+                        ),
+                        permissionModeOverride: nil,
+                        permissionTimeout: permissionTimeout,
+                        repeatedAnswer: RepeatedAnswer(
+                            toolUse: request.toolUse,
+                            answer: answer
+                        )
+                    )
                     for try await event in events { continuation.yield(event) }
                     continuation.finish()
                 } catch {
@@ -278,18 +364,25 @@ nonisolated enum XcodeChat {
     }
 
     /// The answer as the prompt the chat is resumed with: what the agent reads as the user's message.
-    static func prompt(answering answer: ChatEvent.UserResponse, about toolUse: ChatEvent.ToolUse) -> String {
+    static func prompt(
+        answering answer: ChatEvent.UserResponse,
+        about toolUse: ChatEvent.ToolUse
+    ) -> String {
         switch answer {
         case .permission(_, true, _):
             "Allowed: you may run the \(toolUse.name) call you asked permission for."
         case .permission(_, false, let message):
-            "Denied: don't run the \(toolUse.name) call you asked permission for." + (message.map { " \($0)" } ?? "")
+            "Denied: don't run the \(toolUse.name) call you asked permission for."
+                + (message.map { " \($0)" } ?? "")
         case .questions(_, let answers):
             "My answers to your questions: "
                 + answers.sorted { $0.key < $1.key }
-                    .map { "\"\($0.key)\" = \"\($0.value.joined(separator: ", "))\"" }.joined(separator: "; ") + "."
+                .map {
+                    "\"\($0.key)\" = \"\($0.value.joined(separator: ", "))\""
+                }.joined(separator: "; ") + "."
         case .declineQuestions(_, let message):
-            "I decline to answer your questions." + (message.map { " \($0)" } ?? "")
+            "I decline to answer your questions."
+                + (message.map { " \($0)" } ?? "")
         case .planApproval(_, true, _):
             "Your plan is approved: go ahead."
         case .planApproval(_, false, let feedback):

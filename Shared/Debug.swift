@@ -14,7 +14,7 @@
         static let chatStore: String = "Demo10-edhhiszqgddxcwajapbakukmrdhy"
 
         static let chatEventJsonURL: URL? = Bundle.main.url(
-            forResource: "sample",
+            forResource: "sampleHistory",
             withExtension: "json"
         )
     }

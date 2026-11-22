@@ -86,6 +86,13 @@ nonisolated final class Logger: Sendable {
         writeLog(category: category, message: message, level: .info)
     }
 
+    func error(category: String, errorMessage: String) {
+        logger.error(
+            "\(Date().formatted()) error [\(category, privacy: .public)] \(errorMessage, privacy: .public)"
+        )
+        writeLog(category: category, message: errorMessage, level: .error)
+    }
+
     func error(category: String, error: Error) {
         let message = error.localizedDescription
         logger.error(
@@ -117,7 +124,10 @@ nonisolated final class Logger: Sendable {
                 fileHandle.seekToEndOfFile()
                 fileHandle.write(message.data)
             } else {
-                try? message.data.write(to: self.filePath, options: .atomicWrite)
+                try? message.data.write(
+                    to: self.filePath,
+                    options: .atomicWrite
+                )
             }
         }
     }

@@ -60,7 +60,12 @@ nonisolated enum PermissionMode: String, Identifiable, Codable, Sendable,
 ///     1. `.userRequest(.permission)` in place of the `.toolUse`
 ///     2. `.userResponse(.permission(allow: true))`
 ///     3. `.toolResult with the tool's output`
-nonisolated enum ChatEvent: Codable, Hashable, Sendable, Equatable {
+nonisolated enum ChatEvent: Identifiable, Codable, Hashable, Sendable, Equatable
+{
+    /// `id` only for in-app comparison / view rendering
+    /// - no need to keep the id constant across app launches so `hashValue` is fine here.
+    var id: Int { self.hashValue }
+    
     /// What the user sent (the prompt). `"type": "user_message"`
     case userMessage(String)
     /// The assistant's text. `"type": "assistant_message"`
@@ -210,26 +215,28 @@ nonisolated extension ChatEvent {
     }
 }
 
-/// The requests the events end waiting for: `userRequest`s whose tool use has no result or response yet.
-nonisolated func waitingForUser(_ events: [ChatEvent]) -> [ChatEvent
-    .UserRequest]
-{
-    let answered = Set(
-        events.compactMap { event -> String? in
-            switch event {
-            case .toolResult(let result): result.toolUseID
-            case .userResponse(let answer): answer.toolUseID
-            default: nil
+nonisolated extension Array where Element == ChatEvent {
+    /// The requests the events end waiting for: `userRequest`s whose tool use has no result or response yet.
+    /// This function is to be used after mapping tool use / tool result to user request / user response
+    var waitingForUser: [ChatEvent.UserRequest] {
+        let events = self
+        let answered = Set(
+            events.compactMap { event -> String? in
+                switch event {
+                case .toolResult(let result): result.toolUseID
+                case .userResponse(let answer): answer.toolUseID
+                default: nil
+                }
             }
-        }
-    )
-    return events.compactMap { event -> ChatEvent.UserRequest? in
-        if case .userRequest(let request) = event,
-            !answered.contains(request.toolUseID)
-        {
-            request
-        } else {
-            nil
+        )
+        return events.compactMap { event -> ChatEvent.UserRequest? in
+            if case .userRequest(let request) = event,
+                !answered.contains(request.toolUseID)
+            {
+                request
+            } else {
+                nil
+            }
         }
     }
 }

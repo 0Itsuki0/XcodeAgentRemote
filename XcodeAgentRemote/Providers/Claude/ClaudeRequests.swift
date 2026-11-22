@@ -83,9 +83,10 @@ nonisolated extension ClaudeProvider {
         return .permission(toolUse)
     }
 
-    /// History events with the requests and responses in them (`ChatEvent.userRequest` / `.userResponse`, as a live
-    /// turn streams them): a request in place of its tool use, and the user's answer in place of its result (an
-    /// allowed permission's result, the tool's output, stays after it).
+    /// Map tool use / tool result to user request / user response
+    ///
+    /// Returning history events with the requests and responses in them (`ChatEvent.userRequest` / `.userResponse`, as a live turn streams them):
+    /// a request in place of its tool use, and the user's answer in place of its result (an allowed permission's result, the tool's output, stays after it).
     ///
     /// Note
     /// - Answers to questions are split on ", " in the `history`, because the answers are stored joined that way.
@@ -268,13 +269,11 @@ nonisolated extension ClaudeProvider {
             let events = try? SessionHistory.load(contentsOf: transcript)
                 .flatMap(\.chatEvents),
             let data = try? Data(contentsOf: transcript),
-            let request = waitingForUser(
-                addingUserRequests(
-                    to: events,
-                    transcript: data,
-                    sessionID: sessionID
-                )
-            ).last
+            let request = addingUserRequests(
+                to: events,
+                transcript: data,
+                sessionID: sessionID
+            ).waitingForUser.last
         else { return nil }
         return events.lazy.compactMap { event -> ChatEvent.ToolUse? in
             if case .toolUse(let toolUse) = event,
@@ -492,7 +491,9 @@ nonisolated extension ClaudeProvider {
     }
 
     /// The texts of a request's questions (what identifies them; the agent may reword their options).
-    private static func questionTexts(_ request: ChatEvent.UserRequest) -> [String] {
+    private static func questionTexts(_ request: ChatEvent.UserRequest)
+        -> [String]
+    {
         if case .questions(_, let questions) = request {
             questions.map(\.question)
         } else {

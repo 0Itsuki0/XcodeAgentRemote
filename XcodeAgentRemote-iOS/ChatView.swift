@@ -10,64 +10,51 @@ import SwiftUI
 private let logger = Logger.shared
 private let category = Logger.category(#fileID)
 
-private struct IdentifiableChatEvent: Identifiable, Hashable, Equatable,
-    Sendable
-{
-    let id = UUID()
-    let event: ChatEvent
-}
-
 #if DEBUG
     extension ChatView {
-        static private var debugHistory: [IdentifiableChatEvent] {
-            do {
-                guard let url = DebugConstants.chatEventJsonURL else {
-                    logger.info(
-                        category: category,
-                        message: "Debug sample URL not found."
-                    )
-                    return []
-                }
-                let data = try Data(contentsOf: url)
-                return try JSONDecoder().decode([ChatEvent].self, from: data)
-                    .map(IdentifiableChatEvent.init(event:))
-            } catch {
-                logger.error(category: category, error: error)
-                return []
-            }
-        }
-        static var debugUI: ChatView {
+        static func debugUI() -> ChatView {
             ChatView(
-                conversationId: "DebugConversationId",
-                conversationName: "DebugConversation",
-                projectName: "DebugProject",
-                _history: State(initialValue: debugHistory)
+                chatViewModel: ChatViewModel(
+                    debugEventJson: DebugConstants.chatEventJsonURL
+                )
             )
         }
 
-        static var debugServerCall: ChatView {
+        static func debugServerCall(_ apiClient: APIServerClient) -> ChatView {
             ChatView(
-                conversationId: DebugConstants.conversationId,
-                conversationName: "DebugConversation",
-                projectName: "DebugProject",
-                _history: State(initialValue: [])
+                chatViewModel: ChatViewModel(
+                    apiClient: apiClient,
+                    conversationId: DebugConstants.conversationId
+                )
             )
+
         }
     }
 #endif
 
 struct ChatView: View {
     @Environment(XcodeChatManager.self) private var chatManager
-    let conversationId: String
-    let conversationName: String
-    let projectName: String
-    @State private var history: [IdentifiableChatEvent] = []
-    //    var focused: FocusState<Bool>.Binding
+    @State private var chatViewModel: ChatViewModel
+
+    private var conversationId: String {
+        chatViewModel.conversationId
+    }
+    private var conversationName: String {
+        chatViewModel.conversationName
+    }
+    private var projectName: String {
+        chatViewModel.projectName
+    }
+    private var history: [ChatEvent] {
+        chatViewModel.history
+    }
+
+    // var focused: FocusState<Bool>.Binding
     @FocusState private var focused
 
     @State private var entry: String = "ddd\n\\nddfdfs\ndfd\n"
     //    @State private var scrollPosition: ScrollPosition = .init(idType: UUID.self)
-    @State private var scrollPositionID: UUID? = nil
+    @State private var scrollPositionID: Int? = nil
 
     @State private var entryHeight: CGFloat = 24
 
@@ -75,7 +62,7 @@ struct ChatView: View {
 
     private let standardSpacing: CGFloat = 16
 
-    private let bottomSpacer = UUID()
+    private let bottomSpacer = Int.max
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: standardSpacing).fill(
@@ -85,6 +72,13 @@ struct ChatView: View {
 
     private var cardPadding: CGFloat { standardSpacing * 2 / 3 }
 
+    /// user response will be cover together with
+    private var nonResponseHistory: [ChatEvent] {
+        return history.filter {
+            $0.userResponse == nil
+        }
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: standardSpacing) {
@@ -92,12 +86,8 @@ struct ChatView: View {
                 /// 1. unsupported agent type
                 /// 2. empty history
                 /// 3. request error
-                ForEach(
-                    history.filter {
-                        $0.event.response == nil
-                    }
-                ) { event in
-                    self.eventView(event.event)
+                ForEach(nonResponseHistory) { event in
+                    self.eventView(event)
                 }
 
                 EmptyView()
@@ -126,7 +116,7 @@ struct ChatView: View {
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay(alignment: .bottom) {
-            let ids = history.suffix(1).map(\.id) + [bottomSpacer]
+            let ids = nonResponseHistory.suffix(1).map(\.id) + [bottomSpacer]
             if let scrollPositionID, !ids.contains(scrollPositionID) {
                 Button("", systemImage: "arrow.down") {
                     self.scrollPositionID = bottomSpacer
@@ -167,7 +157,7 @@ struct ChatView: View {
         case .toolUse(let toolUse):
             self.toolUse(
                 toolUse,
-                errored: history.map(\.event).result(
+                errored: history.result(
                     for: toolUse
                 )?.isError ?? false
             )
@@ -176,7 +166,7 @@ struct ChatView: View {
         case .userRequest(let request):
             self.userRequest(
                 request,
-                response: history.map(\.event).response(
+                response: history.response(
                     for: request
                 )
             )
@@ -498,7 +488,7 @@ extension Array where Element == ChatEvent {
     func response(for request: ChatEvent.UserRequest) -> ChatEvent.UserResponse?
     {
         let responses: [ChatEvent.UserResponse] = self.compactMap {
-            $0.response
+            $0.userResponse
         }
 
         return responses.first {
@@ -516,7 +506,7 @@ extension Array where Element == ChatEvent {
 }
 
 extension ChatEvent {
-    var response: UserResponse? {
+    var userResponse: UserResponse? {
         if case .userResponse(let response) = self {
             return response
         }

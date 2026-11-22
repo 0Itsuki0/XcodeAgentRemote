@@ -573,12 +573,12 @@ nonisolated enum TestScenarios {
                     let history = try ChatStore.history(conversationID: chatID)
                     guard
                         case .questions(let toolUseID, let questions)? =
-                            waitingForUser(history).last,
+                            history.waitingForUser.last,
                         toolUseID == request.toolUseID
                     else {
                         throw CheckFailed(
                             description:
-                                "the history doesn't end waiting on the question: \(waitingForUser(history))"
+                                "the history doesn't end waiting on the question: \(history.waitingForUser)"
                         )
                     }
                     let events = try await collect(
@@ -600,8 +600,8 @@ nonisolated enum TestScenarios {
                     )
                     let after = try ChatStore.history(conversationID: chatID)
                     try check(
-                        waitingForUser(after).isEmpty,
-                        "the history still waits: \(waitingForUser(after))"
+                        after.waitingForUser.isEmpty,
+                        "the history still waits: \(after.waitingForUser)"
                     )
                     return "answered Green; reply: \(reply(events))"
                 }
@@ -636,8 +636,8 @@ nonisolated enum TestScenarios {
                 "the old tool use is still marked waiting"
             )
             try check(
-                waitingForUser(history).isEmpty,
-                "the history still waits: \(waitingForUser(history))"
+                history.waitingForUser.isEmpty,
+                "the history still waits: \(history.waitingForUser)"
             )
         }
 
@@ -649,12 +649,12 @@ nonisolated enum TestScenarios {
         ) async throws -> ChatEvent.ToolUse {
             let request = try await leaveWaiting(prompt, to: target)
             let history = try ChatStore.history(conversationID: chatID)
-            guard case .permission(let toolUse)? = waitingForUser(history).last,
+            guard case .permission(let toolUse)? = history.waitingForUser.last,
                 toolUse.id == request.toolUseID
             else {
                 throw CheckFailed(
                     description:
-                        "the history doesn't end waiting on it: \(waitingForUser(history))"
+                        "the history doesn't end waiting on it: \(history.waitingForUser)"
                 )
             }
             return toolUse
@@ -692,8 +692,8 @@ nonisolated enum TestScenarios {
                 "the old tool use is still marked waiting"
             )
             try check(
-                waitingForUser(history).isEmpty,
-                "the history still waits: \(waitingForUser(history))"
+                history.waitingForUser.isEmpty,
+                "the history still waits: \(history.waitingForUser)"
             )
         }
 
@@ -716,7 +716,7 @@ nonisolated enum TestScenarios {
                     permissionTimeout: 120
                 )
             )
-            guard let request = waitingForUser(events).last else {
+            guard let request = events.waitingForUser.last else {
                 throw CheckFailed(description: "the agent made no request")
             }
             try check(
@@ -728,7 +728,7 @@ nonisolated enum TestScenarios {
             for _ in 0..<50 where !inFile {
                 let history =
                     (try? ChatStore.history(conversationID: chatID)) ?? []
-                inFile = waitingForUser(history).contains {
+                inFile = history.waitingForUser.contains {
                     $0.toolUseID == request.toolUseID
                 }
                 if !inFile { try await Task.sleep(for: .milliseconds(200)) }
@@ -773,7 +773,7 @@ nonisolated enum TestScenarios {
             )
             while true {
                 for try await event in stream { events.append(event) }
-                guard let request = waitingForUser(events).last else {
+                guard let request = events.waitingForUser.last else {
                     return events
                 }
                 stream = answerUserRequest(
@@ -1014,7 +1014,7 @@ nonisolated enum TestScenarios {
             while true {
                 responses += 1
                 for try await event in stream { events.append(event) }
-                guard let waiting = waitingForUser(events).last else {
+                guard let waiting = events.waitingForUser.last else {
                     return (events, responses)
                 }
                 stream = client.answer(answering(waiting))
