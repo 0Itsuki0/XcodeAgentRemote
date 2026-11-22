@@ -29,7 +29,7 @@ nonisolated struct ScenarioResult: Sendable, CustomStringConvertible {
 nonisolated enum TestScenarios {
 
     /// How a scenario answers the requests its turn waits for.
-    fileprivate typealias Answering = @Sendable (UserRequest) -> UserAnswer
+    fileprivate typealias Answering = @Sendable (ChatEvent.UserRequest) -> ChatEvent.UserResponse
 
     /// A check that did not hold.
     fileprivate struct CheckFailed: Error, CustomStringConvertible {
@@ -98,7 +98,7 @@ nonisolated enum TestScenarios {
     }
 
     /// The user's answers to the requests (`.userResponse`).
-    fileprivate static func userResponses(in events: [ChatEvent]) -> [UserAnswer] {
+    fileprivate static func userResponses(in events: [ChatEvent]) -> [ChatEvent.UserResponse] {
         events.compactMap { event in
             if case .userResponse(let answer) = event { answer } else { nil }
         }
@@ -129,7 +129,7 @@ nonisolated enum TestScenarios {
 
     /// Answers questions with `choose(question)` (the labels to choose), and allows anything else (e.g. ToolSearch).
     fileprivate static func choosing(
-        _ choose: @escaping @Sendable (UserRequest.Question) -> [String]
+        _ choose: @escaping @Sendable (ChatEvent.UserRequest.Question) -> [String]
     ) -> Answering {
         { request in
             guard case .questions(let toolUseID, let questions) = request else {
@@ -702,7 +702,7 @@ nonisolated enum TestScenarios {
         private static func leaveWaiting(
             _ prompt: String,
             to target: MessageTarget
-        ) async throws -> UserRequest {
+        ) async throws -> ChatEvent.UserRequest {
             guard case .conversation(let chatID, _) = target,
                 let sessionID = ChatStore.listProjects().flatMap(
                     \.conversations

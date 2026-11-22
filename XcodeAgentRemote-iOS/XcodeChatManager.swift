@@ -107,7 +107,7 @@ enum RequestState: Equatable, Hashable, Sendable {
 
     }
 
-    func waitingForUser(_ events: [ChatEvent]) -> [UserRequest] {
+    func waitingForUser(_ events: [ChatEvent]) -> [ChatEvent.UserRequest] {
         let answered = Set(
             events.compactMap { event -> String? in
                 switch event {
@@ -117,7 +117,7 @@ enum RequestState: Equatable, Hashable, Sendable {
                 }
             }
         )
-        return events.compactMap { event -> UserRequest? in
+        return events.compactMap { event -> ChatEvent.UserRequest? in
             if case .userRequest(let request) = event,
                 !answered.contains(request.toolUseID)
             {

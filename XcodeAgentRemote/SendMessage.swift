@@ -56,7 +56,7 @@ nonisolated func sendMessage(
 ///   usually makes the same tool use again, and that request is answered with the same answer without asking
 ///   (unless the answer is a deny). `permissionTimeout` applies to that resumed turn.
 /// Throws `SendMessageError.noWaitingRequest` if no chat waits for the user on that tool use.
-nonisolated func answerUserRequest(_ answer: UserAnswer, permissionTimeout: TimeInterval? = nil) -> AsyncThrowingStream<ChatEvent, Error> {
+nonisolated func answerUserRequest(_ answer: ChatEvent.UserResponse, permissionTimeout: TimeInterval? = nil) -> AsyncThrowingStream<ChatEvent, Error> {
     AsyncThrowingStream { continuation in
         let task = Task {
             do {

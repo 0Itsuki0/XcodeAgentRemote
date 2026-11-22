@@ -5,7 +5,7 @@
 
 import Foundation
 
-/// The requests to the user in running turns (permission, questions, a plan: `UserRequest`), and their answers.
+/// The requests to the user in running turns (permission, questions, a plan: `ChatEvent.UserRequest`), and their answers.
 /// A tool use is answerable from when it is streamed until its result (`register` / `unregister`, by `sendMessage`); the answer
 /// may arrive before the agent asks for it (it is kept until the provider waits for it) and is taken once.
 actor PendingUserRequestHandler {
@@ -15,8 +15,8 @@ actor PendingUserRequestHandler {
     /// Where a tool use is: answerable, answered before the agent asked, or the agent waiting for the answer.
     private enum State {
         case registered
-        case answered(UserAnswer)
-        case waiting(CheckedContinuation<UserAnswer?, Never>)
+        case answered(ChatEvent.UserResponse)
+        case waiting(CheckedContinuation<ChatEvent.UserResponse?, Never>)
     }
 
     private var requests: [String: State] = [:]
@@ -45,7 +45,7 @@ actor PendingUserRequestHandler {
 
     /// Takes the answer to a tool use: hands it to the waiting provider, or keeps it until the provider asks.
     /// Throws `noWaitingRequest` if the tool use is not answerable or was already answered.
-    func answer(_ answer: UserAnswer) throws(SendMessageError) {
+    func answer(_ answer: ChatEvent.UserResponse) throws(SendMessageError) {
         let toolUseID = answer.toolUseID
         switch requests[toolUseID] {
         case .registered:
@@ -74,7 +74,7 @@ actor PendingUserRequestHandler {
     /// For providers: the user's answer to the tool use the agent waits for; nil if none arrives within
     /// `timeout` seconds, the tool use is closed, or the task is cancelled.
     func waitForAnswer(toolUseID: String, timeout: TimeInterval) async
-        -> UserAnswer?
+        -> ChatEvent.UserResponse?
     {
         if case .answered(let answer)? = requests[toolUseID] {
             requests[toolUseID] = nil

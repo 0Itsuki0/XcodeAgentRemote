@@ -132,7 +132,7 @@ nonisolated struct APIServerClient: Sendable {
     /// turn's stream from where the previous one (`sendMessage`, or the previous `answer`) ended: until the next
     /// request to the user or the end of the turn, like `sendMessage`.
     /// Throws `NetworkError.badResponse` with code 404 if no turn is waiting for tool use `answer.toolUseID`.
-    func answer(_ answer: UserAnswer) -> AsyncThrowingStream<ChatEvent, Error> {
+    func answer(_ answer: ChatEvent.UserResponse) -> AsyncThrowingStream<ChatEvent, Error> {
         events(for: .answer(answer))
     }
 

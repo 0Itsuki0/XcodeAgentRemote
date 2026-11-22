@@ -137,7 +137,7 @@ nonisolated extension ClaudeProvider {
 
             var toolUses: [String: ChatEvent.ToolUse] = [:]
             // The user's answers to this turn's requests, by tool use id: streamed in place of their results.
-            var answers: [String: UserAnswer] = [:]
+            var answers: [String: ChatEvent.UserResponse] = [:]
             var agentError: String?
             let decoder = JSONDecoder()
             reading: for try await line in agentProcess.outputLines {
@@ -206,7 +206,7 @@ nonisolated extension ClaudeProvider {
                         if let userRequest = userRequest(for: toolUse, decidedByUser: nil, isLastMessage: true) {
                             continuation.yield(.userRequest(userRequest))
                         }
-                        let answer: UserAnswer?
+                        let answer: ChatEvent.UserResponse?
                         if let repeated = repeatedAnswer, !repeated.answer.isDeny, isSameCall(repeated.toolUse, toolUse) {
                             repeatedAnswer = nil
                             answer = repeated.answer.answering(toolUseID)
@@ -259,7 +259,7 @@ nonisolated extension ClaudeProvider {
     /// - plan: "allow" to approve, or "deny" with the feedback.
     /// No answer within `timeout` seconds: deny.
     private static func permissionDecision(
-        for request: ToolPermissionRequest, answer: UserAnswer?, timeout: TimeInterval
+        for request: ToolPermissionRequest, answer: ChatEvent.UserResponse?, timeout: TimeInterval
     ) -> PermissionDecision {
         let input = request.input ?? [:]
         switch answer {

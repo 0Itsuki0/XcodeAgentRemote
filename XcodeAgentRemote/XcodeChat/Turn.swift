@@ -30,12 +30,12 @@ nonisolated struct TurnRequest: Sendable {
 nonisolated struct RepeatedAnswer: Sendable {
     /// The tool use the user answered (it ended without a result).
     var toolUse: ChatEvent.ToolUse
-    var answer: UserAnswer
+    var answer: ChatEvent.UserResponse
 }
 
-nonisolated extension UserAnswer {
+nonisolated extension ChatEvent.UserResponse {
     /// The same answer, for another tool use.
-    func answering(_ toolUseID: String) -> UserAnswer {
+    func answering(_ toolUseID: String) -> ChatEvent.UserResponse {
         switch self {
         case .permission(_, let allow, let message): .permission(toolUseID: toolUseID, allow: allow, message: message)
         case .questions(_, let answers): .questions(toolUseID: toolUseID, answers: answers)

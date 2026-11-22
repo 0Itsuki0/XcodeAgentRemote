@@ -255,7 +255,7 @@ nonisolated enum XcodeChat {
     /// answer to the agent's repeat of that tool use without asking. Once the turn ended, if the agent did repeat it,
     /// the earlier tool use and its interrupted result are removed from the session: only the repeat remains.
     /// Throws `SendMessageError.noWaitingRequest` if no chat waits on that tool use.
-    static func resume(answering answer: UserAnswer, permissionTimeout: TimeInterval) -> AsyncThrowingStream<ChatEvent, Error> {
+    static func resume(answering answer: ChatEvent.UserResponse, permissionTimeout: TimeInterval) -> AsyncThrowingStream<ChatEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -278,7 +278,7 @@ nonisolated enum XcodeChat {
     }
 
     /// The answer as the prompt the chat is resumed with: what the agent reads as the user's message.
-    static func prompt(answering answer: UserAnswer, about toolUse: ChatEvent.ToolUse) -> String {
+    static func prompt(answering answer: ChatEvent.UserResponse, about toolUse: ChatEvent.ToolUse) -> String {
         switch answer {
         case .permission(_, true, _):
             "Allowed: you may run the \(toolUse.name) call you asked permission for."
