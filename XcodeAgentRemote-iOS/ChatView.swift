@@ -7,8 +7,7 @@
 
 import SwiftUI
 
-private let logger = Logger.shared
-private let category = Logger.category(#fileID)
+// TODO: - show errors
 
 #if DEBUG
     extension ChatView {
@@ -65,7 +64,7 @@ struct ChatView: View {
 
     private let standardSpacing: CGFloat = UIConstants.standardSpacing
 
-    private let bottomSpacer = Int.max
+    @State private var bottomSpacer = Int.max
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: standardSpacing).fill(
@@ -86,7 +85,7 @@ struct ChatView: View {
     private var historyViewID: UUID {
         chatViewModel.historyViewID
     }
-    
+
     @State private var fetchID: Int = 0
 
     var body: some View {
@@ -125,7 +124,6 @@ struct ChatView: View {
         .task(id: fetchID) {
             await chatViewModel.fetchConversationDetail()
         }
-        
         .scrollPosition(id: $scrollPositionID, anchor: .bottom)
         .defaultScrollAnchor(.bottom, for: .alignment)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -148,14 +146,6 @@ struct ChatView: View {
         .safeAreaBar(edge: .bottom) {
             EntryView(scrollToEnd: scrollToEnd, focused: $focused)
         }
-
-        //                    .onChange(of: chatManager.streamingMessage, initial: true, {
-        //                        guard chatManager.streamingMessage != nil else {
-        //                            return
-        //                        }
-        //                        proxy.scrollTo(self.streamingMessageID, anchor: .bottom)
-        //                    })
-        //        }
         .labelsHidden()
         .labelStyle(.iconOnly)
         .multilineTextAlignment(.leading)
@@ -357,17 +347,15 @@ struct ChatView: View {
     }
 
     private func scrollToEnd() {
+        scrollPositionID = nil
         guard !nonResponseHistory.isEmpty else {
-            scrollPositionID = nil
             return
         }
-        scrollPositionID = nonResponseHistory.count - 1
         Task {
             try? await Task.sleep(for: .milliseconds(10))
             scrollPositionID = bottomSpacer
         }
     }
-
 }
 
 extension String {

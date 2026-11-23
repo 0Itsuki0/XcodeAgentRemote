@@ -157,14 +157,56 @@ private let category = Logger.category(#fileID)
     func answerPermission(
         toolUseID: String,
         allow: Bool,
-        message: String? = nil
+        message: String?
     ) {
-        guard !self.isResponding else { return }
         let userResponse: ChatEvent.UserResponse = .permission(
             toolUseID: toolUseID,
             allow: allow,
             message: message
         )
+        self.answer(with: userResponse)
+    }
+
+    func answerQuestions(
+        toolUseID: String,
+        answers: [String: [String]]
+    ) {
+        let userResponse: ChatEvent.UserResponse = .questions(
+            toolUseID: toolUseID,
+            answers: answers
+        )
+        self.answer(with: userResponse)
+    }
+
+    func declineQuestions(
+        toolUseID: String,
+        message: String?
+    ) {
+        let userResponse: ChatEvent.UserResponse = .declineQuestions(
+            toolUseID: toolUseID,
+            message: message
+        )
+        self.answer(with: userResponse)
+    }
+
+    func answerPlanApproval(
+        toolUseID: String,
+        approve: Bool,
+        feedback: String?
+    ) {
+        let userResponse: ChatEvent.UserResponse = .planApproval(
+            toolUseID: toolUseID,
+            approve: approve,
+            feedback: feedback
+        )
+        self.answer(with: userResponse)
+    }
+
+    private func answer(with userResponse: ChatEvent.UserResponse) {
+        guard !self.isResponding else { return }
+        self.pendingUserRequest.removeAll {
+            $0.toolUseID == userResponse.toolUseID
+        }
         self.appendHistory(.userResponse(userResponse))
         self.isResponding = true
         let stream = apiClient.answer(userResponse)
@@ -191,35 +233,6 @@ private let category = Logger.category(#fileID)
                 self.error = error
             }
         }
-    }
-
-    func answerQuestions(
-        toolUseID: String,
-        answers: [String: [String]]
-    ) {
-
-    }
-
-    func declineQuestions(
-        toolUseID: String,
-        message: String? = nil
-    ) {
-
-    }
-
-    func declineQuestions(
-        toolUseID: String,
-        answers: [String: [String]]
-    ) {
-
-    }
-
-    func answerPlanApproval(
-        toolUseID: String,
-        approve: Bool,
-        feedback: String? = nil
-    ) {
-
     }
 
     private func appendHistory(_ event: ChatEvent) {

@@ -519,10 +519,22 @@ nonisolated enum TestScenarios {
                             permissionTimeout: 120
                         )
                     )
-                    let bash = toolResults(of: "Bash", in: events)
+                    // The repeat streams only its result: no tool use or request of its own.
+                    let results = events.compactMap { event -> ChatEvent.ToolResult? in
+                        if case .toolResult(let result) = event { result } else { nil }
+                    }
                     try check(
-                        bash.count == 1 && !bash[0].isError,
-                        "Bash: \(bash.map(\.output))"
+                        results.count == 1 && !results[0].isError,
+                        "results: \(results.map(\.output))"
+                    )
+                    try check(
+                        !events.contains {
+                            switch $0 {
+                            case .toolUse, .userRequest: true
+                            default: false
+                            }
+                        },
+                        "the repeat was streamed as a tool use or request: \(events)"
                     )
                     try check(
                         FileManager.default.fileExists(

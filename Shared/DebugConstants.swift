@@ -103,5 +103,15 @@
                 The output should be `planned`.
                 """
         )
+
+        /// Prompts that make the agent ask the user: a permission, questions, a plan approval.
+        static let permissionPrompt: String =
+            "Use the Bash tool to run: touch /tmp/demo10-allowed. Then reply DONE."
+
+        static let questionsPrompt: String =
+            "Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose."
+
+        static let planApprovalPrompt: String =
+            "Enter plan mode with the EnterPlanMode tool, then present a one-step plan to run `echo planned` with the ExitPlanMode tool. After it is approved, run it with Bash and reply with the output."
     }
 #endif

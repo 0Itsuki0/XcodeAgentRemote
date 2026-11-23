@@ -18,8 +18,8 @@ struct XcodeAgentRemote_iOSApp: App {
     var body: some Scene {
         WindowGroup {
             NavigationStack {
-                ChatView.debugUI()
-//                ContentView()
+//                ChatView.debugUI()
+                ContentView()
                     .environment(serverSettingManager)
             }
         }

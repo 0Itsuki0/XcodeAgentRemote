@@ -138,6 +138,8 @@ nonisolated extension ClaudeProvider {
             var toolUses: [String: ChatEvent.ToolUse] = [:]
             // The user's answers to this turn's requests, by tool use id: streamed when given, in place of their results.
             var answers: [String: ChatEvent.UserResponse] = [:]
+            // The agent's repeat of the earlier tool use, and the earlier answer it gets: its tool use isn't streamed.
+            var repeatCall: (toolUseID: String, answer: ChatEvent.UserResponse)?
             var agentError: String?
             let decoder = JSONDecoder()
             reading: for try await line in agentProcess.outputLines {
@@ -159,6 +161,14 @@ nonisolated extension ClaudeProvider {
                                     try? String(contentsOfFile: path, encoding: .utf8), toolUseID: toolUse.id)
                             }
                             toolUses[toolUse.id] = toolUse
+                            if let repeated = repeatedAnswer, !repeated.answer.isDeny,
+                                isSameCall(repeated.toolUse, toolUse)
+                            {
+                                repeatedAnswer = nil
+                                repeatCall = (toolUse.id, repeated.answer.answering(toolUse.id))
+                                request.records.setRepeatedEarlierToolUse()
+                                continue
+                            }
                             continuation.yield(.toolUse(toolUse))
                         default:
                             break
@@ -200,15 +210,14 @@ nonisolated extension ClaudeProvider {
                             id: toolUseID, name: permissionRequest.toolName ?? "?", input: permissionRequest.input ?? [:])
                         // The agent asked the user: mark it waiting, and stream the request it is (`userRequest`).
                         PendingToolUses.add(toolUseID, agent: agent)
-                        if let userRequest = userRequest(for: toolUse, decidedByUser: nil, isLastMessage: true) {
-                            continuation.yield(.userRequest(userRequest))
-                        }
                         let answer: ChatEvent.UserResponse?
-                        if let repeated = repeatedAnswer, !repeated.answer.isDeny, isSameCall(repeated.toolUse, toolUse) {
-                            repeatedAnswer = nil
-                            answer = repeated.answer.answering(toolUseID)
-                            request.records.setRepeatedEarlierToolUse()
+                        if let repeatCall, repeatCall.toolUseID == toolUseID {
+                            // The repeat: answered with the earlier answer, not requested again.
+                            answer = repeatCall.answer
                         } else {
+                            if let userRequest = userRequest(for: toolUse, decidedByUser: nil, isLastMessage: true) {
+                                continuation.yield(.userRequest(userRequest))
+                            }
                             waitingOn.set(toolUseID)
                             answer = await PendingUserRequestHandler.shared.waitForAnswer(
                                 toolUseID: toolUseID, timeout: request.permissionTimeout)
