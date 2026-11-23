@@ -2,6 +2,22 @@
 
 [ngrok: Static dev domains for all ngrok users](https://ngrok.com/blog/free-static-domains-ngrok-users)
 
+## Table of Contents
+
+- [Base Approach](#base-approach)
+- [Run Xcode Agent Programmatically](#run-xcode-agent-programmatically)
+    - [Basic Idea](#basic-idea)
+    - [`xcrun` Command](#xcrun-command)
+    - [Important File locations](#important-file-locations)
+    - [Sample Jsonl (Claude history)](#sample-jsonl-claude-history)
+    - [Implementation Details / Q&A](#implementation-details--qa)
+    - [Current Testing State](#current-testing-state)
+    - [Rejected Approaches](#rejected-approaches)
+    - [Sample Send Message Calls](#sample-send-message-calls)
+    - [Implement A New Agent Provider](#implement-a-new-agent-provider)
+- [Additional Notes / Discussions](#additional-notes--discussions)
+    - [Running From Terminal?](#running-from-terminal)
+
 ## Base Approach
 
 1. Local server to receive request from IOS (ping, list projects, get conversation, send message and stream response)
@@ -312,8 +328,8 @@ We need to tell it apart from other tool user so that we can have the user to an
     - it has a result decided by the user: `permissionDecision.source` `user_temporary` (allowed / answered / approved) or `user_reject` (denied / declined / rejected; `No answer to this …` is the app's timeout: still a request, but no response)
     - it has no result yet, and it is a question or a plan
     - it has no result yet, it is marked, and it is the session's last message (else the mark is stale)
-- `POST /message`:  the request is a `user_request` event, and the stream ends there.
-- `GET /conversation/<id>`: the conversation's `history` has the same event
+- `POST /messages`:  the request is a `user_request` event, and the stream ends there.
+- `GET /conversations/<id>`: the conversation's `history` has the same event
 - the app quitting (or the turn being stopped) is not a pending request: the agent sees its stdin close, settles the request itself (`Tool permission request failed: … stream closed …`), finishes the turn
 - the agent terminated while waiting is: the tool use stays without a result. If the user answers the request, the app resumes the chat with the answer as the prompt:
       1. the agent writes these entries to `.jsonl`, in order, before the model replies
@@ -450,7 +466,7 @@ What that means for us:
 - cancelling a turn stops the agent, the turn is not saved
 - errors: unknown chat, missing project, missing store, agent not implemented (e.g. codex)
 - server + iOS client code (run from the Mac, against the app's server code)
-    - `/health`, `/projects`, `/conversation`
+    - `/health`, `/projects`, `/conversations`
     - message → permission request → answer → … : each response ends where the turn waits for an answer, the answer's response continues the turn
     - allow and deny, the denied tool doesn't run
 
@@ -484,24 +500,24 @@ What that means for us:
 
 ### Sample Send Message Calls
 
-Real calls to the server (`POST /message`, JSON body, SSE response), from one chat.
+Real calls to the server (`POST /messages`, JSON body, SSE response), from one chat.
 
 - every response is `HTTP 200 text/event-stream`: `event: <type>` + `data: <ChatEvent JSON>` per event
-- a response ends where the turn waits for the user (its last `tool_use` has no `tool_result`), or where the turn ends
-- the answer to that tool use is another `POST /message`, and its response continues the same turn
+- the prompt is not echoed back: the caller has it
+- a response ends where the turn waits for the user (its last event is a `user_request`), or where the turn ends
+- the answer to that request is another `POST /messages`, and its response continues the same turn, starting with the `user_response`
+    - an allowed permission: `user_response`, then the tool's own `tool_result`
+    - anything else (a deny, answered questions, a plan): only the `user_response` (its result is the answer itself)
 - `project` is a file URL. in Swift: `sendMessage(_:to:…)` / `answerUserRequest(_:)` on the Mac, `APIServerClient.sendMessage` / `.answer` on iOS
 
 #### Regular message (new chat)
 
 ```
-POST /message
-{"prompt":{"prompt":"Reply with only the word pong.","permissionModeOverride":"manual","target":{"newConversation":{"agent":"claude","name":"Sample calls: ad2ff12c","project":"file:///Users/itsuki/Desktop/XcodeAgentRemote/XcodeAgentRemote.xcodeproj"}}}}
-
-event: user_message
-data: {"text":"Reply with only the word pong.","type":"user_message"}
+POST /messages
+{"prompt":{"permissionModeOverride":"manual","prompt":"Reply with only the word pong.","target":{"newConversation":{"project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj","name":"Sample calls","agent":"claude"}}}}
 
 event: assistant_message
-data: {"type":"assistant_message","text":"pong"}
+data: {"text":"pong","type":"assistant_message"}
 ```
 
 - other targets: `{"conversation":{"id":"<Xcode chat UUID>","project":"file:///…"}}`, `{"conversationInStore":{"id":"<Xcode chat UUID>","store":"<ProjectName>-<hash>"}}`
@@ -510,22 +526,25 @@ data: {"type":"assistant_message","text":"pong"}
 #### Tool call → approve
 
 ```
-POST /message
-{"prompt":{"prompt":"Use the Bash tool to run: touch /tmp/sample-calls-allowed. Then reply DONE.","permissionModeOverride":"manual","target":{"conversation":{"id":"68D951A3-2E67-4A6B-9DBA-F0E0002ADF8B","project":"file:///Users/itsuki/Desktop/XcodeAgentRemote/XcodeAgentRemote.xcodeproj"}}}}
-
-event: user_message
-data: {"type":"user_message","text":"Use the Bash tool to run: touch \/tmp\/sample-calls-allowed. Then reply DONE."}
+POST /messages
+{"prompt":{"permissionModeOverride":"manual","prompt":"Use the Bash tool to run: touch /tmp/sample-calls-allowed. Then reply DONE.","target":{"conversation":{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj"}}}}
 
 event: tool_use
-data: {"input":{"command":"touch \/tmp\/sample-calls-allowed","description":"Create an empty marker file in \/tmp"},"name":"Bash","type":"tool_use","id":"toolu_01Gpcs89uKnEUg1GcA9KSyUb"}
+data: {"input":{"command":"touch \/tmp\/sample-calls-allowed","description":"Create empty marker file in \/tmp"},"name":"Bash","type":"tool_use","id":"toolu_019JRJBSVPfCxjfE8nZBjypA"}
+
+event: user_request
+data: {"type":"user_request","request":{"permission":{"_0":{"input":{"command":"touch \/tmp\/sample-calls-allowed","description":"Create empty marker file in \/tmp"},"id":"toolu_019JRJBSVPfCxjfE8nZBjypA","name":"Bash"}}}}
 ```
 
 ```
-POST /message
-{"answer":{"_0":{"permission":{"toolUseID":"toolu_01Gpcs89uKnEUg1GcA9KSyUb","allow":true}}}}
+POST /messages
+{"answer":{"_0":{"permission":{"allow":true,"toolUseID":"toolu_019JRJBSVPfCxjfE8nZBjypA"}}}}
+
+event: user_response
+data: {"response":{"permission":{"toolUseID":"toolu_019JRJBSVPfCxjfE8nZBjypA","allow":true}},"type":"user_response"}
 
 event: tool_result
-data: {"tool_use_id":"toolu_01Gpcs89uKnEUg1GcA9KSyUb","type":"tool_result","output":"(Bash completed with no output)","is_error":false}
+data: {"is_error":false,"output":"(Bash completed with no output)","type":"tool_result","tool_use_id":"toolu_019JRJBSVPfCxjfE8nZBjypA"}
 
 event: assistant_message
 data: {"type":"assistant_message","text":"DONE"}
@@ -534,22 +553,22 @@ data: {"type":"assistant_message","text":"DONE"}
 #### Question → choice
 
 ```
-POST /message
-{"prompt":{"prompt":"Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose.","permissionModeOverride":"manual","target":{"conversation":{"id":"68D951A3-2E67-4A6B-9DBA-F0E0002ADF8B","project":"file:///…/XcodeAgentRemote.xcodeproj"}}}}
-
-event: user_message
-data: {"type":"user_message","text":"Use the AskUserQuestion tool to ask me which color I prefer, …"}
+POST /messages
+{"prompt":{"permissionModeOverride":"manual","prompt":"Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose.","target":{"conversation":{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj"}}}}
 
 event: tool_use
-data: {"input":{"questions":[{"multiSelect":false,"question":"Which color do you prefer?","options":[{"label":"Red","description":"The color red"},{"label":"Green","description":"The color green"},{"label":"Blue","description":"Th…
+data: {"name":"AskUserQuestion","input":{"questions":[{"header":"Color","options":[{"label":"Red","description":"The color red"},{"label":"Green","description":"The color green"},{"label":"Blue","description":"The color blue"}],"question":"Which color do you prefer?","multiSelect":false}]},"type":"tool_use","id":"toolu_014HT2HpyJoEaRDU7SWo8T1D"}
+
+event: user_request
+data: {"type":"user_request","request":{"questions":{"toolUseID":"toolu_014HT2HpyJoEaRDU7SWo8T1D","_1":[{"options":[{"label":"Red","description":"The color red"},{"label":"Green","description":"The color green"},{"label":"Blue","description":"The color blue"}],"header":"Color","question":"Which color do you prefer?","multiSelect":false}]}}}
 ```
 
 ```
-POST /message
-{"answer":{"_0":{"questions":{"toolUseID":"toolu_019XY2sGxc3vptwUHm7RQUrg","answers":{"Which color do you prefer?":["Green"]}}}}}
+POST /messages
+{"answer":{"_0":{"questions":{"toolUseID":"toolu_014HT2HpyJoEaRDU7SWo8T1D","answers":{"Which color do you prefer?":["Green"]}}}}}
 
-event: tool_result
-data: {"tool_use_id":"toolu_019XY2sGxc3vptwUHm7RQUrg","type":"tool_result","output":"Your questions have been answered: \"Which color do you prefer?\"=\"Green\". You can now continue with these answers in mind.","is_error":false}
+event: user_response
+data: {"response":{"questions":{"toolUseID":"toolu_014HT2HpyJoEaRDU7SWo8T1D","answers":{"Which color do you prefer?":["Green"]}}},"type":"user_response"}
 
 event: assistant_message
 data: {"type":"assistant_message","text":"Green"}
@@ -560,22 +579,22 @@ data: {"type":"assistant_message","text":"Green"}
 #### Tool call → deny
 
 ```
-POST /message
-{"prompt":{"prompt":"Use the Bash tool to run: touch /tmp/sample-calls-denied. If it is denied, reply DENIED.","permissionModeOverride":"manual","target":{"conversation":{"id":"68D951A3-2E67-4A6B-9DBA-F0E0002ADF8B","project":"file:///…/XcodeAgentRemote.xcodeproj"}}}}
-
-event: user_message
-data: {"type":"user_message","text":"Use the Bash tool to run: touch \/tmp\/sample-calls-denied. If it is denied, reply DENIED."}
+POST /messages
+{"prompt":{"permissionModeOverride":"manual","prompt":"Use the Bash tool to run: touch /tmp/sample-calls-denied. If it is denied, reply DENIED.","target":{"conversation":{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj"}}}}
 
 event: tool_use
-data: {"input":{"description":"Create an empty marker file in \/tmp","command":"touch \/tmp\/sample-calls-denied"},"name":"Bash","type":"tool_use","id":"toolu_01L16Nhanm9HoMBXmyD6nsMo"}
+data: {"name":"Bash","input":{"description":"Create empty marker file in \/tmp","command":"touch \/tmp\/sample-calls-denied"},"type":"tool_use","id":"toolu_01KZxEH1GRg1fjDY7DXAYyGD"}
+
+event: user_request
+data: {"type":"user_request","request":{"permission":{"_0":{"input":{"description":"Create empty marker file in \/tmp","command":"touch \/tmp\/sample-calls-denied"},"id":"toolu_01KZxEH1GRg1fjDY7DXAYyGD","name":"Bash"}}}}
 ```
 
 ```
-POST /message
-{"answer":{"_0":{"permission":{"toolUseID":"toolu_01L16Nhanm9HoMBXmyD6nsMo","allow":false,"message":"Not now."}}}}
+POST /messages
+{"answer":{"_0":{"permission":{"allow":false,"toolUseID":"toolu_01KZxEH1GRg1fjDY7DXAYyGD","message":"Not now."}}}}
 
-event: tool_result
-data: {"tool_use_id":"toolu_01L16Nhanm9HoMBXmyD6nsMo","type":"tool_result","output":"Not now.","is_error":true}
+event: user_response
+data: {"response":{"permission":{"allow":false,"toolUseID":"toolu_01KZxEH1GRg1fjDY7DXAYyGD","message":"Not now."}},"type":"user_response"}
 
 event: assistant_message
 data: {"type":"assistant_message","text":"DENIED"}
@@ -589,6 +608,72 @@ data: {"type":"assistant_message","text":"DENIED"}
 - no turn waiting for that tool use: `404`, `{"error":{"message":"No turn is waiting for an answer to tool use toolu_…"}}`
 - the turn failed: the response ends with `event: error`, `data: {"message":"…"}`
 
+
+### Implement A New Agent Provider
+
+A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.swift`), in its own folder `Providers/<Name>/`, the way `Providers/Claude/` does it for Claude. Everything else (Xcode's chat files, the server, the iOS app) only talks to the protocol.
+
+#### Step by step
+
+1. **See how Xcode runs it**
+    - `xcrun mcpbridge run-agent --dry-run <agent>`: the binary, the flags Xcode adds, its config dir. run it exactly like that, plus only what the app needs (its machine-readable input / output)
+    - find where the agent keeps its sessions, and how a chat links to one: decode `assistantConfiguration` of `<chat UUID>/conversation.plist` (`{"agent":{"_0":{"sessionID":"…"}}}` for Claude)
+2. **Collect real samples before writing code**: one session file per case of the checklist below, made with Xcode and with the agent run by hand. add them to this README the way [Sample Jsonl (Claude history)](#sample-jsonl-claude-history) does. every case below was guessed wrong at least once for Claude
+3. **Session basics**: `agent`, `modelIdentifier` (Xcode's `chatModelDefinitionIdentifier.modelIdentifier`, e.g. `claude-code`), `newSessionID()`, `transcriptFile(sessionID:)` (also what `ChatWatcher` watches), `workingDirectory(sessionID:)`
+4. **History** (`history(sessionID:)`): the session's lines → `ChatEvent`s, the same events a live turn streams (`userMessage`, `assistantMessage`, `intermediate`, `toolUse`, `toolResult`, `userRequest`, `userResponse`)
+5. **Run a turn** (`runTurn(_:)`): start the agent like Xcode, send the prompt, stream its output as `ChatEvent`s, and answer its requests to the user (`PendingUserRequestHandler.waitForAnswer`; no answer in `permissionTimeout` is a deny). record file contents around file-changing tools and the denied tool uses in `request.records` (the cards need them)
+6. **Pending requests** (`pendingToolUse(sessionID:)`): the session's last tool use, when it waits for the user, both for the app's own turns and Xcode's ([How to determine whether there is a pending user request](#how-to-determine-whether-there-is-a-pending-user-request))
+7. **Resume and repeat**: `isSameCall(_:_:)`, `removeToolUse(_:sessionID:)`, `removeStoppedResult(of:sessionID:)`, for a request answered after its agent stopped
+8. **Cards** (`card(for:result:record:)`): what Xcode shows for each tool. copy Xcode's own cards field for field from turns Xcode wrote with that agent
+9. **Register it**: add it to `AgentProviders.all`, and its Xcode model cache id to `XcodeAgentConfiguration.xcodeAgentID(of:)` (`IDEChatGatewayModels.<id>` in `com.apple.dt.Xcode`) so `GET /providers` lists its models
+10. **Test against the real agent**: `SessionHistoryTests` with real session files, `SendMessageTests`, `ScenarioTests` (all of them, again after every change: a build passing proves nothing about the chat store paths or the agent's output)
+
+#### What to confirm (and what went wrong for Claude)
+
+**Running the agent**
+
+- output granularity: Claude's stream-json without `--include-partial-messages` sends whole blocks, not tokens. `.intermediate` is one complete thinking block
+- when the tool use reaches the session file: Claude writes it before the answer only with a `PreToolUse` hook registered (the app registers a pass-through one), and only shortly after it asks: an agent killed within a second of asking leaves no tool use at all
+- the order the agent sends things in: Claude sends the assistant's `tool_use` block first, then asks (`can_use_tool`). the live stream gets `.toolUse`, then `.userRequest`
+- how the agent asks the user, for each kind: permission, questions, plan. for Claude all three are the same `can_use_tool` request, answered allow / deny
+- what the answer looks like in the session file, for each kind and each answer (allowed, denied with / without a message, questions answered / declined, plan approved / rejected with feedback)
+- multi-select answers: Claude joins the labels with `, ` (`"Red, Blue"`). a label that itself contains `, ` can't be split back. check whether the new agent keeps them apart
+- the app's own timeout deny: give it a text you can recognise later (Claude: `No answer to this …`). it is a request that was asked and never answered: no `userResponse`
+
+**Who decided (history)**
+
+- every result needs to say whether the user decided it, and where: through the app, in Xcode's prompt, or by a rule. for Claude it is `permissionDecision.source` (`user_temporary` / `user_reject` / `hook` / `config`, [Who decided](#who-decided-permissiondecision))
+- a deny the user clicked in Xcode's prompt looks like Xcode's other hook rejects except for its text (`User selected: Don’t Allow`). it is the user's deny; the others are not requests
+- an Allow clicked in Xcode's prompt can't be told apart from a rule's allow (both `accept` / `hook`). find out whether the new agent records more
+
+**Requests in the history and in the stream**
+
+- a request replaces its tool use, the user's answer replaces its result: never both. an allowed permission is the answer, then the tool's own output (`.userResponse`, then `.toolResult`), in that order
+- emit `.userResponse` as soon as the answer is given, not when the result arrives
+- don't echo the prompt as `.userMessage`: the caller has it
+- a request that isn't an allowed permission has the user's answer as its result: don't stream that result (the card still needs it: `request.records.setResult`)
+
+**Xcode's chats, closed by the app**
+
+- what each stop leaves in the session file, and that a real deny never looks like one. for Claude ([General Approach](#if-initiated-by-xcode) table)
+    - killed while the tool ran: `Exit code 137` (`accept` / `hook`, no `toolDenialKind`)
+    - closed while Xcode's prompt was open: `toolDenialKind` `cancelled` (no `permissionDecision`). this third kind was missed at first, though the close is the same AppleScript
+    - Xcode's own close / stop button: `user-rejected`, then the interrupted text
+    - every real deny has `permission-rule` and a `reject` decision: check both before removing anything
+- what the agent writes when a session that ended without a result is resumed. for Claude, in order: the `[Tool call interrupted …]` result, a synthetic `No response requested.`, the resume prompt
+
+**The repeat (answering a request after its agent stopped)**
+
+- the agent makes the call again under a new id it assigns itself. the app can't choose it: keep the new id everywhere (the response and the result must match it)
+- the repeat may not be asked about at all: Claude's agent allowed it by its own config (`source: config`), so no `can_use_tool` came. match the repeat when the agent sends the call (`isSameCall`), not only when it asks
+- don't stream the repeat's tool use or a second request: the user already answered it. stream only its `.toolResult` (and the `.userResponse` if it was asked)
+- once the turn ended, remove the earlier tool use and its interrupted result (`removeToolUse`), whether or not the repeat was asked. a deny is not repeated: the earlier one stays, interrupted
+- `isSameCall`: which input fields identify a call per tool. the agent rewords its description, a plan, a question's options
+
+**Reading Xcode's chat store**
+
+- the files are per chat: `<store>/<chat UUID>/conversation.plist`, `<store>/<chat UUID>/metadata.plist`. there is no store-level `metadata.plist` (reading it there threw for every chat, and no test caught it until the scenarios ran again)
+- the provider of a chat comes from its metadata (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`). check the new agent's key there
 
 ## Additional Notes / Discussions
 

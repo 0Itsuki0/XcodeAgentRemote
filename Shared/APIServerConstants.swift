@@ -14,13 +14,13 @@ nonisolated enum APIServerConstants {
 
     /// `GET /health` → `SuccessResponse`
     static let healthPath = "health"
-    /// `POST /message` with a `MessageRequest` body: `.prompt` → SSE stream of `ChatEvent`s (event name =
+    /// `POST /messages` with a `MessageRequest` body: `.prompt` → SSE stream of `ChatEvent`s (event name =
     /// `ChatEvent.type`), or an `errorEvent` if the turn fails; `.answer` → the same turn's events, continued, or 404.
     static let messagePath = "messages"
     /// `GET /projects` → `[XcodeProject]`: every project with Xcode chats, with its conversations, no histories
     /// (`XcodeChat.listProjects`).
     static let projectsPath = "projects"
-    /// `GET /conversation/<Xcode chat UUID>` → `XcodeConversationDetail`: one conversation in full, with its history
+    /// `GET /conversations/<Xcode chat UUID>` → `XcodeConversationDetail`: one conversation in full, with its history
     /// and its project (`XcodeChat.conversation(id:)`). 404 if there is no such chat (or its session is missing), 501
     /// if history is not implemented for its agent.
     static let conversationPath = "conversations/:\(conversationIDParameter)"

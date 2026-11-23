@@ -268,7 +268,7 @@ nonisolated extension ChatEvent {
 
 // MARK: - Request body
 
-/// The JSON body of `POST /message`: a new message (the parameters of `sendMessage`),
+/// The JSON body of `POST /messages`: a new message (the parameters of `sendMessage`),
 /// or the user's answer to a request the running turn waits for (`answerUserRequest`).
 nonisolated enum MessageRequest: Codable, Sendable {
     /// Seconds a request to the user (permission, questions, plan) waits for its answer before it is denied; nil: 600.

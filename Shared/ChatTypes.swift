@@ -3,7 +3,7 @@
 //  XcodeAgentRemote
 //
 //  The Xcode projects and conversations listed by the macOS app (`XcodeChat.listProjects`, `GET /projects`), and one
-//  conversation in full (`XcodeChat.conversation(id:)`, `GET /conversation/<id>`), shared with the iOS app.
+//  conversation in full (`XcodeChat.conversation(id:)`, `GET /conversations/<id>`), shared with the iOS app.
 //
 
 import Foundation
@@ -47,7 +47,7 @@ nonisolated struct XcodeChatConversation: Codable, Identifiable, Sendable {
     var isWatching: Bool = false
 }
 
-/// One Xcode conversation in full (`GET /conversation/<id>`): its fields, its history, and the project it belongs to.
+/// One Xcode conversation in full (`GET /conversations/<id>`): its fields, its history, and the project it belongs to.
 nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable {
     /// Xcode's chat UUID (the chat's folder name in the store).
     var id: String

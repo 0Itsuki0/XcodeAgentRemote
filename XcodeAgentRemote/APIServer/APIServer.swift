@@ -15,18 +15,18 @@ nonisolated private let logger = Logger.shared
 nonisolated private let category = Logger.category(#fileID)
 
 /// HTTP server (Hummingbird), listening on localhost only:
-/// `POST /message` runs an agent that can use tools on this Mac, so it is not exposed to the network.
+/// `POST /messages` runs an agent that can use tools on this Mac, so it is not exposed to the network.
 ///
 /// - `GET /health` → `{"status": "ok"}`
 /// - `GET /projects` → `[XcodeProject]` (`XcodeChat.listProjects`)
-/// - `GET /conversation/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChat.conversation`): the conversation, its
+/// - `GET /conversations/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChat.conversation`): the conversation, its
 ///   history and its project; 404 no such chat, 501 not implemented
 /// - `POST /conversations/<Xcode chat UUID>/watch` with `WatchRequest` (`{"watch": true}` / `{"watch": false}`) →
 ///   `{"status": "ok"}` once the Mac started (or stopped) watching the conversation's session (`ChatWatcher`); 404 no
 ///   such chat or its transcript is missing, 501 not implemented. Listed conversations carry `isWatching`.
-/// - `POST /message` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
+/// - `POST /messages` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
 ///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
-///     (the stream ends with that tool use, which has no result yet) or the turn ends:
+///     (the stream ends with that `user_request`) or the turn ends. The prompt is not echoed:
 ///     ```
 ///     {"prompt": {"prompt": "…", "target": {"conversation": {"id": "<Xcode chat UUID>", "project": "file:///…"}},
 ///                 "permissionModeOverride": "manual", "permissionTimeout": 600}}
@@ -34,7 +34,8 @@ nonisolated private let category = Logger.category(#fileID)
 ///     Each `ChatEvent` is sent as `event: <its type>` + `data: <its JSON>`. If the turn fails, an `event: error`
 ///     with `{"message": …}` is sent.
 ///   - `.answer` → the user's answer (`ChatEvent.UserResponse`: permission, questions, plan) goes to the turn waiting for it,
-///     and the response continues that turn's stream from where the previous response ended, again until the next
+///     and the response continues that turn's stream from where the previous response ended (starting with the
+///     `user_response`; an allowed permission's `tool_result` follows it, other answers have none), again until the next
 ///     request to the user or the end. If no running turn waits for it but a chat's history does (the turn ended
 ///     before it was answered), that chat is resumed with the answer and the response streams it (`answerUserRequest`);
 ///     404 if no turn is waiting for that tool use:

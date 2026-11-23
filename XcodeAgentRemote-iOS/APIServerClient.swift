@@ -149,7 +149,7 @@ nonisolated struct APIServerClient: Sendable {
         return try NetworkService.decode([AgentProviderInfo].self, from: data)
     }
 
-    /// `GET /conversation/<Xcode chat UUID>`: one conversation in full, with its history and its project (for when
+    /// `GET /conversations/<Xcode chat UUID>`: one conversation in full, with its history and its project (for when
     /// iCloud syncing fails).
     /// Throws `NetworkError.badResponse` with 404 if there is no such chat, 501 if not implemented for its agent.
     func conversation(id: String) async throws(NetworkError)
@@ -207,11 +207,11 @@ nonisolated struct APIServerClient: Sendable {
         return try NetworkService.decode(SuccessResponse.self, from: data)
     }
 
-    /// `POST /message` (`.prompt`): sends one message, the same parameters as the macOS app's `sendMessage`, and
-    /// streams the turn's events as they arrive (the prompt, then intermediate output, assistant messages, tool uses
-    /// and tool results).
+    /// `POST /messages` (`.prompt`): sends one message, the same parameters as the macOS app's `sendMessage`, and
+    /// streams the turn's events as they arrive (intermediate output, assistant messages, tool uses, tool results,
+    /// requests to the user and their responses; not the prompt: the caller has it).
     /// The stream ends when the turn ends, or when it waits for the user's answer (a permission, questions, a plan):
-    /// then its last tool use has no result (`waitingForUser`), and `answer(_:)` continues the turn's stream.
+    /// then its last event is a `.userRequest` (`waitingForUser`), and `answer(_:)` continues the turn's stream.
     /// Throws `ServerRequestError.turnFailed` if the server reports the turn failed, `NetworkError` for HTTP or
     /// connection errors. Cancelling (or dropping) the stream only closes this connection: the turn keeps running
     /// on the Mac until it finishes.
@@ -231,9 +231,10 @@ nonisolated struct APIServerClient: Sendable {
         )
     }
 
-    /// `POST /message` (`.answer`): answers the request the turn waits for (`waitingForUser`), and continues the
+    /// `POST /messages` (`.answer`): answers the request the turn waits for (`waitingForUser`), and continues the
     /// turn's stream from where the previous one (`sendMessage`, or the previous `answer`) ended: until the next
-    /// request to the user or the end of the turn, like `sendMessage`.
+    /// request to the user or the end of the turn, like `sendMessage`. It starts with the answer's `.userResponse`; an
+    /// allowed permission's `.toolResult` follows it, other answers have none.
     /// Throws `NetworkError.badResponse` with code 404 if no turn is waiting for tool use `answer.toolUseID`.
     func answer(_ answer: ChatEvent.UserResponse) -> AsyncThrowingStream<
         ChatEvent, Error
@@ -241,7 +242,7 @@ nonisolated struct APIServerClient: Sendable {
         events(for: .answer(answer))
     }
 
-    /// Sends a `POST /message` and streams the turn's events from its SSE response.
+    /// Sends a `POST /messages` and streams the turn's events from its SSE response.
     private func events(for request: MessageRequest) -> AsyncThrowingStream<
         ChatEvent, Error
     > {
