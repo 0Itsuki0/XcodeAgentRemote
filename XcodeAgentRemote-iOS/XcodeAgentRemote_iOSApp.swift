@@ -8,6 +8,8 @@
 import SwiftData
 import SwiftUI
 
+
+// TODO: - add a link to get mac app somewhere
 @main
 struct XcodeAgentRemote_iOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -16,8 +18,8 @@ struct XcodeAgentRemote_iOSApp: App {
     var body: some Scene {
         WindowGroup {
             NavigationStack {
-//                ChatView.debugUI()
-                ContentView()
+                ChatView.debugUI()
+//                ContentView()
                     .environment(serverSettingManager)
             }
         }

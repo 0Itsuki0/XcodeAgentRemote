@@ -24,7 +24,10 @@ private let category = Logger.category(#fileID)
             ChatView(
                 chatViewModel: ChatViewModel(
                     apiClient: apiClient,
-                    conversationId: DebugConstants.conversationId
+                    conversationId: DebugConstants.conversationId,
+                    conversationName: "Debug Conversation",
+                    projectName: "Debug Project",
+                    projectStore: DebugConstants.chatStore
                 )
             )
 
@@ -33,7 +36,7 @@ private let category = Logger.category(#fileID)
 #endif
 
 struct ChatView: View {
-//    @Environment(XcodeChatManager.self) private var chatManager
+    //    @Environment(XcodeChatManager.self) private var chatManager
     @State private var chatViewModel: ChatViewModel
 
     private var conversationId: String {
@@ -79,26 +82,35 @@ struct ChatView: View {
         }
     }
 
+    /// id to force the entire history to refresh
+    private var historyViewID: UUID {
+        chatViewModel.historyViewID
+    }
+    
+    @State private var fetchID: Int = 0
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: standardSpacing) {
+                // TODO: - add Error
                 // TODO: - add `ContentUnavailableView`
                 /// 1. unsupported agent type
                 /// 2. empty history
                 /// 3. request error
-                ForEach(nonResponseHistory) { event in
+                ForEach(nonResponseHistory.enumerated(), id: \.offset) {
+                    _,
+                    event in
                     self.eventView(event)
                 }
+                .id(historyViewID)
 
                 EmptyView()
+                    .frame(height: standardSpacing / 2)
                     .id(bottomSpacer)
             }
             .contentMargins(.top, 0)
             .scrollTargetLayout()
             .background(.background)
-            .onChange(of: history, initial: true) {
-                scrollPositionID = bottomSpacer
-            }
             .padding(.all, standardSpacing)
             .frame(
                 maxWidth: .infinity,
@@ -107,19 +119,26 @@ struct ChatView: View {
             )
         }
         .refreshable {
-            // TODO: - add in refresh history logic
-            try? await Task.sleep(for: .seconds(1))
+            /// Calling `fetchConversationDetail` here will cause the request getting cancelled immediately
+            self.fetchID += 1
         }
+        .task(id: fetchID) {
+            await chatViewModel.fetchConversationDetail()
+        }
+        
         .scrollPosition(id: $scrollPositionID, anchor: .bottom)
         .defaultScrollAnchor(.bottom, for: .alignment)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onChange(of: nonResponseHistory, initial: true) {
+            self.scrollToEnd()
+        }
         .overlay(alignment: .bottom) {
-            let ids = nonResponseHistory.suffix(1).map(\.id) + [bottomSpacer]
+            let ids = [nonResponseHistory.count - 1] + [bottomSpacer]
             if let scrollPositionID, !ids.contains(scrollPositionID) {
                 Button("", systemImage: "arrow.down") {
-                    self.scrollPositionID = bottomSpacer
+                    self.scrollToEnd()
                 }
                 .buttonBorderShape(.circle)
                 .buttonStyle(.glass)
@@ -127,7 +146,7 @@ struct ChatView: View {
             }
         }
         .safeAreaBar(edge: .bottom) {
-            EntryView(focused: $focused)
+            EntryView(scrollToEnd: scrollToEnd, focused: $focused)
         }
 
         //                    .onChange(of: chatManager.streamingMessage, initial: true, {
@@ -146,7 +165,7 @@ struct ChatView: View {
         .onTapGesture {
             self.focused = false
         }
-
+        .environment(self.chatViewModel)
     }
 
     @ViewBuilder
@@ -337,86 +356,18 @@ struct ChatView: View {
 
     }
 
-    //    private func sendPrompt() {
-    //        self.focused.wrappedValue = false
-    //        let entry = self.entry.trimmed
-    //        guard !entry.trimmed.isEmpty else {
-    //            return
-    //        }
-    //        guard !chatManager.isResponding else {
-    //            return
-    //        }
-    //
-    //        self.entry = ""
-    //
-    //        Task {
-    //            await chatManager.respond(to: entry)
-    //        }
-    //    }
-}
-
-struct EntryView: View {
-//    @Environment(XcodeChatManager.self) private var chatManager
-
-    var focused: FocusState<Bool>.Binding
-    @State private var selectedPermissionMode: PermissionMode = .auto
-    @State private var text: String = ""
-
-    private let standardSpacing: CGFloat = UIConstants.standardSpacing
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: standardSpacing / 2) {
-            TextField("", text: $text, axis: .vertical)
-                .focused(focused)
-                .onSubmit {
-                    //                        self.entry.append("\n")
-                }
-                //                            .onSubmit({
-                //                                self.sendPrompt()
-                //                            })
-                //                    .padding(.vertical, 4)
-                .padding(.horizontal, standardSpacing / 2)
-                .padding(.top, standardSpacing / 2)
-                .lineLimit(5)
-
-            Divider()
-            HStack {
-                Picker(
-                    selection: $selectedPermissionMode,
-                    content: {
-                        Section("Mode") {
-                            ForEach(PermissionMode.allCases) { mode in
-                                Text(mode.displayString)
-                                    .tag(mode)
-                            }
-                        }
-                    },
-                    label: {},
-                    currentValueLabel: {
-                        Text("\(selectedPermissionMode.displayString) Mode")
-                    }
-                )
-
-                .buttonStyle(.glass)
-
-                Button("", systemImage: "arrow.up") {
-
-                }
-                .buttonBorderShape(.circle)
-                .buttonStyle(.glassProminent)
-
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            // .disabled(chatManager.isResponding)
-
+    private func scrollToEnd() {
+        guard !nonResponseHistory.isEmpty else {
+            scrollPositionID = nil
+            return
         }
-        .padding(.all, standardSpacing / 2)
-        .glassEffect(
-            .regular.tint(.clear),
-            in: .rect(cornerRadius: standardSpacing * 2)
-        )
-        .padding(.horizontal, standardSpacing)
+        scrollPositionID = nonResponseHistory.count - 1
+        Task {
+            try? await Task.sleep(for: .milliseconds(10))
+            scrollPositionID = bottomSpacer
+        }
     }
+
 }
 
 extension String {

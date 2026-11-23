@@ -13,11 +13,20 @@ nonisolated struct AuthHeader: Codable, Hashable, Sendable {
     var name: String
     /// The exact value required, e.g. "Bearer <secret>".
     var value: String
+
+    init(name: String, value: String) {
+        self.name = name
+        self.value = value
+    }
+
+    init() {
+        self.init(name: "", value: "")
+    }
 }
 
 nonisolated struct SuccessResponse: Codable, Sendable {
     let status: String
-    
+
     init() {
         self.status = "ok"
     }

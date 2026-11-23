@@ -5,8 +5,10 @@
 //  Claude's requests to the user (permission, questions, plans) as its session transcript (`.jsonl`) holds them.
 //
 //  - An answered request: the tool result's line has `permissionDecision.source` `user_temporary` (allowed /
-//    answered / approved) or `user_reject` (denied / declined / rejected). That result is the user's answer
-//    (`ChatEvent.userResponse`).
+//    answered / approved) or `user_reject` (denied / declined / rejected), or Xcode's hook rejected it because the
+//    user chose Don't Allow in Xcode's prompt. That result is the user's answer (`ChatEvent.userResponse`).
+//  - A request that timed out: `user_reject` with the app's "No answer to this …" text. It was asked, but not
+//    answered: the request, then its result (no response), as a live turn streams it.
 //  - A waiting request: the tool use is in the transcript with no result yet (Claude writes it shortly after it asks,
 //    because a PreToolUse hook is registered). It is a request if it is a question or plan, or if it is still the
 //    session's last message and either the app marked it waiting (`PendingToolUses`; else the mark is stale) or, in a
@@ -19,10 +21,18 @@ import Foundation
 
 nonisolated extension ClaudeProvider {
 
-    /// The `permissionDecision.source`s of a request the user answered.
+    /// The `permissionDecision.source`s of a request the user settled: the app's agent's (`user_temporary`,
+    /// `user_reject`), and Xcode's PreToolUse hook (`hook`) for Xcode's own prompt.
     private static let userDecisionSources: Set<String> = [
-        "user_temporary", "user_reject",
+        "user_temporary", "user_reject", "hook",
     ]
+
+    /// The start of the app's deny when the user doesn't answer in time (`permissionDecision` for `nil`).
+    static let noAnswerMessagePrefix = "No answer to this "
+
+    /// In Xcode's hook's deny when the user chose Don't Allow in Xcode's prompt:
+    /// `PreToolUse:<tool> hook error: User selected: Don’t Allow`.
+    private static let xcodeUserDeniedMarker = "hook error: User selected: "
 
     /// Whether a tool use is a request to the user, and which: the one place that decides it.
     /// It is one when the agent asked the user about it:
@@ -97,15 +107,14 @@ nonisolated extension ClaudeProvider {
         sessionID: String
     ) -> [ChatEvent] {
         let decisions = userDecisions(transcript)
-        let resulted = Set(
-            events.compactMap { event -> String? in
-                if case .toolResult(let result) = event {
-                    result.toolUseID
-                } else {
-                    nil
-                }
-            }
-        )
+        var results: [String: ChatEvent.ToolResult] = [:]
+        for case .toolResult(let result) in events {
+            results[result.toolUseID] = result
+        }
+        /// How the user settled a tool use with a result; nil if they weren't asked about it.
+        func settledByUser(_ toolUseID: String) -> Settled? {
+            results[toolUseID].flatMap { settled(decisions[toolUseID], result: $0) }
+        }
         var toolUses: [String: ChatEvent.ToolUse] = [:]
         var withRequests: [ChatEvent] = []
         for event in events {
@@ -113,10 +122,10 @@ nonisolated extension ClaudeProvider {
             case .toolUse(let toolUse):
                 toolUses[toolUse.id] = toolUse
                 let request =
-                    resulted.contains(toolUse.id)
+                    results[toolUse.id] != nil
                     ? userRequest(
                         for: toolUse,
-                        decidedByUser: decisions[toolUse.id] != nil,
+                        decidedByUser: settledByUser(toolUse.id) != nil,
                         isLastMessage: false
                     )
                     : userRequest(
@@ -135,15 +144,20 @@ nonisolated extension ClaudeProvider {
                 withRequests.append(request.map { .userRequest($0) } ?? event)
             case .toolResult(let result):
                 guard let toolUse = toolUses[result.toolUseID],
-                    let decision = decisions[result.toolUseID]
+                    let decision = decisions[result.toolUseID],
+                    case .answered(let allowed) = settledByUser(result.toolUseID)
                 else {
+                    // Not a request, or one that timed out: its result.
                     withRequests.append(event)
                     continue
                 }
                 let answer = userAnswer(
                     to: toolUse,
                     result: result,
-                    decision: decision
+                    allowed: allowed,
+                    // Xcode's deny text is Xcode's, not the user's.
+                    userMessage: decision.source != "hook",
+                    answers: decision.answers
                 )
                 withRequests.append(.userResponse(answer))
                 if case .permission(_, true, _) = answer {
@@ -161,21 +175,48 @@ nonisolated extension ClaudeProvider {
     static let declinedMessage = "The user declined to answer."
     static let rejectedPlanMessage = "The user rejected the plan."
 
-    /// The user's answer to a request, from its result: allowed (`user_temporary`) or not (`user_reject`); a deny's
-    /// message is the result (nil if it is Claude's default one), the answers are the result line's `toolUseResult`.
+    /// How the user settled a request.
+    private enum Settled {
+        /// Allowed (answered, approved) or not.
+        case answered(allowed: Bool)
+        /// Not answered in time: the app denied it.
+        case timedOut
+    }
+
+    /// How the user settled a tool use, from its result line's decision; nil if they weren't asked about it:
+    /// - `user_temporary`: allowed; `user_reject`: denied, unless it is the app's timeout deny;
+    /// - `hook` rejecting with Xcode's "User selected: Don’t Allow": denied in Xcode's prompt (other hook decisions
+    ///   are Xcode's own, e.g. its rules, or its prompt failing).
+    private static func settled(_ decision: UserDecision?, result: ChatEvent.ToolResult) -> Settled? {
+        guard let decision else { return nil }
+        switch decision.source {
+        case "user_temporary":
+            return .answered(allowed: true)
+        case "user_reject":
+            return result.output.hasPrefix(noAnswerMessagePrefix) ? .timedOut : .answered(allowed: false)
+        case "hook" where decision.decision == "reject" && result.output.contains(xcodeUserDeniedMarker):
+            return .answered(allowed: false)
+        default:
+            return nil
+        }
+    }
+
+    /// The user's answer to a request, from its result: a deny's message is the result if `userMessage` (nil if it is
+    /// Claude's default one), the answers are the result line's `toolUseResult`.
     private static func userAnswer(
         to toolUse: ChatEvent.ToolUse,
         result: ChatEvent.ToolResult,
-        decision: UserDecision
+        allowed: Bool,
+        userMessage: Bool,
+        answers: [String: [String]]
     ) -> ChatEvent.UserResponse {
-        let allowed = decision.source == "user_temporary"
         func message(unless defaultMessage: String) -> String? {
-            allowed || result.output == defaultMessage ? nil : result.output
+            allowed || !userMessage || result.output == defaultMessage ? nil : result.output
         }
         switch toolUse.name {
         case "AskUserQuestion":
             return allowed
-                ? .questions(toolUseID: toolUse.id, answers: decision.answers)
+                ? .questions(toolUseID: toolUse.id, answers: answers)
                 : .declineQuestions(
                     toolUseID: toolUse.id,
                     message: message(unless: declinedMessage)
@@ -195,15 +236,17 @@ nonisolated extension ClaudeProvider {
         }
     }
 
-    /// What a result line says about the user's decision.
+    /// What a result line says about the decision.
     private struct UserDecision {
         /// `permissionDecision.source`.
         var source: String
+        /// `permissionDecision.decision`: "accept" or "reject".
+        var decision: String?
         /// The answers to questions (`toolUseResult.answers`, `{"<question>": "<label>, <label>"}`), by question.
         var answers: [String: [String]]
     }
 
-    /// The tool uses whose result line says the user decided them (`permissionDecision.source`), with that decision.
+    /// The tool uses whose result line has a decision from one of `userDecisionSources`, with that decision.
     private static func userDecisions(_ transcript: Data) -> [String:
         UserDecision]
     {
@@ -229,6 +272,7 @@ nonisolated extension ClaudeProvider {
                 if let toolUseID = block.toolUseID {
                     decisions[toolUseID] = UserDecision(
                         source: source,
+                        decision: entry.permissionDecision?.decision,
                         answers: answers
                     )
                 }
@@ -239,7 +283,10 @@ nonisolated extension ClaudeProvider {
 
     /// A transcript line's tool results, its `permissionDecision` and `toolUseResult` (only the fields read here).
     private struct DecidedResultLine: Decodable {
-        struct Decision: Decodable { var source: String? }
+        struct Decision: Decodable {
+            var source: String?
+            var decision: String?
+        }
         struct Message: Decodable {
             struct Block: Decodable {
                 var toolUseID: String?
@@ -308,12 +355,14 @@ nonisolated extension ClaudeProvider {
     /// - the project closed by the app (AppleScript): `"content": "Exit code 137"`, `"is_error": true`,
     ///   `"toolUseResult": "Error: Exit code 137"`;
     /// - the user stopping it in Xcode (the close button): `"toolDenialKind": "user-rejected"`, then the interrupted
-    ///   text.
+    ///   text;
+    /// - the project closed by the app while Xcode's prompt was still open: `"toolDenialKind": "cancelled"` ("The user
+    ///   doesn't want to take this action right now…").
     static func removeStoppedResult(of toolUseID: String, sessionID: String)
         throws -> Bool
     {
         let transcript = try transcriptFile(sessionID: sessionID)
-        // The result's line, if it is one of those two.
+        // The result's line, if it is one of those.
         var resultLine: String?
         for line in try String(contentsOf: transcript, encoding: .utf8).split(
             separator: "\n"
@@ -331,6 +380,7 @@ nonisolated extension ClaudeProvider {
                 case .string(let uuid)? = entry["uuid"]
             else { continue }
             let rejected = entry["toolDenialKind"] == .string("user-rejected")
+                || entry["toolDenialKind"] == .string("cancelled")
             let killed =
                 fields["content"] == .string(killedResult)
                 && fields["is_error"] == .bool(true)

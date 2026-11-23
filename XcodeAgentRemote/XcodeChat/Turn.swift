@@ -45,6 +45,11 @@ nonisolated extension ChatEvent.UserResponse {
         }
     }
 
+    /// An allowed permission: the tool runs, and its result is its output.
+    var isAllowedPermission: Bool {
+        if case .permission(_, true, _) = self { true } else { false }
+    }
+
     /// A deny: the tool use doesn't run (denied permission, declined questions, rejected plan).
     var isDeny: Bool {
         switch self {

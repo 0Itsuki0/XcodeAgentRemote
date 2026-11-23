@@ -21,11 +21,28 @@ nonisolated enum ServerRequestError: Error, LocalizedError {
 /// Requests to the macOS app's server (`APIServer`, see `APIServerConstants`).
 nonisolated struct APIServerClient: Sendable {
     /// The server, e.g. `http://192.168.0.4:8765`.
-    var baseURL: URL
-    var authHeader: AuthHeader? = nil
+    let baseURL: URL
+    let useAuth: Bool
+    let authHeaderName: String
+    let authHeaderValue: String
+
+    private var authHeader: AuthHeader? {
+        useAuth
+            ? AuthHeader(
+                name: authHeaderName,
+                value: authHeaderValue
+            ) : nil
+    }
 
     static var saved: APIServerClient? {
-        let url = UserDefaultsKey.apiServerURL.getValue() as? String ?? ""
+        #if DEBUG
+            let url =
+                UserDefaultsKey.apiServerURL.getValue() as? String
+                ?? "https://madison-vernal-unanecdotally.ngrok-free.dev"
+        #else
+            let url = UserDefaultsKey.apiServerURL.getValue() as? String ?? ""
+        #endif
+
         let useAuth =
             UserDefaultsKey.apiServerUseAuth.getValue() as? Bool ?? false
 
@@ -34,40 +51,60 @@ nonisolated struct APIServerClient: Sendable {
         let authHeaderValue =
             UserDefaultsKey.apiServerAuthHeaderValue.getValue() as? String ?? ""
 
-        let authHeader = AuthHeader(
-            name: authHeaderName,
-            value: authHeaderValue
-        )
-
         return APIServerClient(
             baseURLString: url,
-            authHeader: useAuth ? authHeader : nil
+            useAuth: useAuth,
+            authHeaderName: authHeaderName,
+            authHeaderValue: authHeaderValue
         )
     }
 
-    init?(baseURLString: String, authHeader: AuthHeader? = nil) {
+    init?(
+        baseURLString: String,
+        useAuth: Bool,
+        authHeaderName: String,
+        authHeaderValue: String
+    ) {
         guard let baseURL = URL(string: baseURLString) else {
             return nil
         }
-        self.init(baseURL: baseURL, authHeader: authHeader)
+        self.init(
+            baseURL: baseURL,
+            useAuth: useAuth,
+            authHeaderName: authHeaderName,
+            authHeaderValue: authHeaderValue
+        )
     }
 
-    init(baseURL: URL, authHeader: AuthHeader? = nil) {
+    init(
+        baseURL: URL,
+        useAuth: Bool = false,
+        authHeaderName: String = "",
+        authHeaderValue: String = ""
+    ) {
         self.baseURL = baseURL
-        self.authHeader = authHeader
+        self.useAuth = useAuth
+        self.authHeaderName = authHeaderName
+        self.authHeaderValue = authHeaderValue
     }
 
     /// The server at `http://<host>:<port>`.
     init?(
         host: String,
         port: Int = APIServerConstants.defaultPort,
-        authHeader: AuthHeader? = nil
+        useAuth: Bool = false,
+        authHeaderName: String = "",
+        authHeaderValue: String = ""
     ) {
         guard let url = URL(string: "http://\(host):\(port)") else {
             return nil
         }
-        self.baseURL = url
-        self.authHeader = authHeader
+        self.init(
+            baseURL: url,
+            useAuth: useAuth,
+            authHeaderName: authHeaderName,
+            authHeaderValue: authHeaderValue
+        )
     }
 
     /// `GET /health`

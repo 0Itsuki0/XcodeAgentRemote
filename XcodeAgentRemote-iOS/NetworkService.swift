@@ -24,19 +24,19 @@ nonisolated enum NetworkError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .cancelled:
-            "Request cancelled"
+            "Request cancelled."
         case .timeout:
             "Request timeout."
         case .badResponse(let code, let message):
             "Network failed. Code:\(code)." + (message.map { " \($0)" } ?? "")
         case .other(let error):
-            "Error making network request: \(error.localizedDescription)"
+            "Error making network request: \(error.localizedDescription)."
         case .unauthorized:
-            "Unauthorized"
+            "Unauthorized."
         case .cannotConnectToHost:
-            "Could not connect to the server"
+            "Could not connect to the server."
         case .invalidResponseFormat(let error):
-            "Received invalid response format: \(error.localizedDescription)"
+            "Received invalid response format: \(error.localizedDescription)."
         }
     }
 

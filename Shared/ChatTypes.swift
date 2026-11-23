@@ -28,8 +28,8 @@ nonisolated struct XcodeChatConversation: Codable, Identifiable, Sendable {
     /// Xcode's chat UUID (the chat's folder name in the store).
     var id: String
     var name: String
-    /// The agent (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`); nil if it is not one of the agents
-    /// Xcode can run (`Agent`).
+    /// The agent (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`);
+    /// nil if it is not one of the agents Xcode can run (`AgentProviderName`).
     var provider: AgentProviderName?
     /// Xcode's model identifier for the agent, e.g. "claude-code" (the chat's metadata).
     var modelIdentifier: String?

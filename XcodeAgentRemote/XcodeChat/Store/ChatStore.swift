@@ -598,10 +598,13 @@ nonisolated extension ChatStore {
         throws(ChatStoreError)
         -> AgentProvider.Type
     {
-        let metadata = decode(
-            ManifestEntry.self,
-            from: store.appending(path: "metadata.plist")
-        )
+        // The chat's own folder holds its metadata.
+        let metadata = item(named: conversationID, in: store).flatMap {
+            decode(
+                ManifestEntry.self,
+                from: $0.appending(path: "metadata.plist")
+            )
+        }
         guard
             let agent = metadata?.chatModelDefinitionIdentifier?
                 .providerIdentifier?.builtIn?._0.keys.first.flatMap(

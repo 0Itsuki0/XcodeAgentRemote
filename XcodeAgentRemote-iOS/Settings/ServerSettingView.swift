@@ -7,8 +7,14 @@
 
 import SwiftUI
 
+enum SettingRoute: String, Equatable, Hashable, CaseIterable, Identifiable {
+    case server
+    case notification
+
+    var id: String { rawValue }
+}
+
 struct SettingsView: View {
-    //    @Environment(XcodeChatManager.self) private var chatManager
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -36,13 +42,24 @@ struct SettingsView: View {
                     Button("Close", systemImage: "xmark") {
                         self.dismiss()
                     }
-                    // TODO: - make this button smaller
                 }
             }
             .labelStyle(.iconOnly)
         }
     }
 }
+
+//extension ToolbarItem where ID == () {
+//    @ToolbarContentBuilder
+//    static func closeButton(onClose: @escaping () -> Void) -> ToolbarItem {
+//        ToolbarItem(placement: .topBarTrailing) {
+//            Button("Close", systemImage: "xmark") {
+////                onClose()
+//            }
+//        }
+//
+//    }
+//}
 
 //struct ServerConfigurationDidChange: NotificationCenter.MainActorMessage {
 //    typealias Subject = Never
@@ -58,30 +75,30 @@ struct SettingsView: View {
 //    static var serverConfigurationDidChange: Self { .init() }
 //}
 
+// To receive push notifications on conversation
+// 1. start conversation monitor on Mac
+// 2. sign in to same iCloud account on Mac and iOS
+// 3. make sure that both devices are not on low power mode.
+struct NotificationSettingView: View {
+    var body: some View {
+
+    }
+}
+
 extension ServerSettingView {
     init() {
-        #if DEBUG
-            self.urlString =
-                UserDefaultsKey.apiServerURL.getValue() as? String
-                ?? "https://madison-vernal-unanecdotally.ngrok-free.dev"
-        #else
-            self.urlString =
-                UserDefaultsKey.apiServerURL.getValue() as? String
-                ?? ""
-        #endif
-
-        self.useAuth =
-            UserDefaultsKey.apiServerUseAuth.getValue() as? Bool ?? false
-
-        let authHeaderName =
-            UserDefaultsKey.apiServerAuthHeaderName.getValue() as? String ?? ""
-        let authHeaderValue =
-            UserDefaultsKey.apiServerAuthHeaderValue.getValue() as? String ?? ""
-
-        self.authHeader = AuthHeader(
-            name: authHeaderName,
-            value: authHeaderValue
-        )
+        let savedClient = APIServerClient.saved
+        guard let savedClient else {
+            self.urlString = ""
+            self.useAuth = false
+            self.authHeaderName = ""
+            self.authHeaderValue = ""
+            return
+        }
+        self.urlString = savedClient.baseURL.absoluteString
+        self.useAuth = savedClient.useAuth
+        self.authHeaderName = savedClient.authHeaderName
+        self.authHeaderValue = savedClient.authHeaderValue
     }
 }
 
@@ -90,7 +107,8 @@ struct ServerSettingView: View {
 
     @State private var urlString: String
     @State private var useAuth: Bool
-    @State private var authHeader: AuthHeader
+    @State private var authHeaderName: String
+    @State private var authHeaderValue: String
 
     private let standardSpacing = UIConstants.standardSpacing
 
@@ -112,12 +130,12 @@ struct ServerSettingView: View {
                 if useAuth {
                     self.textEntryRow(
                         title: "Name",
-                        text: $authHeader.name,
+                        text: $authHeaderName,
                         prompt: "Authorization"
                     )
                     self.textEntryRow(
                         title: "Value",
-                        text: $authHeader.value,
+                        text: $authHeaderValue,
                         prompt: "Bearer tok_live_9f8e"
                     )
                 }
@@ -137,7 +155,8 @@ struct ServerSettingView: View {
                         self.serverSettingManager.testConfiguration(
                             urlString: urlString,
                             useAuth: useAuth,
-                            authHeader: authHeader
+                            authHeaderName: authHeaderName,
+                            authHeaderValue: authHeaderValue
                         )
 
                     },
@@ -154,7 +173,8 @@ struct ServerSettingView: View {
                         self.serverSettingManager.saveConfiguration(
                             urlString: urlString,
                             useAuth: useAuth,
-                            authHeader: authHeader
+                            authHeaderName: authHeaderName,
+                            authHeaderValue: authHeaderValue
                         )
                         self.dismiss()
                     }
@@ -169,6 +189,7 @@ struct ServerSettingView: View {
         .navigationTitle("Server Configuration")
         .navigationSubtitle("Server hosted on your Mac")
         .navigationBarTitleDisplayMode(.inline)
+
     }
 
     @ContentBuilder

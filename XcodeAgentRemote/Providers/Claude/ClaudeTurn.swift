@@ -136,7 +136,7 @@ nonisolated extension ClaudeProvider {
             if let earlier = request.repeatedAnswer { PendingToolUses.remove(earlier.toolUse.id, agent: agent) }
 
             var toolUses: [String: ChatEvent.ToolUse] = [:]
-            // The user's answers to this turn's requests, by tool use id: streamed in place of their results.
+            // The user's answers to this turn's requests, by tool use id: streamed when given, in place of their results.
             var answers: [String: ChatEvent.UserResponse] = [:]
             var agentError: String?
             let decoder = JSONDecoder()
@@ -177,14 +177,11 @@ nonisolated extension ClaudeProvider {
                             toolUseID: toolUse.id,
                             output: SessionMessage.text(of: result.content ?? []),
                             isError: result.isError ?? false)
-                        // A request's result: the user's answer instead (an allowed permission's result, the tool's
-                        // output, follows it). The card still needs the result: recorded.
-                        if let answer = answers[toolUse.id] {
-                            continuation.yield(.userResponse(answer))
-                            guard case .permission(_, true, _) = answer else {
-                                request.records.setResult(toolResult, toolUseID: toolUse.id)
-                                continue
-                            }
+                        // A request's result is the user's answer, streamed when it was given; only an allowed
+                        // permission's result (the tool's output) is streamed. The card still needs the result: recorded.
+                        if let answer = answers[toolUse.id], !answer.isAllowedPermission {
+                            request.records.setResult(toolResult, toolUseID: toolUse.id)
+                            continue
                         }
                         continuation.yield(.toolResult(toolResult))
                     }
@@ -220,6 +217,7 @@ nonisolated extension ClaudeProvider {
                         if let answer {
                             PendingToolUses.remove(toolUseID, agent: agent)
                             answers[toolUseID] = answer
+                            continuation.yield(.userResponse(answer))
                         }
                         let decision = permissionDecision(for: permissionRequest, answer: answer, timeout: request.permissionTimeout)
                         if decision.behavior == "deny" {
@@ -276,7 +274,7 @@ nonisolated extension ClaudeProvider {
         case .planApproval(_, false, let feedback):
             return PermissionDecision(behavior: "deny", message: feedback ?? rejectedPlanMessage)
         case nil:
-            return PermissionDecision(behavior: "deny", message: "No answer to this request within \(Int(timeout)) seconds.")
+            return PermissionDecision(behavior: "deny", message: "\(noAnswerMessagePrefix)request within \(Int(timeout)) seconds.")
         }
     }
 

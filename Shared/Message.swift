@@ -60,12 +60,8 @@ nonisolated enum PermissionMode: String, Identifiable, Codable, Sendable,
 ///     1. `.userRequest(.permission)` in place of the `.toolUse`
 ///     2. `.userResponse(.permission(allow: true))`
 ///     3. `.toolResult with the tool's output`
-nonisolated enum ChatEvent: Identifiable, Codable, Hashable, Sendable, Equatable
-{
-    /// `id` only for in-app comparison / view rendering
-    /// - no need to keep the id constant across app launches so `hashValue` is fine here.
-    var id: Int { self.hashValue }
-    
+nonisolated enum ChatEvent: Codable, Hashable, Sendable, Equatable {
+
     /// What the user sent (the prompt). `"type": "user_message"`
     case userMessage(String)
     /// The assistant's text. `"type": "assistant_message"`

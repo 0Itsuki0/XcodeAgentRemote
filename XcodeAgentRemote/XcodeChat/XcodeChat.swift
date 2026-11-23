@@ -214,7 +214,6 @@ nonisolated enum XcodeChat {
             workingDirectory: workingDirectory
         )
         let startDate = Date()
-        continuation.yield(.userMessage(prompt))
         let records = ToolUseRecords()
         let request = TurnRequest(
             workingDirectory: workingDirectory,

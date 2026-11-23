@@ -28,9 +28,9 @@ nonisolated enum SendMessageError: LocalizedError {
 
 // MARK: - Send
 
-/// Runs one turn and streams its events as they happen: the prompt (`.userMessage`), then `.intermediate`,
-/// `.assistantMessage`, `.toolUse`, `.toolResult`, `.userRequest` and `.userResponse` events. The turn is recorded in
-/// Xcode's chat store when it ends.
+/// Runs one turn and streams its events as they happen: `.intermediate`, `.assistantMessage`, `.toolUse`,
+/// `.toolResult`, `.userRequest` and `.userResponse` events (not the prompt: the caller has it). The turn is recorded
+/// in Xcode's chat store when it ends.
 ///
 /// The stream ends when the turn ends, or when the agent waits for the user (permission to use a tool, questions, a
 /// plan): then it ends with that `.userRequest` (`waitingForUser`), and `answerUserRequest(_:)` continues the turn's

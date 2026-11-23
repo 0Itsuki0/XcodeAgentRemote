@@ -34,7 +34,7 @@ struct SendMessageTests {
             "Reply with only the word pong.",
             to: .conversation(id: Self.conversationID, project: Self.project))
 
-        #expect(events.first == .userMessage("Reply with only the word pong."))
+        #expect(!events.contains { if case .userMessage = $0 { true } else { false } })
         let reply = events.compactMap { if case .assistantMessage(let text) = $0 { text } else { nil } }.joined()
         #expect(reply.lowercased().contains("pong"))
         #expect(events.waitingForUser.isEmpty)

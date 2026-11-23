@@ -52,22 +52,23 @@ struct DashboardWindow: View {
 
 struct ChatWatcherConfigurationView: View {
     @Environment(ChatWatcher.self) private var chatWatcher
-    
+
     // TODO: - add iCloud account state, add project / conversation list
 
     var body: some View {
         Button("watch") {
-//            let url = URL.desktopDirectory.appending(path: "test.txt")
-//            Task {
-//                do {
-////                    try await chatWatcher.watchFile(at: url)
-//                } catch {
-//                    print(error)
-//                }
-//            }
+            //            let url = URL.desktopDirectory.appending(path: "test.txt")
+            //            Task {
+            //                do {
+            ////                    try await chatWatcher.watchFile(at: url)
+            //                } catch {
+            //                    print(error)
+            //                }
+            //            }
         }
     }
 }
+
 
 struct APIServerView: View {
     @Environment(APIServerManager.self) private var serverManager
@@ -78,9 +79,7 @@ struct APIServerView: View {
         middleStates.contains(serverManager.serverState)
     }
 
-    private var portFormatStyle: IntegerFormatStyle<Int> {
-        .number.grouping(.never)
-    }
+    private let portFormatStyle: IntegerFormatStyle<Int> = .nonGrouping
 
     var body: some View {
         @Bindable var serverManager = serverManager
@@ -140,7 +139,7 @@ struct APIServerView: View {
                         value: $serverManager.port,
                         format: portFormatStyle
                     )
-                    
+
                     // TODO: - add auth configuration
                 } footer: {
                     Text("Restart the server to apply any changes.")
