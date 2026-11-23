@@ -172,7 +172,10 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 
 - on the result's line, next to `toolUseResult`. `"toolDenialKind": "permission-rule"` with a reject
     - `user_temporary` / `user_reject`: the user, through the app (`can_use_tool`). what counts as a request the user answered (`ClaudeProvider.userRequest`)
+        - except the app's own timeout deny: `user_reject` with `No answer to this …`. it was asked but not answered: a request with no response (the history shows `user_request`, then its `tool_result`, as the live turn streams it)
     - `hook`: Xcode's PreToolUse hook. the same whether Xcode asked the user or allowed it by its rules
+        - except a deny the user clicked in Xcode's prompt: a reject with `PreToolUse:<tool> hook error: User selected: Don’t Allow`. that is the user's deny (`user_request`, then `user_response` with no message: the text is Xcode's). Xcode's other rejects (its rules, or its prompt failing, e.g. `Error requesting permission: … CancellationError`) are not
+        - an Allow clicked in Xcode's prompt can't be told apart: an allow's result is the tool's output, and Xcode writes the same `accept` / `hook` for what its rules allow
     - `config`: the agent itself, without asking (`--allowedTools`, its own rules), or settled by itself (the stream closed, above)
 
 ```json
@@ -218,7 +221,7 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "Run `echo second` instead.", "is_error": true, "tool_use_id": "toolu_01GvXVmcsLfYGcdv56xbLSo3"}]}, "toolUseResult": "Error: Run `echo second` instead."}
 ```
 
-#### Stopped while the tool ran (Xcode's chat, the project closed)
+#### Stopped (Xcode's chat, the project closed)
 
 - closed by the app (AppleScript): Xcode doesn't notice, the tool is killed: a plain error result
     - the same result as a command that was killed for another reason; the app removes it only right after it closed the project for that tool use (`removeStoppedResult`)
@@ -232,6 +235,12 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 ```json
 {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", "is_error": true, "tool_use_id": "toolu_01AJGSJBsHVuSidRJ9vRyZiM"}]}, "toolUseResult": "User rejected tool use", "toolDenialKind": "user-rejected"}
 {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user for tool use]"}]}}
+```
+
+- closed by the app (AppleScript) while Xcode's prompt was still open (the tool never started): a "cancelled" result, no `permissionDecision`
+
+```json
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed.", "is_error": true, "tool_use_id": "toolu_01VshYyvL6Tn5vEhNBYLpRjN"}]}, "toolUseResult": "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed.", "toolDenialKind": "cancelled"}
 ```
 
 #### Interrupted
@@ -300,7 +309,7 @@ We need to tell it apart from other tool user so that we can have the user to an
     - without any `PreToolUse` hook, the tool use is only written after the answer
 - when the agent asks, the app marks the tool use waiting (in memory while the app runs, per agent: `[agent: [tool use id]]`). removed once the answer arrives or the tool use has a result
 - a tool use is a request **initiated by THIS App** when all three are `true` (Logic: `ClaudeProvider.userRequest`)
-    - it has a result decided by the user: `permissionDecision.source` `user_temporary` (allowed / answered / approved) or `user_reject` (denied / declined / rejected)
+    - it has a result decided by the user: `permissionDecision.source` `user_temporary` (allowed / answered / approved) or `user_reject` (denied / declined / rejected; `No answer to this …` is the app's timeout: still a request, but no response)
     - it has no result yet, and it is a question or a plan
     - it has no result yet, it is marked, and it is the session's last message (else the mark is stale)
 - `POST /message`:  the request is a `user_request` event, and the stream ends there.
@@ -356,14 +365,27 @@ We need to tell it apart from other tool user so that we can have the user to an
         - anything it can't decide (missing settings, a command it can't parse) counts as asking
 - the user answers through the app: the project is closed, then the `.jsonl` is read again
     - the tool use still has no result (it was waiting): the chat is resumed with the answer, the same as an agent killed while waiting. the agent repeats the call, it is answered without asking, and the old tool use is removed
-    - it now has the result of a stop (it was running, closing the project killed it): that result is removed, and it continues like the no-result case. only these two results are removed; a result the tool produced itself (it finished before the close) stays, so it doesn't run again
-        - by the app (AppleScript): Xcode doesn't notice, the tool is killed: a plain error result `Exit code 137` (`permissionDecision.source` `hook`)
+    - it now has the result of a stop (closing the project stopped it): that result is removed, and it continues like the no-result case. only these results are removed (`removeStoppedResult`); a result the tool produced itself (it finished before the close) stays, so it doesn't run again
+        - by the app (AppleScript), while the tool ran: Xcode doesn't notice, the tool is killed: a plain error result `Exit code 137` (`permissionDecision.source` `hook`)
+        - by the app (AppleScript), while Xcode's prompt was still open: `The user doesn't want to take this action right now …` (`"toolDenialKind": "cancelled"`)
         - by the user (the close button): Xcode notices: the `The tool use was rejected …` result (`"toolDenialKind": "user-rejected"`) and `[Request interrupted by user for tool use]` after it
+    - a real deny is never removed: every deny has `"toolDenialKind": "permission-rule"` and a `reject` `permissionDecision`. no stop result has either: `cancelled` and `user-rejected` have no `permissionDecision`, and `Exit code 137` has an `accept` one with no `toolDenialKind`
+
+| What happened | `toolDenialKind` | `permissionDecision` | Result | Removed |
+|---|---|---|---|---|
+| denied through the app's API | `permission-rule` | `reject` / `user_reject` | the user's message, or `The user denied this tool use.` | no |
+| questions declined through the API | `permission-rule` | `reject` / `user_reject` | `The user declined to answer.` | no |
+| plan rejected through the API | `permission-rule` | `reject` / `user_reject` | the feedback | no |
+| no answer in time (the app's timeout) | `permission-rule` | `reject` / `user_reject` | `No answer to this request within … seconds.` | no |
+| denied in Xcode's prompt | `permission-rule` | `reject` / `hook` | `PreToolUse:<tool> hook error: User selected: Don’t Allow` | no |
+| closed by the app while the tool ran | none | `accept` / `hook` | `Exit code 137` | yes |
+| closed by the app while Xcode's prompt was open | `cancelled` | none | `The user doesn't want to take this action right now …` | yes |
+| Xcode's close / stop button | `user-rejected` | none | `The user doesn't want to proceed with this tool use …` | yes |
 
 
 **Why it works (scenario by scenario)**
 
-- Xcode waits on its prompt, the user answers in the app: closing Xcode while it waits leaves no result (tested). the resume gives the agent the answer, it repeats the call, the call runs (or is denied) with that answer
+- Xcode waits on its prompt, the user answers in the app: closing Xcode while it waits leaves no result, or the `cancelled` result, which is removed (both seen). the resume gives the agent the answer, it repeats the call, the call runs (or is denied) with that answer
 - Xcode allowed it by itself and the check agrees: it is not shown as a request, the user never answers it, so Xcode is never closed and nothing is interrupted
 - the check says Xcode asks, but Xcode allowed it (it was running): when the user answers, closing the project kills it and its agent writes `Exit code 137` as the result (tested). that is removed and the call runs again with the user's answer. cost: the part that already ran runs a second time
 - the check says Xcode doesn't ask, but it did: shown as running, the request never reaches the app; it can only be answered in Xcode. known cases
