@@ -11,18 +11,25 @@ import SwiftUI
 @main
 struct XcodeAgentRemoteApp: App {
 
-    private let apiServerManager = APIServerManager()
-    private let chatWatcher = ChatWatcher()
+    private let apiServerManager: APIServerManager
+    private let chatWatcher: ChatWatcher
+
+    init() {
+        let chatWatcher = ChatWatcher()
+        let apiServerManager = APIServerManager(chatWatcher: chatWatcher)
+        self.chatWatcher = chatWatcher
+        self.apiServerManager = apiServerManager
+    }
 
     var body: some Scene {
         // TODO: comment out for testing purpose
         // when ready, put it back in as well as setting `Application is agent (UIElement)` in info.plist back to false
-//        MenuBarExtra {
-//            AppMenu()
-//        } label: {
-//            Image(systemName: "cloud.fill")
-//        }
-//        .menuBarExtraStyle(.window)
+        //        MenuBarExtra {
+        //            AppMenu()
+        //        } label: {
+        //            Image(systemName: "cloud.fill")
+        //        }
+        //        .menuBarExtraStyle(.window)
 
         Window("Dashboard", id: DashboardWindow.identifier) {
             // ContentView()
@@ -69,9 +76,9 @@ struct AppMenu: View {
         systemImage: String,
         action: @escaping () -> Void
     ) -> some View {
-//        Button(title, systemImage: systemImage, action: action)
-//            .frame(maxWidth: .infinity, alignment: .leading)
-//            .contentShape(Rectangle())
+        //        Button(title, systemImage: systemImage, action: action)
+        //            .frame(maxWidth: .infinity, alignment: .leading)
+        //            .contentShape(Rectangle())
         Button {
             action()
         } label: {

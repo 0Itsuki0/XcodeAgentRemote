@@ -43,6 +43,8 @@ nonisolated struct XcodeChatConversation: Codable, Identifiable, Sendable {
     var subtitle: String?
     var startDate: Date?
     var lastActivityDate: Date?
+    /// The Mac watches its session's transcript (`POST /conversations/<id>/watch`).
+    var isWatching: Bool = false
 }
 
 /// One Xcode conversation in full (`GET /conversation/<id>`): its fields, its history, and the project it belongs to.
@@ -65,6 +67,8 @@ nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable {
     var subtitle: String?
     var startDate: Date?
     var lastActivityDate: Date?
+    /// The Mac watches its session's transcript (`POST /conversations/<id>/watch`).
+    var isWatching: Bool = false
     /// Its events, loaded from the agent's own session: the same events a live turn streams (`sendMessage`).
     var history: [ChatEvent]
     /// The project it belongs to.

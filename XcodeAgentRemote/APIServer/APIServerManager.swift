@@ -45,7 +45,7 @@ enum ServerState: String, Equatable, Hashable, Sendable {
 
 @Observable
 class APIServerManager {
-    private let server = APIServer()
+    private let server: APIServer
 
     /// port to start the server on.
     /// Any changes will be applied on the next server.start.
@@ -80,7 +80,8 @@ class APIServerManager {
         }
     }
 
-    init() {
+    init(chatWatcher: ChatWatcher) {
+        self.server = APIServer(chatWatcher: chatWatcher)
         self.port =
             UserDefaultsKey.apiServerPort.getValue() as? Int
             ?? APIServerConstants.defaultPort

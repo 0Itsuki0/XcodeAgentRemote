@@ -41,6 +41,11 @@ nonisolated struct ErrorResponse: Codable, Sendable {
     var error: Body
 }
 
+/// The body of `POST /conversations/<id>/watch`: start (true) or stop (false) watching the conversation.
+nonisolated struct WatchRequest: Codable, Sendable {
+    var watch: Bool
+}
+
 /// One agent provider (`GET /providers`): whether this app supports it, and the models the provider itself offers.
 nonisolated struct AgentProviderInfo: Codable, Sendable {
     var name: AgentProviderName

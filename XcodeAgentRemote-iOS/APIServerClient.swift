@@ -156,8 +156,12 @@ nonisolated struct APIServerClient: Sendable {
         -> XcodeConversationDetail
     {
         let data = try await NetworkService.sendURLRequest(
-            url: baseURL.appending(path: APIServerConstants.conversationPath)
-                .appending(path: id),
+            url: baseURL.appending(
+                path: APIServerConstants.path(
+                    APIServerConstants.conversationPath,
+                    conversationID: id
+                )
+            ),
             method: "GET",
             headers: Self.headers(
                 ["Accept": "application/json"],
@@ -169,6 +173,38 @@ nonisolated struct APIServerClient: Sendable {
             XcodeConversationDetail.self,
             from: data
         )
+    }
+
+    /// `POST /conversations/<Xcode chat UUID>/watch`: starts (`watch` true) or stops watching the conversation on the
+    /// Mac; returns once it did. Throws `NetworkError.badResponse` with 404 if there is no such chat (or its transcript
+    /// is missing), 501 if not implemented for its agent.
+    func watch(conversationID: String, _ watch: Bool) async throws(NetworkError)
+        -> SuccessResponse
+    {
+        let body: Data
+        do {
+            body = try NetworkService.encode(WatchRequest(watch: watch))
+        } catch {
+            throw .other(error)
+        }
+        let data = try await NetworkService.sendURLRequest(
+            url: baseURL.appending(
+                path: APIServerConstants.path(
+                    APIServerConstants.watchPath,
+                    conversationID: conversationID
+                )
+            ),
+            method: "POST",
+            headers: Self.headers(
+                [
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                ],
+                authHeader: authHeader
+            ),
+            body: body
+        )
+        return try NetworkService.decode(SuccessResponse.self, from: data)
     }
 
     /// `POST /message` (`.prompt`): sends one message, the same parameters as the macOS app's `sendMessage`, and

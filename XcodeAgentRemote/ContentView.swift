@@ -14,7 +14,7 @@ struct ContentView: View {
     //    @Query private var items: [ItemModel]
     @State private var sendMessageOutput: [String] = []
     @State private var runningCommand: CommandExecutor.RunningCommand?
-    private let server = APIServer()
+//    private let server = APIServer()
     private let iCloudManager = ICloudManager()
 
     var body: some View {
@@ -33,7 +33,7 @@ struct ContentView: View {
                 Button("Start server") {
                     Task {
                         do {
-                            try await server.start()
+//                            try await server.start()
                         } catch {
                             print("error starting server: ", error)
                         }
@@ -42,7 +42,7 @@ struct ContentView: View {
 
                 Button("stop server") {
                     Task {
-                        await server.stop()
+//                        await server.stop()
                     }
                 }
 

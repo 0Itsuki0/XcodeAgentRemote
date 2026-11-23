@@ -10,6 +10,8 @@ import Foundation
 nonisolated enum APIServerConstants {
     static let defaultPort = 8000
 
+    // MARK: - Paths
+
     /// `GET /health` → `SuccessResponse`
     static let healthPath = "health"
     /// `POST /message` with a `MessageRequest` body: `.prompt` → SSE stream of `ChatEvent`s (event name =
@@ -21,10 +23,28 @@ nonisolated enum APIServerConstants {
     /// `GET /conversation/<Xcode chat UUID>` → `XcodeConversationDetail`: one conversation in full, with its history
     /// and its project (`XcodeChat.conversation(id:)`). 404 if there is no such chat (or its session is missing), 501
     /// if history is not implemented for its agent.
-    static let conversationPath = "conversations"
+    static let conversationPath = "conversations/:\(conversationIDParameter)"
+    /// `POST /conversations/<Xcode chat UUID>/watch` with a `WatchRequest` body → `SuccessResponse` once the Mac started
+    /// (or stopped) watching the conversation's session. 404 if there is no such chat (or its transcript is missing),
+    /// 501 if not implemented for its agent.
+    static let watchPath = "conversations/:\(conversationIDParameter)/watch"
     /// `GET /providers` → `[AgentProviderInfo]`: every agent provider, whether this app supports it, and the models
     /// the provider offers (`AgentProviders.infos`).
     static let providersPath = "providers"
+
+    // MARK: - Path parameters
+    /// The path parameter for Xcode's chat UUID in `conversationPath` and `watchPath`.
+    static let conversationIDParameter = "conversationID"
+
+    /// The path with its `:conversationID` replaced by `conversationID` (what the client requests).
+    static func path(_ path: String, conversationID: String) -> String {
+        path.replacingOccurrences(
+            of: ":\(conversationIDParameter)",
+            with: conversationID
+        )
+    }
+
+    // MARK: - Stream event
     /// SSE event name sent instead of the remaining events when a turn fails; data is `ErrorResponse.Body`.
     static let errorEvent = "error"
 

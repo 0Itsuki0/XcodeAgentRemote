@@ -21,6 +21,9 @@ nonisolated private let category = Logger.category(#fileID)
 /// - `GET /projects` → `[XcodeProject]` (`XcodeChat.listProjects`)
 /// - `GET /conversation/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChat.conversation`): the conversation, its
 ///   history and its project; 404 no such chat, 501 not implemented
+/// - `POST /conversations/<Xcode chat UUID>/watch` with `WatchRequest` (`{"watch": true}` / `{"watch": false}`) →
+///   `{"status": "ok"}` once the Mac started (or stopped) watching the conversation's session (`ChatWatcher`); 404 no
+///   such chat or its transcript is missing, 501 not implemented. Listed conversations carry `isWatching`.
 /// - `POST /message` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
 ///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
 ///     (the stream ends with that tool use, which has no result yet) or the turn ends:
@@ -52,6 +55,13 @@ actor APIServer {
     /// On stop, how long open requests (e.g. a turn's stream) may take before they are closed.
     private static let maximumShutdownDuration: Duration = .seconds(2)
 
+    /// Watches conversations for `POST /conversations/<id>/watch`, and tells which are watched (`isWatching`).
+    private let chatWatcher: ChatWatcher
+
+    init(chatWatcher: ChatWatcher) {
+        self.chatWatcher = chatWatcher
+    }
+
     // MARK: - Start server
 
     /// Starts listening on `127.0.0.1:<port>` and returns the port once the server is running
@@ -73,7 +83,10 @@ actor APIServer {
 
         let (running, runningContinuation) = AsyncStream<Int>.makeStream()
         let app = Application(
-            router: Self.router(authHeader: authHeader),
+            router: Self.router(
+                authHeader: authHeader,
+                chatWatcher: chatWatcher
+            ),
             configuration: .init(address: .hostname("127.0.0.1", port: port)),
             onServerRunning: { channel in
                 runningContinuation.yield(channel.localAddress?.port ?? port)
@@ -134,9 +147,10 @@ actor APIServer {
 
     // MARK: - Routes
 
-    private static func router(authHeader: AuthHeader?) -> Router<
-        BasicRequestContext
-    > {
+    private static func router(
+        authHeader: AuthHeader?,
+        chatWatcher: ChatWatcher
+    ) -> Router<BasicRequestContext> {
         let router = Router()
 
         if let authHeader {
@@ -157,34 +171,43 @@ actor APIServer {
                 category: category,
                 message: "GET /\(APIServerConstants.projectsPath)"
             )
-            return ChatStore.listProjects()
+            let watching = chatWatcher.watchingConversationIds
+            return ChatStore.listProjects().map { project in
+                var project = project
+                project.conversations = project.conversations.map {
+                    conversation in
+                    var conversation = conversation
+                    conversation.isWatching = isWatching(
+                        conversation.id,
+                        in: watching
+                    )
+                    return conversation
+                }
+                return project
+            }
         }
 
-        router.get(
-            RouterPath("\(APIServerConstants.conversationPath)/:conversation")
-        ) { _, context -> XcodeConversationDetail in
+        router.get(RouterPath(APIServerConstants.conversationPath)) {
+            _,
+            context -> XcodeConversationDetail in
             logger.info(
                 category: category,
-                message:
-                    "GET /\(APIServerConstants.conversationPath)/:conversation"
+                message: "GET /\(APIServerConstants.conversationPath)"
             )
-            let conversationID = try context.parameters.require("conversation")
+            let conversationID = try context.parameters.require(
+                APIServerConstants.conversationIDParameter
+            )
             do {
-                return try ChatStore.conversation(id: conversationID)
+                var conversation = try ChatStore.conversation(
+                    id: conversationID
+                )
+                conversation.isWatching = isWatching(
+                    conversation.id,
+                    in: chatWatcher.watchingConversationIds
+                )
+                return conversation
             } catch let error as ChatStoreError {
-                switch error {
-                case .notImplemented:
-                    throw HTTPError(
-                        .notImplemented,
-                        message: error.localizedDescription
-                    )
-                case .chatNotFound, .unknownProvider, .sessionMissing,
-                    .transcriptMissing:
-                    throw HTTPError(
-                        .notFound,
-                        message: error.localizedDescription
-                    )
-                }
+                throw httpError(error)
             }
         }
 
@@ -196,7 +219,34 @@ actor APIServer {
             return AgentProviders.infos()
         }
 
-        // TODO: - addd a POST /conversation/:conversation/watch
+        router.post(RouterPath(APIServerConstants.watchPath)) {
+            request,
+            context -> SuccessResponse in
+            logger.info(
+                category: category,
+                message: "POST /\(APIServerConstants.watchPath)"
+            )
+            let conversationID = try context.parameters.require(
+                APIServerConstants.conversationIDParameter
+            )
+            let body = try await request.decode(
+                as: WatchRequest.self,
+                context: context
+            )
+            guard body.watch else {
+                await chatWatcher.stopWatchingConversation(conversationID)
+                return SuccessResponse()
+            }
+            do {
+                try await chatWatcher.watchConversation(conversationID)
+            } catch let error as ChatStoreError {
+                throw httpError(error)
+            } catch let error as FileWatcherError {
+                // The session's transcript could not be opened.
+                throw HTTPError(.notFound, message: "\(error)")
+            }
+            return SuccessResponse()
+        }
 
         router.post(RouterPath(APIServerConstants.messagePath)) {
             request,
@@ -213,7 +263,8 @@ actor APIServer {
 
             switch body {
             case .answer(let answer):
-                guard RunningTurns.isWaitingForUser(toolUseID: answer.toolUseID) else {
+                guard RunningTurns.isWaitingForUser(toolUseID: answer.toolUseID)
+                else {
                     throw HTTPError(
                         .notFound,
                         message: SendMessageError.noWaitingRequest(
@@ -240,6 +291,24 @@ actor APIServer {
         }
 
         return router
+    }
+
+    /// The response to a `ChatStoreError`: 501 not implemented for the chat's agent, 404 anything else.
+    private static func httpError(_ error: ChatStoreError) -> HTTPError {
+        switch error {
+        case .notImplemented:
+            HTTPError(.notImplemented, message: error.localizedDescription)
+        case .chatNotFound, .unknownProvider, .sessionMissing,
+            .transcriptMissing:
+            HTTPError(.notFound, message: error.localizedDescription)
+        }
+    }
+
+    /// The conversation is among the watched ones (the same chat UUID, in any case).
+    private static func isWatching(_ id: String, in watching: [String])
+        -> Bool
+    {
+        watching.contains { ChatStore.sameID($0, id) }
     }
 
     /// An SSE response streaming a turn's events (`sendMessage` / `answerUserRequest`): each `ChatEvent` as
