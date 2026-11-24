@@ -26,7 +26,12 @@ private let category = Logger.category(#fileID)
     private(set) var apiClient: APIServerClient?
 
     private(set) var validating: Bool = false
-    private(set) var validationError: String? = nil
+    private(set) var validationError: String? = nil {
+        didSet {
+            guard let validationError else { return }
+            logger.error(category: category, errorMessage: validationError)
+        }
+    }
 
     //    @ObservationIgnored
     //    private var observationToken: NotificationCenter.ObservationToken?
@@ -110,9 +115,14 @@ private let category = Logger.category(#fileID)
 @Observable class ProjectViewModel {
     private(set) var projects: [XcodeProject] = []
 
-    private(set) var error: NetworkError?
+    private(set) var error: NetworkError? {
+        didSet {
+            guard let error else { return }
+            logger.error(category: category, error: error)
+        }
+    }
 
-    private let apiClient: APIServerClient
+    let apiClient: APIServerClient
 
     private var isFetching: Bool = false
 
@@ -133,16 +143,10 @@ private let category = Logger.category(#fileID)
         }
         do {
             self.projects = try await apiClient.projects()
-            logger.info(
-                category: category,
-                message: "Server configured successfully."
-            )
             self.projects = projects
         } catch {
-            logger.error(category: category, error: error)
             self.error = error
             self.projects = []
         }
     }
-
 }

@@ -11,7 +11,6 @@ import SwiftUI
 struct EntryView: View {
     @Environment(ChatViewModel.self) private var chatViewModel
 
-    var scrollToEnd: () -> Void
     var focused: FocusState<Bool>.Binding
     @State private var selectedPermissionMode: PermissionMode = .auto
     @State private var text: String = ""

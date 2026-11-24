@@ -28,12 +28,15 @@ nonisolated enum APIServerConstants {
     /// (or stopped) watching the conversation's session. 404 if there is no such chat (or its transcript is missing),
     /// 501 if not implemented for its agent.
     static let watchPath = "conversations/:\(conversationIDParameter)/watch"
+    /// `POST /conversations/<Xcode chat UUID>/read` → `SuccessResponse` once the chat is marked read in Xcode's
+    /// navigator (`isUnread` false). 404 if there is no such chat.
+    static let readPath = "conversations/:\(conversationIDParameter)/read"
     /// `GET /providers` → `[AgentProviderInfo]`: every agent provider, whether this app supports it, and the models
     /// the provider offers (`AgentProviders.infos`).
     static let providersPath = "providers"
 
     // MARK: - Path parameters
-    /// The path parameter for Xcode's chat UUID in `conversationPath` and `watchPath`.
+    /// The path parameter for Xcode's chat UUID in `conversationPath`, `watchPath` and `readPath`.
     static let conversationIDParameter = "conversationID"
 
     /// The path with its `:conversationID` replaced by `conversationID` (what the client requests).

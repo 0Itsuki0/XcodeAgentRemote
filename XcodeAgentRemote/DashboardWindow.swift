@@ -70,6 +70,7 @@ struct ChatWatcherConfigurationView: View {
 }
 
 
+// TODO: add auto ngrok. Force kill app may not stop ngrok correctly. run `killall ngrok` if needed.
 struct APIServerView: View {
     @Environment(APIServerManager.self) private var serverManager
 

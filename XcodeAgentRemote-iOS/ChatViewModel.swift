@@ -28,8 +28,12 @@ private let category = Logger.category(#fileID)
     private var isFetching: Bool = false
 
     //    private(set) var streamingEvents: [ChatEvent]? = nil
-    private(set) var error: Error? = nil
-    //    private(set) var requestState: RequestState = .idle
+    private(set) var error: Error? = nil {
+        didSet {
+            guard let error else { return }
+            logger.error(category: category, error: error)
+        }
+    }
 
     private var conversationDetail: XcodeConversationDetail? = nil {
         didSet {
@@ -110,8 +114,21 @@ private let category = Logger.category(#fileID)
             )
             self.conversationDetail = conversationDetail
         } catch {
-            logger.error(category: category, error: error)
             self.error = error
+        }
+    }
+
+    /// Do it in background instead of waiting
+    /// Error: logging only
+    private func markConversationAsRead() {
+        Task {
+            do {
+                let _ = try await apiClient.markRead(
+                    conversationID: conversationId
+                )
+            } catch {
+                logger.error(category: category, error: error)
+            }
         }
     }
 
@@ -229,7 +246,6 @@ private let category = Logger.category(#fileID)
                         "Pending user request count: \(self.pendingUserRequest.count)"
                 )
             } catch {
-                logger.error(category: category, error: error)
                 self.error = error
             }
         }

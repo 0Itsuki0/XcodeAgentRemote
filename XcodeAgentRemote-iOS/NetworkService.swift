@@ -56,6 +56,12 @@ nonisolated enum NetworkError: Error, LocalizedError {
     }
 }
 
+/// The HTTP methods the client sends.
+nonisolated enum HTTPMethod: String, Sendable {
+    case get = "GET"
+    case post = "POST"
+}
+
 nonisolated enum NetworkService {
 
     /// For ordinary request / response calls.
@@ -82,7 +88,7 @@ nonisolated enum NetworkService {
     /// Sends a request and returns the response body. Throws `NetworkError.badResponse` for a non-2xx status.
     static func sendURLRequest(
         url: URL,
-        method: String,
+        method: HTTPMethod,
         headers: [String: String],
         body: Data?,
         requestTimeout: TimeInterval? = nil,
@@ -112,7 +118,7 @@ nonisolated enum NetworkService {
     /// the connection.
     static func streamURLRequest(
         url: URL,
-        method: String,
+        method: HTTPMethod,
         headers: [String: String],
         body: Data?,
     ) async throws(NetworkError) -> URLSession.AsyncBytes {
@@ -145,13 +151,13 @@ nonisolated enum NetworkService {
 
     private static func makeRequest(
         url: URL,
-        method: String,
+        method: HTTPMethod,
         headers: [String: String],
         body: Data?,
         requestTimeout: TimeInterval?
     ) -> URLRequest {
         var request = URLRequest(url: url)
-        request.httpMethod = method
+        request.httpMethod = method.rawValue
         request.allHTTPHeaderFields = headers
         request.httpBody = body
         // Per-call cap, when the caller can't wait for the session-wide default.

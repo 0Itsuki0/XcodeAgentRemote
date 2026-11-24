@@ -34,6 +34,24 @@ import SwiftUI
     }
 #endif
 
+extension ChatView {
+    /// store: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
+    init(
+        apiClient: APIServerClient,
+        conversation: XcodeChatConversation,
+        projectName: String,
+        projectStore: String
+    ) {
+        self.chatViewModel = ChatViewModel(
+            apiClient: apiClient,
+            conversationId: conversation.id,
+            conversationName: conversation.name,
+            projectName: projectName,
+            projectStore: projectStore
+        )
+    }
+}
+
 struct ChatView: View {
     //    @Environment(XcodeChatManager.self) private var chatManager
     @State private var chatViewModel: ChatViewModel
@@ -145,7 +163,7 @@ struct ChatView: View {
             }
         }
         .safeAreaBar(edge: .bottom) {
-            EntryView(scrollToEnd: scrollToEnd, focused: $focused)
+            EntryView(focused: $focused)
         }
         .labelsHidden()
         .labelStyle(.iconOnly)

@@ -24,6 +24,8 @@ nonisolated private let category = Logger.category(#fileID)
 /// - `POST /conversations/<Xcode chat UUID>/watch` with `WatchRequest` (`{"watch": true}` / `{"watch": false}`) →
 ///   `{"status": "ok"}` once the Mac started (or stopped) watching the conversation's session (`watchConversation`); 404 no
 ///   such chat or its transcript is missing, 501 not implemented. Listed conversations carry `isWatching`.
+/// - `POST /conversations/<Xcode chat UUID>/read` → `{"status": "ok"}` once the chat is marked read in Xcode's navigator
+///   (`ChatStore.markRead`); 404 no such chat.
 /// - `POST /messages` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
 ///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
 ///     (the stream ends with that `user_request`) or the turn ends. The prompt is not echoed:
@@ -232,6 +234,24 @@ actor APIServer {
                 message: "GET /\(APIServerConstants.providersPath)"
             )
             return AgentProviders.infos()
+        }
+
+        router.post(RouterPath(APIServerConstants.readPath)) {
+            _,
+            context -> SuccessResponse in
+            logger.info(
+                category: category,
+                message: "POST /\(APIServerConstants.readPath)"
+            )
+            let conversationID = try context.parameters.require(
+                APIServerConstants.conversationIDParameter
+            )
+            do {
+                try ChatStore.markRead(conversationID: conversationID)
+            } catch let error as ChatStoreError {
+                throw httpError(error)
+            }
+            return SuccessResponse()
         }
 
         router.post(RouterPath(APIServerConstants.watchPath)) {

@@ -20,8 +20,8 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let apiClient = serverSettingManager.apiClient {
-//                ProjectListView(apiClient: apiClient)
-                ChatView.debugServerCall(apiClient)
+                ProjectListView(apiClient: apiClient)
+                //                ChatView.debugServerCall(apiClient)
             } else {
                 ContentUnavailableView {
                     Label("Server not configured", systemImage: "server.rack")
@@ -105,22 +105,29 @@ struct ProjectListView: View {
 
     @ContentBuilder
     private var projectList: some View {
-        let projects = [DebugConstants.project]
+        let projects = projectViewModel.projects
+        //        [DebugConstants.project]
         List {
-            NavigationLink {
-                ChatView.debugUI()
-            } label: {
-                Text("Dummy chat")
-            }
-
             ForEach(projects) { project in
                 NavigationLink {
                     ConversationListView(
                         conversations: project.conversations,
-                        projectName: project.name
+                        projectName: project.name,
+                        projectStore: project.store.lastPathComponent,
+                        apiClient: projectViewModel.apiClient,
+                        refresh: {
+                            await projectViewModel.loadProjects(
+                                checkInitial: false
+                            )
+                        }
                     )
                 } label: {
                     HStack(spacing: standardSpacing / 2) {
+                        if project.conversations.contains(
+                            where: { $0.isUnread && !$0.isArchived }
+                        ) {
+                            UnreadMark()
+                        }
                         Text(project.name)
                         let count = project.conversations.count
                         if count > 0 {
@@ -136,12 +143,17 @@ struct ProjectListView: View {
         }
         //        .navigationDestination(item: , destination: )
         .contentMargins(.top, UIConstants.standardTopMargin)
-        // TODO: - check if the call is cancelled immediately like ChatView
-        // if yes, switch to .task with id.
         .refreshable {
             await projectViewModel.loadProjects(checkInitial: false)
         }
+    }
+}
 
+struct UnreadMark: View {
+    var body: some View {
+        Circle()
+            .fill(Color.accentColor)
+            .frame(width: 8)
     }
 }
 
@@ -150,6 +162,10 @@ struct ConversationListView: View {
 
     let conversations: [XcodeChatConversation]
     let projectName: String
+    let projectStore: String
+    let apiClient: APIServerClient
+
+    let refresh: () async -> Void
 
     private let standardSpacing = UIConstants.standardSpacing
 
@@ -157,14 +173,17 @@ struct ConversationListView: View {
         List {
             ForEach(conversations.filter { !$0.isArchived }) { conversation in
                 NavigationLink {
-                    // TODO: - add conversation detail view
+                    ChatView(
+                        apiClient: apiClient,
+                        conversation: conversation,
+                        projectName: projectName,
+                        projectStore: projectStore
+                    )
                 } label: {
                     VStack(alignment: .leading, spacing: standardSpacing / 2) {
                         HStack(spacing: standardSpacing / 2) {
                             if conversation.isUnread {
-                                Circle()
-                                    .fill(Color.accentColor)
-                                    .frame(width: 8)
+                                UnreadMark()
                             }
 
                             Text(conversation.name)
@@ -190,7 +209,9 @@ struct ConversationListView: View {
         .navigationTitle("Conversations")
         .navigationSubtitle(projectName)
         .toolbarTitleDisplayMode(.inline)
-
+        .refreshable {
+            await self.refresh()
+        }
     }
 }
 

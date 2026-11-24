@@ -513,6 +513,54 @@ nonisolated extension ChatStore {
         )
     }
 
+    // MARK: Read
+
+    /// Marks a chat read in Xcode's navigator (`isUnread` false in its store's `CodingAssistantNavigator.plist`).
+    /// Throws `ChatStoreError.chatNotFound` if no store has the chat.
+    static func markRead(conversationID: String) throws {
+        try markRead(
+            conversationID: conversationID,
+            store: chatStore(conversationID: conversationID)
+        )
+    }
+
+    /// Marks a chat of `store` read (`setUnread`).
+    static func markRead(conversationID: String, store: URL) throws {
+        try setUnread(false, conversationID: conversationID, store: store)
+    }
+
+    /// Marks a chat of `store` unread, as Xcode does when a reply arrives while the chat isn't shown (`setUnread`).
+    static func markUnread(conversationID: String, store: URL) throws {
+        try setUnread(true, conversationID: conversationID, store: store)
+    }
+
+    /// Sets a chat's `isUnread` in `store`'s `CodingAssistantNavigator.plist`; the rest of the file is kept as it is
+    /// (and in its format). A chat with no state there, or already in that state, is left alone.
+    private static func setUnread(_ unread: Bool, conversationID: String, store: URL) throws {
+        let file = store.appending(path: "CodingAssistantNavigator.plist")
+        guard let data = try? Data(contentsOf: file) else { return }
+        var format = PropertyListSerialization.PropertyListFormat.binary
+        guard
+            var navigator = try PropertyListSerialization.propertyList(
+                from: data,
+                format: &format
+            ) as? [String: Any],
+            var states = navigator["navigatorConversations"] as? [Any]
+        else { return }
+        // Swift's `[UUID: State]` is written as a flat `[id, state, id, state, ...]` list.
+        guard
+            let index = stride(from: 0, to: states.count - 1, by: 2).first(where: {
+                (states[$0] as? String).map { sameID($0, conversationID) } ?? false
+            }),
+            var state = states[index + 1] as? [String: Any],
+            state["isUnread"] as? Bool != unread
+        else { return }
+        state["isUnread"] = unread
+        states[index + 1] = state
+        navigator["navigatorConversations"] = states
+        try writePlist(navigator, to: file, format: format)
+    }
+
     // MARK: A conversation
 
     /// One conversation in full, given Xcode's chat UUID: its fields, its history (`history(conversationID:)`) and its
