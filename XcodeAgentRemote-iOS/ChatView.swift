@@ -54,8 +54,6 @@ struct ChatView: View {
     // var focused: FocusState<Bool>.Binding
     @FocusState private var focused
 
-    @State private var entry: String = "ddd\n\\nddfdfs\ndfd\n"
-    //    @State private var scrollPosition: ScrollPosition = .init(idType: UUID.self)
     @State private var scrollPositionID: Int? = nil
 
     @State private var entryHeight: CGFloat = 24
@@ -356,7 +354,9 @@ struct ChatView: View {
         }
         Task {
             try? await Task.sleep(for: .milliseconds(10))
-            scrollPositionID = bottomSpacer
+            withAnimation(.smooth) {
+                scrollPositionID = bottomSpacer
+            }
         }
     }
 }

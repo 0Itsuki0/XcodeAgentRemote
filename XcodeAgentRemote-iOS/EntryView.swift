@@ -7,14 +7,14 @@
 
 import SwiftUI
 
+// TODO: - add a setting to hide intermediate messages
 struct EntryView: View {
     @Environment(ChatViewModel.self) private var chatViewModel
 
     var scrollToEnd: () -> Void
     var focused: FocusState<Bool>.Binding
     @State private var selectedPermissionMode: PermissionMode = .auto
-    @State private var text: String = "Hello"
-//    DebugConstants.planApprovalPrompt
+    @State private var text: String = ""
 
     private let standardSpacing: CGFloat = UIConstants.standardSpacing
 
