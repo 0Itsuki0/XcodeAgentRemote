@@ -317,8 +317,6 @@ nonisolated enum XcodeChat {
             snapshotAfter: snapshotAfter
         )
         try conversation.save()
-        // A new reply Xcode didn't show: unread, as Xcode marks it. Best effort: the turn is recorded either way.
-        try? ChatStore.markUnread(conversationID: conversation.id, store: store)
 
         // The agent repeated the earlier tool use and was given its answer: the earlier one (left without a result
         // when its agent was stopped, then marked interrupted on resume) is replaced by the repeat, so remove it.

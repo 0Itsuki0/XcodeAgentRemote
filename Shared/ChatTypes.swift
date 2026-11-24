@@ -9,7 +9,9 @@
 import Foundation
 
 /// A project that has Xcode chats: one chat store folder `<ProjectName>-<hash>`.
-nonisolated struct XcodeProject: Codable, Identifiable, Sendable {
+nonisolated struct XcodeProject: Codable, Identifiable, Sendable, Hashable,
+    Equatable
+{
     /// `<ProjectName>` of the store folder (the project file's name without extension).
     var name: String
     /// The `.xcodeproj` / `.xcworkspace`, or nil if it could not be found (moved, deleted, ...).
@@ -24,7 +26,9 @@ nonisolated struct XcodeProject: Codable, Identifiable, Sendable {
 
 /// One Xcode conversation, as a project lists it (no history: `XcodeConversationDetail` has it).
 /// It runs in one agent session (`providerSessionID`).
-nonisolated struct XcodeChatConversation: Codable, Identifiable, Sendable {
+nonisolated struct XcodeChatConversation: Codable, Identifiable, Sendable,
+    Hashable, Equatable
+{
     /// Xcode's chat UUID (the chat's folder name in the store).
     var id: String
     var name: String
@@ -48,7 +52,9 @@ nonisolated struct XcodeChatConversation: Codable, Identifiable, Sendable {
 }
 
 /// One Xcode conversation in full (`GET /conversations/<id>`): its fields, its history, and the project it belongs to.
-nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable {
+nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable,
+    Hashable, Equatable
+{
     /// Xcode's chat UUID (the chat's folder name in the store).
     var id: String
     var name: String
@@ -76,7 +82,7 @@ nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable {
 }
 
 /// The project a conversation belongs to: the project's own fields, without its conversations.
-nonisolated struct ProjectReference: Codable, Sendable {
+nonisolated struct ProjectReference: Codable, Sendable, Hashable, Equatable {
     /// `<ProjectName>` of the store folder (the project file's name without extension).
     var name: String
     /// The `.xcodeproj` / `.xcworkspace`, or nil if it could not be found (moved, deleted, ...).

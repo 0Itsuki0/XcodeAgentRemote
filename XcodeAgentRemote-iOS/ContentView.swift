@@ -9,10 +9,6 @@ import CloudKit
 import SwiftData
 import SwiftUI
 
-//@Observable class AppViewRouter {
-//
-//}
-
 struct ContentView: View {
     @Environment(ServerSettingManager.self) private var serverSettingManager
     @State private var showSettings: Bool = false
@@ -106,7 +102,6 @@ struct ProjectListView: View {
     @ContentBuilder
     private var projectList: some View {
         let projects = projectViewModel.projects
-        //        [DebugConstants.project]
         List {
             ForEach(projects) { project in
                 NavigationLink {
@@ -114,6 +109,7 @@ struct ProjectListView: View {
                         conversations: project.conversations,
                         projectName: project.name,
                         projectStore: project.store.lastPathComponent,
+                        projectId: project.id,
                         apiClient: projectViewModel.apiClient,
                         refresh: {
                             await projectViewModel.loadProjects(
@@ -141,7 +137,6 @@ struct ProjectListView: View {
                 }
             }
         }
-        //        .navigationDestination(item: , destination: )
         .contentMargins(.top, UIConstants.standardTopMargin)
         .refreshable {
             await projectViewModel.loadProjects(checkInitial: false)
@@ -163,6 +158,7 @@ struct ConversationListView: View {
     let conversations: [XcodeChatConversation]
     let projectName: String
     let projectStore: String
+    let projectId: String
     let apiClient: APIServerClient
 
     let refresh: () async -> Void
@@ -177,7 +173,8 @@ struct ConversationListView: View {
                         apiClient: apiClient,
                         conversation: conversation,
                         projectName: projectName,
-                        projectStore: projectStore
+                        projectStore: projectStore,
+                        projectId: projectId
                     )
                 } label: {
                     VStack(alignment: .leading, spacing: standardSpacing / 2) {

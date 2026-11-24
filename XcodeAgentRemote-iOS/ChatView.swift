@@ -9,6 +9,27 @@ import SwiftUI
 
 // TODO: - show errors
 
+struct SelectedConversationDidChange: NotificationCenter.MainActorMessage {
+    typealias Subject = Never
+
+    struct Conversation: Sendable, Hashable, Equatable {
+        var conversationId: String
+        var projectId: String
+    }
+
+    /// (`ConversationId`, `projectId`)
+    let conversation: Conversation?
+}
+
+extension NotificationCenter.MessageIdentifier
+where
+    Self == NotificationCenter.BaseMessageIdentifier<
+        SelectedConversationDidChange
+    >
+{
+    static var selectedConversationDidChange: Self { .init() }
+}
+
 #if DEBUG
     extension ChatView {
         static func debugUI() -> ChatView {
@@ -26,7 +47,8 @@ import SwiftUI
                     conversationId: DebugConstants.conversationId,
                     conversationName: "Debug Conversation",
                     projectName: "Debug Project",
-                    projectStore: DebugConstants.chatStore
+                    projectStore: DebugConstants.chatStore,
+                    projectId: DebugConstants.chatStore
                 )
             )
 
@@ -40,14 +62,16 @@ extension ChatView {
         apiClient: APIServerClient,
         conversation: XcodeChatConversation,
         projectName: String,
-        projectStore: String
+        projectStore: String,
+        projectId: String
     ) {
         self.chatViewModel = ChatViewModel(
             apiClient: apiClient,
             conversationId: conversation.id,
             conversationName: conversation.name,
             projectName: projectName,
-            projectStore: projectStore
+            projectStore: projectStore,
+            projectId: projectId
         )
     }
 }
@@ -64,6 +88,9 @@ struct ChatView: View {
     }
     private var projectName: String {
         chatViewModel.projectName
+    }
+    private var projectId: String {
+        chatViewModel.projectId
     }
     private var history: [ChatEvent] {
         chatViewModel.history
@@ -139,6 +166,23 @@ struct ChatView: View {
         }
         .task(id: fetchID) {
             await chatViewModel.fetchConversationDetail()
+        }
+        .onAppear {
+            NotificationCenter.default.post(
+                SelectedConversationDidChange(
+                    conversation: .init(
+                        conversationId: conversationId,
+                        projectId: projectId
+                    )
+                )
+            )
+        }
+        .onDisappear {
+            NotificationCenter.default.post(
+                SelectedConversationDidChange(
+                    conversation: nil
+                )
+            )
         }
         .scrollPosition(id: $scrollPositionID, anchor: .bottom)
         .defaultScrollAnchor(.bottom, for: .alignment)

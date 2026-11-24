@@ -16,6 +16,9 @@ private let category = Logger.category(#fileID)
     let conversationId: String
     private(set) var conversationName: String
     private(set) var projectName: String
+    
+    /// should be the same as the store, but here for consistency
+    private(set) var projectId: String
 
     /// Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
     private var projectStore: String
@@ -54,14 +57,15 @@ private let category = Logger.category(#fileID)
         conversationId: String,
         conversationName: String,
         projectName: String,
-        projectStore: String
-
+        projectStore: String,
+        projectId: String
     ) {
         self.apiClient = apiClient
         self.conversationId = conversationId
         self.conversationName = conversationName
         self.projectName = projectName
         self.projectStore = projectStore
+        self.projectId = projectId
     }
 
     #if DEBUG
@@ -83,6 +87,7 @@ private let category = Logger.category(#fileID)
             self.conversationName = "DebugConversation"
             self.projectName = "DebugProject"
             self.projectStore = "Debug-Hash"
+            self.projectId = "Debug-Hash"
         }
 
         private static func loadHistoryFromFile(_ url: URL?) -> [ChatEvent] {
@@ -113,6 +118,7 @@ private let category = Logger.category(#fileID)
                 id: self.conversationId
             )
             self.conversationDetail = conversationDetail
+            self.markConversationAsRead()
         } catch {
             self.error = error
         }

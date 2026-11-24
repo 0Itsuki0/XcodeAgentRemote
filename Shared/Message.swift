@@ -11,7 +11,9 @@ import Foundation
 
 /// The agents Xcode can run: `xcrun mcpbridge run-agent <agent>`
 /// ("Supported agents: antigravity, claude, claude-ext, codex, copilot, mock-agent").
-nonisolated enum AgentProviderName: String, Codable, CaseIterable, Sendable {
+nonisolated enum AgentProviderName: String, Codable, CaseIterable, Sendable,
+    Hashable, Equatable
+{
     case antigravity
     case claude
     case claudeExt = "claude-ext"

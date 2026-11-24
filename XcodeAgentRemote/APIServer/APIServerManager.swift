@@ -104,6 +104,9 @@ class APIServerManager {
 
     @ObservationIgnored
     private var ngrokCommand: CommandExecutor.RunningCommand?
+    
+    @ObservationIgnored
+    private var observationToken: NotificationCenter.ObservationToken?
 
     init(
         watchingConversations: @Sendable @escaping () -> [String],
@@ -151,14 +154,13 @@ class APIServerManager {
             value: authHeaderValue
         )
 
-        // A process the app started isn't stopped with it: stop ngrok when the app quits. (Killed instead, e.g. stopped
-        // from Xcode, the app runs no code: the next launch stops that ngrok, `stopLeftoverNgrok`.)
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
+        /// A process the app started isn't stopped with it: stop ngrok when the app quits. (Killed instead, e.g. stopped
+        /// from Xcode, the app runs no code: the next launch stops that ngrok, `stopLeftoverNgrok`.)
+        observationToken = NotificationCenter.default.addObserver(
+            of: NSApplication.shared,
+            for: .willTerminate
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.ngrokCommand?.terminate() }
+            self?.ngrokCommand?.terminate()
         }
         Self.stopLeftoverNgrok()
 
