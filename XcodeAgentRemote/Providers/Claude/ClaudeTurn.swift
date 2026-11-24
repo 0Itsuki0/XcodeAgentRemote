@@ -102,21 +102,14 @@ nonisolated extension ClaudeProvider {
         // so the wait ends right away (the request is left waiting in the transcript, still answerable).
         let waitingOn = WaitingToolUse()
         let sessionID = request.sessionID
-        RunningSessions.insert(sessionID)
-        let agentProcess: CommandExecutor.RunningCommand
-        do {
-            agentProcess = try CommandExecutor.runCommandStream(
-                ["xcrun"] + launchArguments(sessionID: sessionID, resume: request.resume, permissionMode: request.permissionMode),
-                in: request.workingDirectory
-            ) {
-                RunningSessions.remove(sessionID)
-                if let toolUseID = waitingOn.toolUseID {
-                    Task { await PendingUserRequestHandler.shared.unregister(toolUseID) }
-                }
+        // The session is in `RunningSessions` for the whole turn (`XcodeChat.runTurn`).
+        let agentProcess = try CommandExecutor.runCommandStream(
+            ["xcrun"] + launchArguments(sessionID: sessionID, resume: request.resume, permissionMode: request.permissionMode),
+            in: request.workingDirectory
+        ) {
+            if let toolUseID = waitingOn.toolUseID {
+                Task { await PendingUserRequestHandler.shared.unregister(toolUseID) }
             }
-        } catch {
-            RunningSessions.remove(sessionID)
-            throw error
         }
         /// Writes one JSON line to the agent's input.
         func sendToAgent<Message: Encodable>(_ message: Message) {

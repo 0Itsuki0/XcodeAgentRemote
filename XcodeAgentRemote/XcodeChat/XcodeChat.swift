@@ -24,6 +24,8 @@ nonisolated enum XcodeChatError: LocalizedError {
     case projectFileNotFound(store: URL)
     /// The turn ran (and was recorded) but the agent reported an error.
     case agentFailed(message: String)
+    /// The chat is already running a turn (another message to it, or an answer that resumes it).
+    case conversationRunning(conversationID: String)
 
     var errorDescription: String? {
         switch self {
@@ -43,6 +45,8 @@ nonisolated enum XcodeChatError: LocalizedError {
             "Could not find the project file for \(store.path)"
         case .agentFailed(let message):
             "The agent failed: \(message)"
+        case .conversationRunning(let id):
+            "Chat \(id) is already running a turn: wait for it to end (or answer its request)"
         }
     }
 }
@@ -164,6 +168,11 @@ nonisolated enum XcodeChat {
                 name: name ?? String(prompt.prefix(40))
             )
         }
+        // One turn per chat at a time: claimed until this turn is recorded.
+        guard RunningSessions.insert(sessionID) else {
+            throw XcodeChatError.conversationRunning(conversationID: conversation.id)
+        }
+        defer { RunningSessions.remove(sessionID) }
 
         if project == nil {  // a store only: find the project from the session's folder and the snapshots
             let folders =

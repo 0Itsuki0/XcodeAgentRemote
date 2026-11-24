@@ -70,6 +70,30 @@ struct SendMessageTests {
         #expect(!FileManager.default.fileExists(atPath: file.path), "the command ran although it was denied")
     }
 
+    /// A second message to a chat whose turn is still running (here: waiting on a request) is refused; once that turn
+    /// ended, the chat takes messages again.
+    @Test func refusesSecondMessageWhileRunning() async throws {
+        let file = URL(filePath: NSTemporaryDirectory()).appending(path: "busy-test-\(UUID().uuidString)")
+        let target = MessageTarget.conversation(id: Self.conversationID, project: Self.project)
+        var events: [ChatEvent] = []
+        for try await event in sendMessage(
+            "Use the Bash tool to run: touch \(file.path). If it is denied, say DENIED and stop.",
+            to: target, permissionModeOverride: .manual
+        ) { events.append(event) }
+        let request = try #require(events.waitingForUser.last, "the first turn didn't wait for the user")
+
+        await #expect {
+            _ = try await Self.events("Reply with only the word pong.", to: target)
+        } throws: { error in
+            if case XcodeChatError.conversationRunning = error { true } else { false }
+        }
+
+        // End the first turn, then the chat takes a message again.
+        for try await _ in answerUserRequest(.permission(toolUseID: request.toolUseID, allow: false)) {}
+        let reply = try await Self.events("Reply with only the word pong.", to: target)
+        #expect(reply.contains { if case .assistantMessage = $0 { true } else { false } })
+    }
+
     @Test func throwsForUnknownConversation() async throws {
         await #expect(throws: XcodeChatError.self) {
             _ = try await Self.events(

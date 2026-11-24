@@ -8,14 +8,18 @@
 import Foundation
 import Synchronization
 
-/// The sessions whose agent the app is running now (by session id). A tool use with no result in one of them is the
-/// app's own: its requests are marked (`PendingToolUses`), so Xcode's permission check (`PermissionRule`) is not used.
+/// The sessions the app is running a turn in now (by session id), from the start of the turn until it is recorded
+/// (`XcodeChat.runTurn`). One turn per session at a time: another message to that chat is refused meanwhile.
+/// A tool use with no result in one of them is the app's own: its requests are marked (`PendingToolUses`), so Xcode's
+/// permission check (`PermissionRule`) is not used.
 nonisolated enum RunningSessions {
     private static let ids = Mutex<Set<String>>([])
 
     // Kept lowercased, and looked up lowercased (`ChatStore.sameID`): the id may be cased differently.
-    static func insert(_ sessionID: String) {
-        ids.withLock { _ = $0.insert(sessionID.lowercased()) }
+    /// Adds the session; false if it was running already (checked and added at once).
+    @discardableResult
+    static func insert(_ sessionID: String) -> Bool {
+        ids.withLock { $0.insert(sessionID.lowercased()).inserted }
     }
     static func remove(_ sessionID: String) {
         ids.withLock { _ = $0.remove(sessionID.lowercased()) }

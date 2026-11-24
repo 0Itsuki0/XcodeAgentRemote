@@ -15,6 +15,8 @@ nonisolated enum UserDefaultsKey: String, CaseIterable {
     case apiServerAuthHeaderValue
     case apiServerUseAuth
     case ngrokURL
+    /// The pid of the ngrok the app started, while it runs: stopped on the next launch if the app was killed first.
+    case ngrokProcessID
 
     case startAPIServerOnAppLaunch
     case startNgrokTunnelOnServerStart
