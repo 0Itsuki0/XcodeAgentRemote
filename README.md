@@ -640,9 +640,9 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 **Requests in the history and in the stream**
 
 - a request replaces its tool use, the user's answer replaces its result: never both. an allowed permission is the answer, then the tool's own output (`.userResponse`, then `.toolResult`), in that order
-- don't echo what the caller sent: not the prompt (`.userMessage`), not the answer (`.userResponse`). the history has both
-- a question or a plan is always a request: stream only its `.userRequest`, not its `.toolUse` (a permission's tool use can't be known in advance: it streams, then its request)
-- a request that isn't an allowed permission has the user's answer as its result: don't stream that result (the card still needs it: `request.records.setResult`)
+- the caller doesn't get back what it sent: not the prompt (`.userMessage`, never streamed), not the answer (`.userResponse`, streamed by the provider, kept from the caller by `ClientEvents`). the history has both
+- a question or a plan is always a request (the provider says which: `alwaysWaitsForUser`): the caller gets only its `.userRequest`, not its `.toolUse` (a permission's tool use can't be known in advance: it comes, then its request)
+- the provider streams every event (Xcode's cards are built from all of them); what the caller doesn't get is decided outside the provider (`ClientEvents` in `XcodeChat.swift`). a request that isn't an allowed permission has the user's answer as its result: the caller doesn't get that result
 
 **Xcode's chats, closed by the app**
 
@@ -657,7 +657,7 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 
 - the agent makes the call again under a new id it assigns itself. the app can't choose it: keep the new id everywhere (the response and the result must match it)
 - the repeat may not be asked about at all: Claude's agent allowed it by its own config (`source: config`), so no `can_use_tool` came. match the repeat when the agent sends the call (`isSameCall`), not only when it asks
-- don't stream the repeat's tool use or a second request: the user already answered it. stream only its `.toolResult`
+- the caller doesn't get the repeat's tool use or a second request: the user already answered it. it gets only the repeat's `.toolResult` (`ClientEvents` matches the repeat with the provider's `isSameCall`)
 - once the turn ended, remove the earlier tool use and its interrupted result (`removeToolUse`), whether or not the repeat was asked. a deny is not repeated: the earlier one stays, interrupted
 - `isSameCall`: which input fields identify a call per tool. the agent rewords its description, a plan, a question's options
 

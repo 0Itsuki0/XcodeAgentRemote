@@ -129,9 +129,7 @@ nonisolated extension ClaudeProvider {
             if let earlier = request.repeatedAnswer { PendingToolUses.remove(earlier.toolUse.id, agent: agent) }
 
             var toolUses: [String: ChatEvent.ToolUse] = [:]
-            // The user's answers to this turn's requests, by tool use id: streamed when given, in place of their results.
-            var answers: [String: ChatEvent.UserResponse] = [:]
-            // The agent's repeat of the earlier tool use, and the earlier answer it gets: its tool use isn't streamed.
+            // The agent's repeat of the earlier tool use, and the earlier answer it gets without asking the user.
             var repeatCall: (toolUseID: String, answer: ChatEvent.UserResponse)?
             var agentError: String?
             let decoder = JSONDecoder()
@@ -160,12 +158,6 @@ nonisolated extension ClaudeProvider {
                                 repeatedAnswer = nil
                                 repeatCall = (toolUse.id, repeated.answer.answering(toolUse.id))
                                 request.records.setRepeatedEarlierToolUse()
-                                continue
-                            }
-                            // A question or a plan always waits for the user: streamed as its request (when the agent
-                            // asks), not as a tool use.
-                            if userRequest(for: toolUse, decidedByUser: nil, isLastMessage: false) != nil {
-                                continue
                             }
                             continuation.yield(.toolUse(toolUse))
                         default:
@@ -185,12 +177,6 @@ nonisolated extension ClaudeProvider {
                             toolUseID: toolUse.id,
                             output: SessionMessage.text(of: result.content ?? []),
                             isError: result.isError ?? false)
-                        // A request's result is the user's answer, streamed when it was given; only an allowed
-                        // permission's result (the tool's output) is streamed. The card still needs the result: recorded.
-                        if let answer = answers[toolUse.id], !answer.isAllowedPermission {
-                            request.records.setResult(toolResult, toolUseID: toolUse.id)
-                            continue
-                        }
                         continuation.yield(.toolResult(toolResult))
                     }
 
@@ -208,14 +194,14 @@ nonisolated extension ClaudeProvider {
                             id: toolUseID, name: permissionRequest.toolName ?? "?", input: permissionRequest.input ?? [:])
                         // The agent asked the user: mark it waiting, and stream the request it is (`userRequest`).
                         PendingToolUses.add(toolUseID, agent: agent)
+                        if let userRequest = userRequest(for: toolUse, decidedByUser: nil, isLastMessage: true) {
+                            continuation.yield(.userRequest(userRequest))
+                        }
                         let answer: ChatEvent.UserResponse?
                         if let repeatCall, repeatCall.toolUseID == toolUseID {
-                            // The repeat: answered with the earlier answer, not requested again.
+                            // The repeat: answered with the earlier answer, without waiting for the user.
                             answer = repeatCall.answer
                         } else {
-                            if let userRequest = userRequest(for: toolUse, decidedByUser: nil, isLastMessage: true) {
-                                continuation.yield(.userRequest(userRequest))
-                            }
                             waitingOn.set(toolUseID)
                             answer = await PendingUserRequestHandler.shared.waitForAnswer(
                                 toolUseID: toolUseID, timeout: request.permissionTimeout)
@@ -223,8 +209,7 @@ nonisolated extension ClaudeProvider {
                         }
                         if let answer {
                             PendingToolUses.remove(toolUseID, agent: agent)
-                            // Not streamed: the caller sent it.
-                            answers[toolUseID] = answer
+                            continuation.yield(.userResponse(answer))
                         }
                         let decision = permissionDecision(for: permissionRequest, answer: answer, timeout: request.permissionTimeout)
                         if decision.behavior == "deny" {

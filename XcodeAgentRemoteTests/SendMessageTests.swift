@@ -94,6 +94,36 @@ struct SendMessageTests {
         #expect(reply.contains { if case .assistantMessage = $0 { true } else { false } })
     }
 
+    /// A plan isn't streamed as a tool use (only its request), but its card is still recorded in Xcode's chat.
+    @Test func recordsPlanCard() async throws {
+        let target = MessageTarget.conversation(id: Self.conversationID, project: Self.project)
+        var events: [ChatEvent] = []
+        var stream = sendMessage(
+            "Enter plan mode with the EnterPlanMode tool, then present a one-step plan to run `echo planned` with the ExitPlanMode tool. After it is approved, run it with Bash and reply with the output.",
+            to: target, permissionModeOverride: .manual)
+        var planID: String?
+        while true {
+            for try await event in stream { events.append(event) }
+            guard let request = events.waitingForUser.last else { break }
+            let answer: ChatEvent.UserResponse
+            if case .planApproval(let id, _) = request {
+                planID = id
+                answer = .planApproval(toolUseID: id, approve: true)
+            } else {
+                answer = .permission(toolUseID: request.toolUseID, allow: true)
+            }
+            events.append(.userResponse(answer))
+            stream = answerUserRequest(answer)
+        }
+        let id = try #require(planID, "no plan was presented")
+        #expect(!events.contains { if case .toolUse(let toolUse) = $0 { toolUse.id == id } else { false } })
+
+        let chat = ChatStore.storeDirectory(forProject: Self.project)
+            .appending(path: Self.conversationID).appending(path: "conversation.plist")
+        let plist = try Data(contentsOf: chat)
+        #expect(plist.range(of: Data(id.utf8)) != nil, "the plan's card is not in the chat")
+    }
+
     @Test func throwsForUnknownConversation() async throws {
         await #expect(throws: XcodeChatError.self) {
             _ = try await Self.events(

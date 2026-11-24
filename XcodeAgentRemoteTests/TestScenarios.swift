@@ -558,6 +558,8 @@ nonisolated enum TestScenarios {
                         "the command did not run"
                     )
                     try checkAnswered(toolUse, chatID: chatID)
+                    // The repeat has its card in Xcode's chat.
+                    try checkCardsRecorded(events, store: ChatStore.storeDirectory(forProject: project))
                     return
                         "the agent repeated it, answered without asking, and it ran; reply: \(reply(events))"
                 }
@@ -782,8 +784,47 @@ nonisolated enum TestScenarios {
             return events
         }
 
+        /// The chat store a message goes to.
+        private static func store(of target: MessageTarget) -> URL {
+            switch target {
+            case .newConversation(let project, _, _), .conversation(_, let project):
+                ChatStore.storeDirectory(forProject: project)
+            case .conversationInStore(_, let name):
+                ChatStore.storeDirectory(named: name)
+            }
+        }
+
+        /// Checks every tool use the turn saw (as a tool use, a request or a result: a question, a plan or a repeat
+        /// reaches the caller only as one of the latter) has its card in the chat the turn was recorded in (the most
+        /// recently written `conversation.plist` of `store`): what Xcode shows.
+        private static func checkCardsRecorded(_ events: [ChatEvent], store: URL) throws {
+            let ids = Set(events.compactMap { event -> String? in
+                switch event {
+                case .toolUse(let toolUse): toolUse.id
+                case .userRequest(let request): request.toolUseID
+                case .toolResult(let result): result.toolUseID
+                default: nil
+                }
+            })
+            guard !ids.isEmpty else { return }
+            let chats = (try? FileManager.default.contentsOfDirectory(
+                at: store, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            let latest = chats.map { $0.appending(path: "conversation.plist") }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+                .max {
+                    let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                    let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                    return (a ?? .distantPast) < (b ?? .distantPast)
+                }
+            guard let latest, let plist = try? Data(contentsOf: latest) else {
+                throw CheckFailed(description: "no recorded chat in \(store.path)")
+            }
+            let missing = ids.filter { plist.range(of: Data($0.utf8)) == nil }
+            try check(missing.isEmpty, "tool uses without a card in Xcode's chat: \(missing.sorted())")
+        }
+
         /// Sends one message and collects the turn's events; answers each request the turn waits for (permission,
-        /// questions, plan) with `answering`.
+        /// questions, plan) with `answering`. Checks each of its tool uses has a card in Xcode's chat.
         private static func sendDirect(
             _ prompt: String,
             to target: MessageTarget,
@@ -801,6 +842,7 @@ nonisolated enum TestScenarios {
             while true {
                 for try await event in stream { events.append(event) }
                 guard let request = events.waitingForUser.last else {
+                    try checkCardsRecorded(events, store: store(of: target))
                     return events
                 }
                 // The answer isn't streamed back: keep it, like the iOS app does.

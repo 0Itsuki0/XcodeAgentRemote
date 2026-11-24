@@ -62,7 +62,7 @@ nonisolated extension ChatEvent.UserResponse {
 }
 
 /// What the cards need about a turn's tool uses that their events don't carry, by tool use id: the content of the file
-/// a tool use changes, its result when the user's answer is streamed instead, and whether it was denied (its result alone doesn't tell a denial from an error).
+/// a tool use changes, and whether it was denied (its result alone doesn't tell a denial from an error).
 /// Recorded by the provider while the turn runs (only it knows which of its tools change files, and what it denied);
 /// read when the turn's cards are built. Set and read only, never waited on: kept behind a lock.
 nonisolated final class ToolUseRecords: Sendable {
@@ -74,8 +74,6 @@ nonisolated final class ToolUseRecords: Sendable {
         var fileAfter: String?
         /// The user denied it, declined its questions or rejected its plan (or did not answer in time).
         var denied = false
-        /// Its result, when the events carry the user's answer instead (`ChatEvent.userResponse`).
-        var result: ChatEvent.ToolResult?
     }
 
     private struct State {
@@ -100,11 +98,6 @@ nonisolated final class ToolUseRecords: Sendable {
     /// Records that the tool use was denied.
     func setDenied(toolUseID: String) {
         state.withLock { $0.byToolUseID[toolUseID, default: Record()].denied = true }
-    }
-
-    /// Records the tool use's result the events don't carry (the user's answer is streamed instead).
-    func setResult(_ result: ChatEvent.ToolResult, toolUseID: String) {
-        state.withLock { $0.byToolUseID[toolUseID, default: Record()].result = result }
     }
 
     /// The earlier answer (`TurnRequest.repeatedAnswer`) was given to a repeat of its tool use in this turn.

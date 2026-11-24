@@ -44,6 +44,9 @@ nonisolated protocol AgentProvider: SendableMetatype {
     /// produced itself (it finished before the stop) stays. Returns whether there was one to remove.
     static func removeStoppedResult(of toolUseID: String, sessionID: String)
         throws -> Bool
+    /// Whether the tool use always waits for the user (a question, a plan, …), whatever the settings: it is shown as its
+    /// request (`ChatEvent.userRequest`), not as a tool use.
+    static func alwaysWaitsForUser(_ toolUse: ChatEvent.ToolUse) -> Bool
     /// Whether two tool uses are the same call (the same tool, with the same input that matters).
     static func isSameCall(
         _ toolUse: ChatEvent.ToolUse,

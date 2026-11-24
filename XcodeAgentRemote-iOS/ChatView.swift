@@ -194,7 +194,7 @@ struct ChatView: View {
 
     @ContentBuilder
     private func userMessage(_ text: String) -> some View {
-        Text(text)
+        Text(text.trimmed)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.all, cardPadding)
             .background(cardBackground)

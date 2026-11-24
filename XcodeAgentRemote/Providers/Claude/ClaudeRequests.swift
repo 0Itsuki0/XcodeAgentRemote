@@ -65,6 +65,11 @@ nonisolated extension ClaudeProvider {
         }
     }
 
+    /// A question (AskUserQuestion) or a plan (ExitPlanMode): always a request.
+    static func alwaysWaitsForUser(_ toolUse: ChatEvent.ToolUse) -> Bool {
+        if case .permission = requestKind(of: toolUse) { false } else { true }
+    }
+
     /// What a request about this tool use asks: questions (AskUserQuestion's input), a plan (ExitPlanMode's input),
     /// else permission for it.
     private static func requestKind(of toolUse: ChatEvent.ToolUse)
