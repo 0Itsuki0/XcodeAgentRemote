@@ -81,10 +81,15 @@ nonisolated enum CommandExecutor {
             self.input = input
             self.exit = exit
             outputLines = AsyncThrowingStream { continuation in
-                let task = Task {
-                    do {
-                        var line = Data()
-                        for try await byte in output.bytes {
+                // Read on a thread of its own, not with `FileHandle.bytes`: that reads every handle in the app on one
+                // shared serial queue, so a command that never writes (e.g. ngrok) blocks every other command's output.
+                // It ends when the command closes its output (it exited, or was terminated).
+                // `availableData` returns as soon as some output arrives (`read(upToCount:)` would wait for that
+                // many bytes or the end), and is empty at the end.
+                Thread {
+                    var line = Data()
+                    while case let data = output.availableData, !data.isEmpty {
+                        for byte in data {
                             if byte == UInt8(ascii: "\n") {
                                 continuation.yield(line)
                                 line.removeAll(keepingCapacity: true)
@@ -92,13 +97,10 @@ nonisolated enum CommandExecutor {
                                 line.append(byte)
                             }
                         }
-                        if !line.isEmpty { continuation.yield(line) }
-                        continuation.finish()
-                    } catch {
-                        continuation.finish(throwing: error)
                     }
-                }
-                continuation.onTermination = { _ in task.cancel() }
+                    if !line.isEmpty { continuation.yield(line) }
+                    continuation.finish()
+                }.start()
             }
         }
 

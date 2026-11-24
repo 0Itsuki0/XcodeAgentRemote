@@ -27,6 +27,23 @@
             return String(decoding: data, as: UTF8.self)
         }
 
+        /// A command that never writes (like ngrok) doesn't hold up another command's output, and a line arrives as soon
+        /// as it is written, while the command keeps running (like the agent waiting for its next input).
+        @Test(.timeLimit(.minutes(1))) func linesArriveWhileCommandsRun() async throws {
+            let silent = try CommandExecutor.runCommandStream(["sleep", "30"])
+            defer { silent.terminate() }
+            let talking = try CommandExecutor.runCommandStream(["sh", "-c", "echo hello; sleep 30"])
+            defer { talking.terminate() }
+            let start = Date()
+            var first: String?
+            for try await line in talking.outputLines {
+                first = String(decoding: line, as: UTF8.self)
+                break
+            }
+            #expect(first == "hello")
+            #expect(Date().timeIntervalSince(start) < 5, "the line came only when the command ended")
+        }
+
         @Test func commandsGetTheLoginShellPATH() {
             let path = CommandExecutor.runCommand(["sh", "-c", "printf '%s' \"$PATH\""])
             #expect(path == Self.loginShellPATH)

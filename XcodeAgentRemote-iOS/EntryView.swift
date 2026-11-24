@@ -13,7 +13,8 @@ struct EntryView: View {
     var scrollToEnd: () -> Void
     var focused: FocusState<Bool>.Binding
     @State private var selectedPermissionMode: PermissionMode = .auto
-    @State private var text: String = DebugConstants.planApprovalPrompt
+    @State private var text: String = "Hello"
+//    DebugConstants.planApprovalPrompt
 
     private let standardSpacing: CGFloat = UIConstants.standardSpacing
 

@@ -201,7 +201,6 @@ class APIServerManager {
     }
 
     func stopServer() {
-        print(#function, self.server)
         guard self.serverState == .running else { return }
         self.serverState = .stopping
         Task {

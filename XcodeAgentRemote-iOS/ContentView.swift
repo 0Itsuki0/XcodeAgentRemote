@@ -185,19 +185,6 @@ struct ConversationListView: View {
                     .fontWeight(.medium)
                 }
             }
-            //            /// Xcode's model identifier for the agent, e.g. "claude-code" (the chat's metadata).
-            //            var modelIdentifier: String?
-            //            /// The agent's own session id (`conversation.plist` → `assistantConfiguration`).
-            //            var providerSessionID: String?
-            //            /// The navigator group (folder) the chat is in, if any.
-            //            var group: String?
-            //            var isArchived: Bool
-            //            var isUnread: Bool
-            //            /// The line under the chat's name in Xcode's navigator, e.g. "Editing README.md".
-            //            var subtitle: String?
-            //            var startDate: Date?
-            //            var lastActivityDate: Date?
-
         }
         .contentMargins(.top, UIConstants.standardTopMargin)
         .navigationTitle("Conversations")
