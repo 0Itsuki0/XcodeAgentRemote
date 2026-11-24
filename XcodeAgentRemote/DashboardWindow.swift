@@ -96,11 +96,11 @@ struct APIServerView: View {
 
                     Button(serverManager.serverState.actionButtonLabel) {
                         switch serverManager.serverState {
-                        case .stopping, .running:
+                        case .stopping, .starting:
                             break
                         case .stopped:
                             serverManager.startServer()
-                        case .starting:
+                        case .running:
                             serverManager.stopServer()
                         }
                     }

@@ -5,16 +5,50 @@
 
 import Foundation
 
-/// Running commands (looked up in PATH, e.g. `git`, `xcrun`): to completion for their output (`runCommand`), or with
-/// their input and output connected for a back-and-forth over lines (`runCommandStream`).
+/// Running commands (looked up in the login shell's PATH, e.g. `git`, `xcrun`, `ngrok`): to completion for their output
+/// (`runCommand`), or with their input and output connected for a back-and-forth over lines (`runCommandStream`).
 nonisolated enum CommandExecutor {
 
-    /// Runs a command (looked up in PATH, e.g. `git`, `xcrun`) and returns its output,
+    /// The login shell's PATH (what a terminal has), read once. An app started from Finder, the Dock or Xcode gets only
+    /// launchd's default (`/usr/bin:/bin:/usr/sbin:/sbin`), without e.g. Homebrew's `/opt/homebrew/bin`.
+    /// nil if it could not be read: the app's own PATH is used.
+    private static let loginShellPATH: String? = {
+        let shell = getpwuid(getuid()).map { String(cString: $0.pointee.pw_shell) } ?? "/bin/zsh"
+        let process = Process()
+        process.executableURL = URL(filePath: shell)
+        process.arguments = ["-l", "-c", "printf '%s' \"$PATH\""]
+        let output = Pipe()
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        // A profile may print something before it: the PATH is the last line.
+        guard process.terminationStatus == 0,
+            let path = String(decoding: data, as: UTF8.self).split(separator: "\n").last, !path.isEmpty
+        else { return nil }
+        return String(path)
+    }()
+
+    /// The app's environment, with the login shell's PATH.
+    private static var environment: [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        if let loginShellPATH { environment["PATH"] = loginShellPATH }
+        return environment
+    }
+
+    /// Runs a command (looked up in the login shell's PATH, e.g. `git`, `xcrun`) and returns its output,
     /// or nil if it could not run or exited with a non-zero code.
     static func runCommand(_ arguments: [String], in directory: URL? = nil) -> String? {
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/env")
         process.arguments = arguments
+        process.environment = environment
         process.currentDirectoryURL = directory
         let output = Pipe()
         process.standardInput = FileHandle.nullDevice
@@ -88,15 +122,16 @@ nonisolated enum CommandExecutor {
         }
     }
 
-    /// Starts a command (looked up in PATH, e.g. `xcrun`) with its input and output connected, for a back-and-forth over
-    /// lines (`RunningCommand`). Its error output goes where the app's does. `onExit` runs once it exits.
-    /// Throws if it could not start.
+    /// Starts a command (looked up in the login shell's PATH, e.g. `xcrun`, `ngrok`) with its input and output connected,
+    /// for a back-and-forth over lines (`RunningCommand`). Its error output goes where the app's does. `onExit` runs once
+    /// it exits. Throws if it could not start.
     static func runCommandStream(
         _ arguments: [String], in directory: URL? = nil, onExit: @escaping @Sendable () -> Void = {}
     ) throws -> RunningCommand {
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/env")
         process.arguments = arguments
+        process.environment = environment
         process.currentDirectoryURL = directory
         let input = Pipe()
         let output = Pipe()

@@ -47,6 +47,28 @@ enum ServerState: String, Equatable, Hashable, Sendable {
 class APIServerManager {
     private let server: APIServer
 
+    var ngrokURL: String {
+        didSet {
+            UserDefaultsKey.ngrokURL.setValue(value: self.ngrokURL)
+        }
+    }
+
+    var startAPIServerOnAppLaunch: Bool {
+        didSet {
+            UserDefaultsKey.startAPIServerOnAppLaunch.setValue(
+                value: self.startAPIServerOnAppLaunch
+            )
+        }
+    }
+
+    var startNgrokTunnelOnServerStart: Bool {
+        didSet {
+            UserDefaultsKey.startNgrokTunnelOnServerStart.setValue(
+                value: self.startNgrokTunnelOnServerStart
+            )
+        }
+    }
+
     /// port to start the server on.
     /// Any changes will be applied on the next server.start.
     var port: Int {
@@ -80,8 +102,30 @@ class APIServerManager {
         }
     }
 
+    @ObservationIgnored
+    private var ngrokCommand: CommandExecutor.RunningCommand?
+
     init(chatWatcher: ChatWatcher) {
         self.server = APIServer(chatWatcher: chatWatcher)
+
+        #if DEBUG
+            UserDefaultsKey.ngrokURL.setValue(value: DebugConstants.ngrokURL)
+            UserDefaultsKey.startAPIServerOnAppLaunch.setValue(value: true)
+            UserDefaultsKey.startNgrokTunnelOnServerStart.setValue(value: true)
+        #endif
+
+        self.ngrokURL =
+            UserDefaultsKey.ngrokURL.getValue() as? String
+            ?? ""
+
+        self.startAPIServerOnAppLaunch =
+            UserDefaultsKey.startAPIServerOnAppLaunch.getValue() as? Bool
+            ?? false
+
+        self.startNgrokTunnelOnServerStart =
+            UserDefaultsKey.startNgrokTunnelOnServerStart.getValue() as? Bool
+            ?? false
+
         self.port =
             UserDefaultsKey.apiServerPort.getValue() as? Int
             ?? APIServerConstants.defaultPort
@@ -98,6 +142,33 @@ class APIServerManager {
             name: authHeaderName,
             value: authHeaderValue
         )
+
+        if self.startAPIServerOnAppLaunch {
+            self.startServer()
+        }
+    }
+
+    func startNgrokTunnel() {
+        guard self.ngrokCommand == nil else { return }
+
+        do {
+            self.ngrokCommand = try CommandExecutor.runCommandStream(
+                [
+                    "ngrok", "http", "\(port)", "--url", self.ngrokURL,
+                ],
+                onExit: { [weak self] in
+                    guard let self else { return }
+                    Task { await MainActor.run { self.ngrokCommand = nil } }
+                }
+            )
+        } catch {
+            self.error = error
+        }
+    }
+
+    func stopNgrokTunnel() {
+        guard let ngrokCommand else { return }
+        ngrokCommand.terminate()
     }
 
     func startServer() {
@@ -110,6 +181,10 @@ class APIServerManager {
                     authHeader: self.useAuth ? self.authHeader : nil
                 )
                 self.serverState = .running
+
+                if self.startNgrokTunnelOnServerStart {
+                    self.startNgrokTunnel()
+                }
             } catch {
                 self.serverState = .stopped
                 self.error = error
@@ -118,11 +193,13 @@ class APIServerManager {
     }
 
     func stopServer() {
+        print(#function, self.server)
         guard self.serverState == .running else { return }
         self.serverState = .stopping
         Task {
             await server.stop()
             self.serverState = .stopped
+            self.stopNgrokTunnel()
         }
     }
 }

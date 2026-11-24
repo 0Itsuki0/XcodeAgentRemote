@@ -35,13 +35,13 @@ nonisolated struct APIServerClient: Sendable {
     }
 
     static var saved: APIServerClient? {
-        #if DEBUG
-            let url =
-                UserDefaultsKey.apiServerURL.getValue() as? String
-                ?? "https://madison-vernal-unanecdotally.ngrok-free.dev"
-        #else
-            let url = UserDefaultsKey.apiServerURL.getValue() as? String ?? ""
+        #if DEBGU
+            UserDefaultsKey.apiServerURL.setValue(
+                value: DebugConstants.ngrokURL
+            )
         #endif
+
+        let url = UserDefaultsKey.apiServerURL.getValue() as? String ?? ""
 
         let useAuth =
             UserDefaultsKey.apiServerUseAuth.getValue() as? Bool ?? false

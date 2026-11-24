@@ -9,6 +9,9 @@
 
     import Foundation
     nonisolated enum DebugConstants {
+        
+        static let ngrokURL = "https://madison-vernal-unanecdotally.ngrok-free.dev"
+        
         static let conversationId: String =
             "1170A351-FBFE-4317-8FA7-4F65AC6F3B64"
         static let chatStore: String = "Demo10-edhhiszqgddxcwajapbakukmrdhy"

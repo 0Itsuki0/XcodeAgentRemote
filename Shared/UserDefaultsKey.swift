@@ -8,10 +8,16 @@
 import Foundation
 
 nonisolated enum UserDefaultsKey: String, CaseIterable {
+    case startAppOnSystemLaunch
+
     case apiServerPort
     case apiServerAuthHeaderName
     case apiServerAuthHeaderValue
     case apiServerUseAuth
+    case ngrokURL
+
+    case startAPIServerOnAppLaunch
+    case startNgrokTunnelOnServerStart
 
     case apiServerURL
 

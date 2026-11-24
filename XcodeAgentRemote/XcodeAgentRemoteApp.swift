@@ -14,6 +14,8 @@ struct XcodeAgentRemoteApp: App {
     private let apiServerManager: APIServerManager
     private let chatWatcher: ChatWatcher
 
+    @Environment(\.openWindow) private var openWindow
+
     init() {
         let chatWatcher = ChatWatcher()
         let apiServerManager = APIServerManager(chatWatcher: chatWatcher)
@@ -22,17 +24,17 @@ struct XcodeAgentRemoteApp: App {
     }
 
     var body: some Scene {
-        // TODO: comment out for testing purpose
-        // when ready, put it back in as well as setting `Application is agent (UIElement)` in info.plist back to false
-        //        MenuBarExtra {
-        //            AppMenu()
-        //        } label: {
-        //            Image(systemName: "cloud.fill")
-        //        }
-        //        .menuBarExtraStyle(.window)
-
+        MenuBarExtra {
+            AppMenu()
+        } label: {
+            Image(systemName: "cloud.fill")
+                .onAppear {
+                    self.openWindow(id: DashboardWindow.identifier)
+                }
+        }
+        .menuBarExtraStyle(.window)
+        
         Window("Dashboard", id: DashboardWindow.identifier) {
-            // ContentView()
             DashboardWindow()
                 .environment(apiServerManager)
                 .environment(chatWatcher)
