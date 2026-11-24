@@ -423,12 +423,6 @@ struct ChatView: View {
     }
 }
 
-extension String {
-    var trimmed: String {
-        return self.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
 extension ChatEvent.ToolUse {
     var jsonInput: String {
         var jsonInputs: [String] = []

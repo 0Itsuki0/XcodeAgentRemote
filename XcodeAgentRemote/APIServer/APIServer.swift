@@ -15,8 +15,6 @@ nonisolated private let logger = Logger.shared
 nonisolated private let category = Logger.category(#fileID)
 
 /// HTTP server (Hummingbird), listening on localhost only:
-/// `POST /messages` runs an agent that can use tools on this Mac, so it is not exposed to the network.
-///
 /// - `GET /health` → `{"status": "ok"}`
 /// - `GET /projects` → `[XcodeProject]` (`XcodeChat.listProjects`)
 /// - `GET /conversations/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChat.conversation`): the conversation, its

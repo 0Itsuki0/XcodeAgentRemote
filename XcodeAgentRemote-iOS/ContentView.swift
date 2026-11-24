@@ -101,7 +101,9 @@ struct ProjectListView: View {
 
     @ContentBuilder
     private var projectList: some View {
-        let projects = projectViewModel.projects
+        let projects = projectViewModel.projects.filter {
+            $0.projectFile != nil
+        }
         List {
             ForEach(projects) { project in
                 NavigationLink {

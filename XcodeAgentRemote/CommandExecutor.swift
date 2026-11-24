@@ -13,7 +13,9 @@ nonisolated enum CommandExecutor {
     /// launchd's default (`/usr/bin:/bin:/usr/sbin:/sbin`), without e.g. Homebrew's `/opt/homebrew/bin`.
     /// nil if it could not be read: the app's own PATH is used.
     private static let loginShellPATH: String? = {
-        let shell = getpwuid(getuid()).map { String(cString: $0.pointee.pw_shell) } ?? "/bin/zsh"
+        let shell =
+            getpwuid(getuid()).map { String(cString: $0.pointee.pw_shell) }
+            ?? "/bin/zsh"
         let process = Process()
         process.executableURL = URL(filePath: shell)
         process.arguments = ["-l", "-c", "printf '%s' \"$PATH\""]
@@ -30,7 +32,9 @@ nonisolated enum CommandExecutor {
         process.waitUntilExit()
         // A profile may print something before it: the PATH is the last line.
         guard process.terminationStatus == 0,
-            let path = String(decoding: data, as: UTF8.self).split(separator: "\n").last, !path.isEmpty
+            let path = String(decoding: data, as: UTF8.self).split(
+                separator: "\n"
+            ).last, !path.isEmpty
         else { return nil }
         return String(path)
     }()
@@ -44,7 +48,9 @@ nonisolated enum CommandExecutor {
 
     /// Runs a command (looked up in the login shell's PATH, e.g. `git`, `xcrun`) and returns its output,
     /// or nil if it could not run or exited with a non-zero code.
-    static func runCommand(_ arguments: [String], in directory: URL? = nil) -> String? {
+    static func runCommand(_ arguments: [String], in directory: URL? = nil)
+        -> String?
+    {
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/env")
         process.arguments = arguments
@@ -62,7 +68,8 @@ nonisolated enum CommandExecutor {
         // Read before waiting: a large output (e.g. `git diff`) would otherwise fill the pipe and block the command.
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return process.terminationStatus == 0 ? String(decoding: data, as: UTF8.self) : nil
+        return process.terminationStatus == 0
+            ? String(decoding: data, as: UTF8.self) : nil
     }
 
     // MARK: - A command with its input and output connected
@@ -76,16 +83,25 @@ nonisolated enum CommandExecutor {
         /// Split on "\n" only, not on other line separators (U+2028 can be inside a JSON string).
         let outputLines: AsyncThrowingStream<Data, Error>
 
-        fileprivate init(process: Process, input: FileHandle, output: FileHandle, exit: AsyncStream<Void>) {
+        fileprivate init(
+            process: Process,
+            input: FileHandle,
+            output: FileHandle,
+            exit: AsyncStream<Void>
+        ) {
             self.process = process
             self.input = input
             self.exit = exit
             outputLines = AsyncThrowingStream { continuation in
-                // Read on a thread of its own, not with `FileHandle.bytes`: that reads every handle in the app on one
-                // shared serial queue, so a command that never writes (e.g. ngrok) blocks every other command's output.
-                // It ends when the command closes its output (it exited, or was terminated).
-                // `availableData` returns as soon as some output arrives (`read(upToCount:)` would wait for that
-                // many bytes or the end), and is empty at the end.
+                /// Read on a thread of its own, not with `FileHandle.bytes`
+                /// Reason:
+                /// `FileHandle.bytes` reads every handle in the app on one shared serial queue,
+                /// so a command that never writes (e.g. ngrok) blocks every other command's output.
+                ///
+                /// It ends when the command closes its output (it exited, or was terminated).
+                ///
+                /// `availableData` returns as soon as some output arrives
+                /// (whereas `read(upToCount:)` would wait for that many bytes or the end), and is empty at the end.
                 Thread {
                     var line = Data()
                     while case let data = output.availableData, !data.isEmpty {
@@ -126,11 +142,23 @@ nonisolated enum CommandExecutor {
         }
     }
 
+    /// A command started by `runCommandStream` exited with a non-zero code.
+    struct CommandFailedError: LocalizedError {
+        let status: Int32
+
+        var errorDescription: String? {
+            "Process exited with code \(status)."
+        }
+    }
+
     /// Starts a command (looked up in the login shell's PATH, e.g. `xcrun`, `ngrok`) with its input and output connected,
     /// for a back-and-forth over lines (`RunningCommand`). Its error output goes where the app's does. `onExit` runs once
-    /// it exits. Throws if it could not start.
+    /// it exits: with a `CommandFailedError` if it exited with a non-zero code, nil otherwise (also when it was
+    /// terminated). Throws if it could not start.
     static func runCommandStream(
-        _ arguments: [String], in directory: URL? = nil, onExit: @escaping @Sendable () -> Void = {}
+        _ arguments: [String],
+        in directory: URL? = nil,
+        onExit: @escaping @Sendable (Error?) -> Void = { _ in }
     ) throws -> RunningCommand {
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/env")
@@ -142,14 +170,25 @@ nonisolated enum CommandExecutor {
         process.standardInput = input
         process.standardOutput = output
         let (exit, exitContinuation) = AsyncStream<Void>.makeStream()
-        process.terminationHandler = { _ in
-            onExit()
+        process.terminationHandler = { process in
+            let failed =
+                process.terminationReason == .exit
+                && process.terminationStatus != 0
+            onExit(
+                failed
+                    ? CommandFailedError(status: process.terminationStatus)
+                    : nil
+            )
             exitContinuation.finish()
         }
         // Writing after the command exited fails instead of killing the app with SIGPIPE.
         _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         try process.run()
         return RunningCommand(
-            process: process, input: input.fileHandleForWriting, output: output.fileHandleForReading, exit: exit)
+            process: process,
+            input: input.fileHandleForWriting,
+            output: output.fileHandleForReading,
+            exit: exit
+        )
     }
 }

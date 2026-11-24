@@ -16,6 +16,13 @@ nonisolated private let category = Logger.category(#fileID)
 class AppDelegate: NSObject {
     let iCloudManager = ICloudManager()
 
+    private var observationToken: NotificationCenter.ObservationToken?
+
+    private var selectedConversationId: String?
+    
+    /// a list of conversation id delivered but has not opened yet.
+    private var unreadNotifications: [String] = []
+
     /// perform set ups
     private func setupAppOnLaunch() {
 
@@ -24,6 +31,14 @@ class AppDelegate: NSObject {
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().setBadgeCount(0)
         requestNotificationPermission()
+
+        self.observationToken = NotificationCenter.default.addObserver(
+            of: Never.self,
+            for: .selectedConversationDidChange
+        ) { [weak self] message in
+            guard let self else { return }
+            self.selectedConversationId = message.conversation?.conversationId
+        }
     }
 
     private func didRegisterForRemoteNotificationsWithDeviceToken(

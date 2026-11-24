@@ -95,16 +95,24 @@ class APIServerManager {
     }
 
     private(set) var serverState: ServerState = .stopped
-    var error: Error? {
+    var serverError: Error? {
         didSet {
-            guard let error else { return }
-            logger.error(category: category, error: error)
+            guard let serverError else { return }
+            logger.error(category: category, error: serverError)
         }
     }
 
-    @ObservationIgnored
+    var ngrokRunning: Bool {
+        return ngrokCommand != nil
+    }
     private var ngrokCommand: CommandExecutor.RunningCommand?
-    
+    var ngrokError: Error? {
+        didSet {
+            guard let ngrokError else { return }
+            logger.error(category: category, error: ngrokError)
+        }
+    }
+
     @ObservationIgnored
     private var observationToken: NotificationCenter.ObservationToken?
 
@@ -172,15 +180,29 @@ class APIServerManager {
     /// Stops the ngrok an earlier run of the app started and left running (the app was killed before it could stop
     /// it): it keeps the tunnel's URL, so this run's ngrok couldn't start.
     private static func stopLeftoverNgrok() {
-        guard let pid = UserDefaultsKey.ngrokProcessID.getValue() as? Int else { return }
+        guard let pid = UserDefaultsKey.ngrokProcessID.getValue() as? Int else {
+            return
+        }
         UserDefaultsKey.ngrokProcessID.setValue(value: nil)
         // Only if that pid is still an ngrok (the pid may belong to another process by now).
-        let command = CommandExecutor.runCommand(["ps", "-o", "comm=", "-p", "\(pid)"])?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = CommandExecutor.runCommand([
+            "ps", "-o", "comm=", "-p", "\(pid)",
+        ])?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
         guard command?.hasSuffix("ngrok") == true else { return }
         kill(pid_t(pid), SIGTERM)
     }
 
+    // TODO: - consider adding additional arguments to route error to stdout
+    //    itsuki@MacBook-Pro ~ %  ngrok http 8000 --url https://madison-vernal-unanecdotally.ngrok-free.dev --log stdout --log-level crit
+    //    t=2026-11-24T16:02:05+0900 lvl=crit msg="command failed" err="failed to start tunnel: The endpoint 'https://madison-vernal-unanecdotally.ngrok-free.dev' is already online. Either\n1. stop your existing endpoint first, or\n2. start both endpoints with `--pooling-enabled` to load balance between them.\r\n\r\nERR_NGROK_334\r\n"
+    //    ERROR:  failed to start tunnel: The endpoint 'https://madison-vernal-unanecdotally.ngrok-free.dev' is already online. Either
+    //    ERROR:  1. stop your existing endpoint first, or
+    //    ERROR:  2. start both endpoints with `--pooling-enabled` to load balance between them.
+    //    ERROR:
+    //    ERROR:  ERR_NGROK_334
+    //    ERROR:  https://ngrok.com/docs/errors/err_ngrok_334
+    //    ERROR:
     func startNgrokTunnel() {
         guard self.ngrokCommand == nil else { return }
 
@@ -189,31 +211,39 @@ class APIServerManager {
                 [
                     "ngrok", "http", "\(port)", "--url", self.ngrokURL,
                 ],
-                onExit: { [weak self] in
+                onExit: { [weak self] error in
                     guard let self else { return }
                     Task {
                         await MainActor.run {
-                            // It exited: nothing to stop on the next launch.
-                            if let pid = self.ngrokCommand?.processIdentifier,
-                                UserDefaultsKey.ngrokProcessID.getValue() as? Int == Int(pid)
-                            {
-                                UserDefaultsKey.ngrokProcessID.setValue(value: nil)
+                            if let error {
+                                self.ngrokError = error
                             }
-                            self.ngrokCommand = nil
+                            self.stopNgrokTunnel()
                         }
                     }
                 }
             )
             self.ngrokCommand = command
-            UserDefaultsKey.ngrokProcessID.setValue(value: Int(command.processIdentifier))
+            UserDefaultsKey.ngrokProcessID.setValue(
+                value: Int(command.processIdentifier)
+            )
         } catch {
-            self.error = error
+            self.ngrokError = error
         }
     }
 
     func stopNgrokTunnel() {
-        guard let ngrokCommand else { return }
-        ngrokCommand.terminate()
+        /// Process exited: nothing to stop on the next launch.
+        if let pid = self.ngrokCommand?.processIdentifier,
+            UserDefaultsKey.ngrokProcessID.getValue()
+                as? Int == Int(pid)
+        {
+            UserDefaultsKey.ngrokProcessID.setValue(
+                value: nil
+            )
+        }
+        ngrokCommand?.terminate()
+        self.ngrokCommand = nil
     }
 
     func startServer() {
@@ -232,7 +262,7 @@ class APIServerManager {
                 }
             } catch {
                 self.serverState = .stopped
-                self.error = error
+                self.serverError = error
             }
         }
     }

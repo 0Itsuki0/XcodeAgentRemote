@@ -101,12 +101,15 @@ nonisolated extension ClaudeProvider {
         // The request the turn waits on: if the agent exits meanwhile (e.g. it is killed), nothing will come of it,
         // so the wait ends right away (the request is left waiting in the transcript, still answerable).
         let waitingOn = WaitingToolUse()
+        // Why the agent exited, if it failed (a non-zero code): thrown to the client once it exited.
+        let exitError = ExitError()
         let sessionID = request.sessionID
         // The session is in `RunningSessions` for the whole turn (`XcodeChat.runTurn`).
         let agentProcess = try CommandExecutor.runCommandStream(
             ["xcrun"] + launchArguments(sessionID: sessionID, resume: request.resume, permissionMode: request.permissionMode),
             in: request.workingDirectory
-        ) {
+        ) { error in
+            exitError.set(error)
             if let toolUseID = waitingOn.toolUseID {
                 Task { await PendingUserRequestHandler.shared.unregister(toolUseID) }
             }
@@ -237,6 +240,7 @@ nonisolated extension ClaudeProvider {
             await agentProcess.waitUntilExit()
             try Task.checkCancellation()
             if let agentError { throw XcodeChatError.agentFailed(message: agentError) }
+            if let error = exitError.error { throw XcodeChatError.agentFailed(message: error.localizedDescription) }
         } onCancel: {
             agentProcess.terminate()
         }
@@ -328,6 +332,13 @@ nonisolated extension ClaudeProvider {
         private let id = Mutex<String?>(nil)
         var toolUseID: String? { id.withLock { $0 } }
         func set(_ toolUseID: String?) { id.withLock { $0 = toolUseID } }
+    }
+
+    /// Set by the agent process's `onExit` (on another thread), read once it exited.
+    private final class ExitError: Sendable {
+        private let value = Mutex<(any Error)?>(nil)
+        var error: (any Error)? { value.withLock { $0 } }
+        func set(_ error: (any Error)?) { value.withLock { $0 = error } }
     }
 
     /// `{}`: a hook's output with no decision.

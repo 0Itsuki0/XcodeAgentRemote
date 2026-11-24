@@ -19,6 +19,15 @@ enum DashboardOption: String, Hashable, CaseIterable {
             "Chat Watcher"
         }
     }
+
+    var navigationTitle: String {
+        switch self {
+        case .server:
+            "API Server Setting"
+        case .watcher:
+            "Chat Watcher"
+        }
+    }
 }
 
 struct DashboardWindow: View {
@@ -38,7 +47,7 @@ struct DashboardWindow: View {
         } detail: {
             switch selection {
             case .server:
-                APIServerView()
+                ServerSettingView()
             case .watcher:
                 ChatWatcherConfigurationView()
             }
@@ -69,9 +78,8 @@ struct ChatWatcherConfigurationView: View {
     }
 }
 
-
 // TODO: add auto ngrok. Force kill app may not stop ngrok correctly. run `killall ngrok` if needed.
-struct APIServerView: View {
+struct ServerSettingView: View {
     @Environment(APIServerManager.self) private var serverManager
 
     private let middleStates = [ServerState.starting, .stopping]
@@ -84,89 +92,208 @@ struct APIServerView: View {
 
     var body: some View {
         @Bindable var serverManager = serverManager
+        Form {
+            Section {
+                TextField(
+                    "Port",
+                    value: $serverManager.port,
+                    format: portFormatStyle
+                )
 
-        VStack {
-            VStack(alignment: .leading) {
-                HStack {
-                    self.symbol
+                // TODO: - add auth configuration
 
-                    Text(serverManager.serverState.displayLabel)
+                Toggle(
+                    "Start on app launch",
+                    isOn: $serverManager.startAPIServerOnAppLaunch
+                )
+            } header: {
+                VStack(alignment: .leading) {
+                    Text("App Server")
+                        .font(.headline)
                         .foregroundStyle(.secondary)
 
-                    Spacer().frame(width: 8)
+                    HStack {
+                        self.symbol
 
-                    Button(serverManager.serverState.actionButtonLabel) {
-                        switch serverManager.serverState {
-                        case .stopping, .starting:
-                            break
-                        case .stopped:
-                            serverManager.startServer()
-                        case .running:
-                            serverManager.stopServer()
+                        Text(serverManager.serverState.displayLabel)
+                            .foregroundStyle(.secondary)
+
+                        Spacer().frame(width: 8)
+
+                        Button(serverManager.serverState.actionButtonLabel) {
+                            switch serverManager.serverState {
+                            case .stopping, .starting:
+                                break
+                            case .stopped:
+                                serverManager.startServer()
+                            case .running:
+                                serverManager.stopServer()
+                            }
                         }
+                        .buttonStyle(.link)
+                        .disabled(self.isMiddleState)
                     }
-                    .buttonStyle(.link)
-                    .disabled(self.isMiddleState)
-                }
-                .font(.subheadline)
+                    .font(.subheadline)
 
-                if serverManager.serverState == .running {
-                    let formattedPort = serverManager.port.formatted(
-                        portFormatStyle
-                    )
-
-                    Text(
-                        """
-                        Server listening on `127.0.0.1:\(formattedPort)`
-                        Recommend to start a tunnel with `ngrok` to connect from iOS. 
-                        ex: `ngrok http \(formattedPort) --url https://<YOUR_DEV_DOMAIN>`
-                        [Static dev domains is supported for all users for free](https://ngrok.com/blog/free-static-domains-ngrok-users)
-                        """
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Form {
-                Section {
-                    TextField(
-                        "Port",
-                        value: $serverManager.port,
-                        format: portFormatStyle
-                    )
-
-                    // TODO: - add auth configuration
-                } footer: {
-                    Text("Restart the server to apply any changes.")
+                    Text(explanationText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+
+                    InlineErrorView(
+                        error: $serverManager.serverError,
+                        autoDisappear: .seconds(3)
+                    ).padding(.top, 1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            } footer: {
+                Text("Restart the server to apply any changes.")
+                    .font(.caption)
             }
-            .contentMargins(.top, -12)
-            .formStyle(.grouped)
-            .scrollBounceBehavior(.basedOnSize)
-            .frame(
-                maxWidth: .infinity,
-                maxHeight: .infinity,
-                alignment: .topLeading
-            )
+
+            NgrokSettingSection()
         }
-        .navigationTitle(DashboardOption.server.label)
+        .contentMargins(.top, 0)
+        .formStyle(.grouped)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: .topLeading
+        )
+        .navigationTitle(DashboardOption.server.navigationTitle)
 
     }
 
     @ContentBuilder
     private var symbol: some View {
-        Image(systemName: "circle.fill")
+        StateSymbol()
             .foregroundStyle(serverManager.serverState.symbolColor)
             .symbolEffect(
                 .pulse,
                 isActive: isMiddleState
             )
+    }
+
+    private var explanationText: LocalizedStringKey {
+        let formattedPort = serverManager.port.formatted(
+            portFormatStyle
+        )
+
+        if serverManager.serverState == .running {
+            return """
+                Server listening on `127.0.0.1:\(formattedPort)`.
+                """
+        } else {
+            return """
+                Start a server listening on `127.0.0.1:\(formattedPort)`
+                to expose necessary endpoints to the iOS app.
+                """
+        }
+    }
+}
+
+struct InlineErrorView: View {
+    @Binding var error: Error?
+    let autoDisappear: Duration?
+    var body: some View {
+        if let error {
+            Text(error.localizedDescription)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .task {
+                    if let autoDisappear {
+                        try? await Task.sleep(for: autoDisappear)
+                        self.error = nil
+                    }
+                }
+        }
+    }
+}
+
+struct StateSymbol: View {
+    var body: some View {
+        Image(systemName: "circle.fill")
+            .font(.system(size: 8))
+    }
+}
+
+struct NgrokSettingSection: View {
+    @Environment(APIServerManager.self) private var serverManager
+    private var running: Bool {
+        serverManager.ngrokRunning
+    }
+    var body: some View {
+        @Bindable var serverManager = serverManager
+        Section {
+            TextField(
+                "URL",
+                text: $serverManager.ngrokURL,
+            )
+
+            Toggle(
+                "Start on server start",
+                isOn: $serverManager.startNgrokTunnelOnServerStart
+            )
+        } header: {
+            VStack(alignment: .leading) {
+                Text("Ngrok Tunnel")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    StateSymbol()
+                        .foregroundStyle(running ? .green : .red)
+
+                    Text(running ? "Tunneling" : "Stopped")
+                        .foregroundStyle(.secondary)
+
+                    Spacer().frame(width: 8)
+
+                    Button(running ? "Stop" : "Start") {
+                        running
+                            ? serverManager.stopNgrokTunnel()
+                            : serverManager.startNgrokTunnel()
+                    }
+                    .buttonStyle(.link)
+                }
+                .font(.subheadline)
+
+                Text(explanationText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                InlineErrorView(
+                    error: $serverManager.ngrokError,
+                    autoDisappear: .seconds(3)
+                ).padding(.top, 1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        } footer: {
+            Text("Restart the tunnel to apply any changes.")
+                .font(.caption)
+        }
+
+    }
+
+    private var explanationText: LocalizedStringKey {
+        if running {
+            return """
+                Tunneling listening on `\(serverManager.ngrokURL)`.
+                If app exits unexpectedly, `ngrok` might not be stopped correctly. 
+                Run `killall ngrok` if needed.
+                """
+        } else {
+            return """
+                Start a tunnel with `ngrok` for connection from iOS using `https`. 
+                [Static dev domains is supported for all users for free](https://ngrok.com/blog/free-static-domains-ngrok-users)
+                """
+        }
     }
 }
