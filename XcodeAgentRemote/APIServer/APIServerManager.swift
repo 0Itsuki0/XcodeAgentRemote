@@ -151,24 +151,59 @@ class APIServerManager {
             value: authHeaderValue
         )
 
+        // A process the app started isn't stopped with it: stop ngrok when the app quits. (Killed instead, e.g. stopped
+        // from Xcode, the app runs no code: the next launch stops that ngrok, `stopLeftoverNgrok`.)
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.ngrokCommand?.terminate() }
+        }
+        Self.stopLeftoverNgrok()
+
         if self.startAPIServerOnAppLaunch {
             self.startServer()
         }
+    }
+
+    /// Stops the ngrok an earlier run of the app started and left running (the app was killed before it could stop
+    /// it): it keeps the tunnel's URL, so this run's ngrok couldn't start.
+    private static func stopLeftoverNgrok() {
+        guard let pid = UserDefaultsKey.ngrokProcessID.getValue() as? Int else { return }
+        UserDefaultsKey.ngrokProcessID.setValue(value: nil)
+        // Only if that pid is still an ngrok (the pid may belong to another process by now).
+        let command = CommandExecutor.runCommand(["ps", "-o", "comm=", "-p", "\(pid)"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard command?.hasSuffix("ngrok") == true else { return }
+        kill(pid_t(pid), SIGTERM)
     }
 
     func startNgrokTunnel() {
         guard self.ngrokCommand == nil else { return }
 
         do {
-            self.ngrokCommand = try CommandExecutor.runCommandStream(
+            let command = try CommandExecutor.runCommandStream(
                 [
                     "ngrok", "http", "\(port)", "--url", self.ngrokURL,
                 ],
                 onExit: { [weak self] in
                     guard let self else { return }
-                    Task { await MainActor.run { self.ngrokCommand = nil } }
+                    Task {
+                        await MainActor.run {
+                            // It exited: nothing to stop on the next launch.
+                            if let pid = self.ngrokCommand?.processIdentifier,
+                                UserDefaultsKey.ngrokProcessID.getValue() as? Int == Int(pid)
+                            {
+                                UserDefaultsKey.ngrokProcessID.setValue(value: nil)
+                            }
+                            self.ngrokCommand = nil
+                        }
+                    }
                 }
             )
+            self.ngrokCommand = command
+            UserDefaultsKey.ngrokProcessID.setValue(value: Int(command.processIdentifier))
         } catch {
             self.error = error
         }

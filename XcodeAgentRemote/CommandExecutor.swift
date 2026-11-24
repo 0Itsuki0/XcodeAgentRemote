@@ -118,6 +118,8 @@ nonisolated enum CommandExecutor {
             process.terminate()
         }
 
+        var processIdentifier: Int32 { process.processIdentifier }
+
         /// Returns once it exited.
         func waitUntilExit() async {
             for await _ in exit {}
