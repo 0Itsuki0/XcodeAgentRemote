@@ -3,7 +3,7 @@
 //  XcodeAgentRemoteTests
 //
 //  Runs sendMessage against the real agent.
-//  These send real turns to an existing chat of this project (they are recorded in Xcode's chat store).
+//  These send real turns to an existing chat of the Demo10 project (they are recorded in Xcode's chat store).
 //
 
 #if os(macOS)
@@ -14,11 +14,10 @@ import Testing
 @Suite(.serialized)
 struct SendMessageTests {
 
-    static let project = URL(filePath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .appending(path: "XcodeAgentRemote.xcodeproj")
-    /// The "Echo user message" chat of this project.
-    static let conversationID = "D868CB20-1251-4ECC-9047-041C449419CB"
+    /// The Demo10 project (the one `ScenarioTests` uses).
+    static let project = ScenarioTests.project
+    /// A chat of the Demo10 project (`DebugConstants.conversationId`).
+    static let conversationID = "1170A351-FBFE-4317-8FA7-4F65AC6F3B64"
 
     static func events(_ prompt: String, to target: MessageTarget,
                        permissionModeOverride: PermissionMode? = nil) async throws -> [ChatEvent] {

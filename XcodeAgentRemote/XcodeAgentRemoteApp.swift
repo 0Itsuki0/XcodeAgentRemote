@@ -18,7 +18,11 @@ struct XcodeAgentRemoteApp: App {
 
     init() {
         let chatWatcher = ChatWatcher()
-        let apiServerManager = APIServerManager(chatWatcher: chatWatcher)
+        let apiServerManager = APIServerManager(
+            watchingConversations: { chatWatcher.watchingConversationIds },
+            watchConversation: chatWatcher.watchConversation,
+            stopWatchingConversation: chatWatcher.stopWatchingConversation
+        )
         self.chatWatcher = chatWatcher
         self.apiServerManager = apiServerManager
     }
@@ -33,7 +37,7 @@ struct XcodeAgentRemoteApp: App {
                 }
         }
         .menuBarExtraStyle(.window)
-        
+
         Window("Dashboard", id: DashboardWindow.identifier) {
             DashboardWindow()
                 .environment(apiServerManager)
@@ -55,15 +59,9 @@ struct AppMenu: View {
 
             Divider()
 
-            //            Button(
-            //                action: {
-            //                    NSApplication.shared.terminate(nil)
-            //                },
-            //                label: {
-            //                    Label(String(localized: "Quit", table: localizationTable), systemImage: "power")
-            //                }
-            //            )
-
+            menuButton("Quit", systemImage: "power") {
+                NSApplication.shared.terminate(nil)
+            }
         }
         .buttonStyle(.plain)
         .padding(.vertical, 12)

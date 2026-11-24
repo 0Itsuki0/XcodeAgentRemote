@@ -3,7 +3,7 @@
 //  XcodeAgentRemoteTests
 //
 //  ChatWatcher, and the server's `POST /conversations/:conversationID/watch` and `isWatching`, against a real chat of
-//  this project (nothing is written to it).
+//  the Demo10 project (nothing is written to it).
 //
 
 #if os(macOS)
@@ -11,8 +11,8 @@
     import Testing
     @testable import XcodeAgentRemote
 
-    /// The "Echo user message" chat of this project.
-    private let conversationID = "D868CB20-1251-4ECC-9047-041C449419CB"
+    /// A chat of the Demo10 project (`DebugConstants.conversationId`).
+    private let conversationID = "1170A351-FBFE-4317-8FA7-4F65AC6F3B64"
     private let unknownID = "00000000-0000-0000-0000-000000000000"
 
     @Suite(.serialized)
@@ -51,7 +51,11 @@
 
         @Test func watchAndUnwatch() async throws {
             let watcher = ChatWatcher()
-            let server = APIServer(chatWatcher: watcher)
+            let server = APIServer(
+                watchingConversations: { watcher.watchingConversationIds },
+                watchConversation: watcher.watchConversation,
+                stopWatchingConversation: watcher.stopWatchingConversation
+            )
             let port = try await server.start(port: 0)
             let base = URL(string: "http://127.0.0.1:\(port)")!
 

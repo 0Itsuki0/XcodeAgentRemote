@@ -22,7 +22,7 @@ nonisolated private let category = Logger.category(#fileID)
 /// - `GET /conversations/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChat.conversation`): the conversation, its
 ///   history and its project; 404 no such chat, 501 not implemented
 /// - `POST /conversations/<Xcode chat UUID>/watch` with `WatchRequest` (`{"watch": true}` / `{"watch": false}`) →
-///   `{"status": "ok"}` once the Mac started (or stopped) watching the conversation's session (`ChatWatcher`); 404 no
+///   `{"status": "ok"}` once the Mac started (or stopped) watching the conversation's session (`watchConversation`); 404 no
 ///   such chat or its transcript is missing, 501 not implemented. Listed conversations carry `isWatching`.
 /// - `POST /messages` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
 ///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
@@ -56,11 +56,21 @@ actor APIServer {
     /// On stop, how long open requests (e.g. a turn's stream) may take before they are closed.
     private static let maximumShutdownDuration: Duration = .seconds(2)
 
-    /// Watches conversations for `POST /conversations/<id>/watch`, and tells which are watched (`isWatching`).
-    private let chatWatcher: ChatWatcher
+    /// The ids of the watched conversations (`isWatching`).
+    private let watchingConversations: @Sendable () -> [String]
+    /// Starts watching a conversation (`POST /conversations/<id>/watch`); throws if it can't.
+    private let watchConversation: @Sendable (String) async throws -> Void
+    /// Stops watching a conversation.
+    private let stopWatchingConversation: @Sendable (String) async -> Void
 
-    init(chatWatcher: ChatWatcher) {
-        self.chatWatcher = chatWatcher
+    init(
+        watchingConversations: @Sendable @escaping () -> [String],
+        watchConversation: @Sendable @escaping (String) async throws -> Void,
+        stopWatchingConversation: @Sendable @escaping (String) async -> Void
+    ) {
+        self.watchingConversations = watchingConversations
+        self.watchConversation = watchConversation
+        self.stopWatchingConversation = stopWatchingConversation
     }
 
     // MARK: - Start server
@@ -86,7 +96,9 @@ actor APIServer {
         let app = Application(
             router: Self.router(
                 authHeader: authHeader,
-                chatWatcher: chatWatcher
+                watchingConversations: watchingConversations,
+                watchConversation: watchConversation,
+                stopWatchingConversation: stopWatchingConversation
             ),
             configuration: .init(address: .hostname("127.0.0.1", port: port)),
             onServerRunning: { channel in
@@ -150,7 +162,9 @@ actor APIServer {
 
     private static func router(
         authHeader: AuthHeader?,
-        chatWatcher: ChatWatcher
+        watchingConversations: @Sendable @escaping () -> [String],
+        watchConversation: @Sendable @escaping (String) async throws -> Void,
+        stopWatchingConversation: @Sendable @escaping (String) async -> Void
     ) -> Router<BasicRequestContext> {
         let router = Router()
 
@@ -172,7 +186,7 @@ actor APIServer {
                 category: category,
                 message: "GET /\(APIServerConstants.projectsPath)"
             )
-            let watching = chatWatcher.watchingConversationIds
+            let watching = watchingConversations()
             return ChatStore.listProjects().map { project in
                 var project = project
                 project.conversations = project.conversations.map {
@@ -204,7 +218,7 @@ actor APIServer {
                 )
                 conversation.isWatching = isWatching(
                     conversation.id,
-                    in: chatWatcher.watchingConversationIds
+                    in: watchingConversations()
                 )
                 return conversation
             } catch let error as ChatStoreError {
@@ -235,11 +249,11 @@ actor APIServer {
                 context: context
             )
             guard body.watch else {
-                await chatWatcher.stopWatchingConversation(conversationID)
+                await stopWatchingConversation(conversationID)
                 return SuccessResponse()
             }
             do {
-                try await chatWatcher.watchConversation(conversationID)
+                try await watchConversation(conversationID)
             } catch let error as ChatStoreError {
                 throw httpError(error)
             } catch let error as FileWatcherError {

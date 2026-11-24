@@ -105,8 +105,16 @@ class APIServerManager {
     @ObservationIgnored
     private var ngrokCommand: CommandExecutor.RunningCommand?
 
-    init(chatWatcher: ChatWatcher) {
-        self.server = APIServer(chatWatcher: chatWatcher)
+    init(
+        watchingConversations: @Sendable @escaping () -> [String],
+        watchConversation: @Sendable @escaping (String) async throws -> Void,
+        stopWatchingConversation: @Sendable @escaping (String) async -> Void
+    ) {
+        self.server = APIServer(
+            watchingConversations: watchingConversations,
+            watchConversation: watchConversation,
+            stopWatchingConversation: stopWatchingConversation
+        )
 
         #if DEBUG
             UserDefaultsKey.ngrokURL.setValue(value: DebugConstants.ngrokURL)
