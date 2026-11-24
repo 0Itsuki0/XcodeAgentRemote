@@ -169,6 +169,11 @@ nonisolated extension ClaudeProvider {
                                 request.records.setRepeatedEarlierToolUse()
                                 continue
                             }
+                            // A question or a plan always waits for the user: streamed as its request (when the agent
+                            // asks), not as a tool use.
+                            if userRequest(for: toolUse, decidedByUser: nil, isLastMessage: false) != nil {
+                                continue
+                            }
                             continuation.yield(.toolUse(toolUse))
                         default:
                             break
@@ -225,8 +230,8 @@ nonisolated extension ClaudeProvider {
                         }
                         if let answer {
                             PendingToolUses.remove(toolUseID, agent: agent)
+                            // Not streamed: the caller sent it.
                             answers[toolUseID] = answer
-                            continuation.yield(.userResponse(answer))
                         }
                         let decision = permissionDecision(for: permissionRequest, answer: answer, timeout: request.permissionTimeout)
                         if decision.behavior == "deny" {

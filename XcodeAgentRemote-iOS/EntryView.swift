@@ -13,17 +13,13 @@ struct EntryView: View {
     var scrollToEnd: () -> Void
     var focused: FocusState<Bool>.Binding
     @State private var selectedPermissionMode: PermissionMode = .auto
-    // TODO: - confirm server call
-    @State private var text: String = DebugConstants.questionsPrompt
+    @State private var text: String = DebugConstants.planApprovalPrompt
 
     private let standardSpacing: CGFloat = UIConstants.standardSpacing
 
     var body: some View {
         Group {
             if let userRequest = chatViewModel.pendingUserRequest.last {
-                //            if let userRequest = DebugConstants.questionsRequest
-                //                as? ChatEvent.UserRequest
-                //            {
                 switch userRequest {
                 case .permission(let toolUse):
                     ApprovalView(

@@ -233,8 +233,8 @@ nonisolated struct APIServerClient: Sendable {
 
     /// `POST /messages` (`.answer`): answers the request the turn waits for (`waitingForUser`), and continues the
     /// turn's stream from where the previous one (`sendMessage`, or the previous `answer`) ended: until the next
-    /// request to the user or the end of the turn, like `sendMessage`. It starts with the answer's `.userResponse`; an
-    /// allowed permission's `.toolResult` follows it, other answers have none.
+    /// request to the user or the end of the turn, like `sendMessage`. The answer is not echoed (keep it as
+    /// `.userResponse`); an allowed permission's `.toolResult` comes next, other answers have none.
     /// Throws `NetworkError.badResponse` with code 404 if no turn is waiting for tool use `answer.toolUseID`.
     func answer(_ answer: ChatEvent.UserResponse) -> AsyncThrowingStream<
         ChatEvent, Error

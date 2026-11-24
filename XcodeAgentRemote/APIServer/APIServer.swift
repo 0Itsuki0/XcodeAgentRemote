@@ -34,8 +34,8 @@ nonisolated private let category = Logger.category(#fileID)
 ///     Each `ChatEvent` is sent as `event: <its type>` + `data: <its JSON>`. If the turn fails, an `event: error`
 ///     with `{"message": …}` is sent.
 ///   - `.answer` → the user's answer (`ChatEvent.UserResponse`: permission, questions, plan) goes to the turn waiting for it,
-///     and the response continues that turn's stream from where the previous response ended (starting with the
-///     `user_response`; an allowed permission's `tool_result` follows it, other answers have none), again until the next
+///     and the response continues that turn's stream from where the previous response ended (the answer is not
+///     echoed; an allowed permission's `tool_result` comes next, other answers have none), again until the next
 ///     request to the user or the end. If no running turn waits for it but a chat's history does (the turn ended
 ///     before it was answered), that chat is resumed with the answer and the response streams it (`answerUserRequest`);
 ///     404 if no turn is waiting for that tool use:

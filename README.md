@@ -505,9 +505,9 @@ Real calls to the server (`POST /messages`, JSON body, SSE response), from one c
 - every response is `HTTP 200 text/event-stream`: `event: <type>` + `data: <ChatEvent JSON>` per event
 - the prompt is not echoed back: the caller has it
 - a response ends where the turn waits for the user (its last event is a `user_request`), or where the turn ends
-- the answer to that request is another `POST /messages`, and its response continues the same turn, starting with the `user_response`
-    - an allowed permission: `user_response`, then the tool's own `tool_result`
-    - anything else (a deny, answered questions, a plan): only the `user_response` (its result is the answer itself)
+- the answer to that request is another `POST /messages`, and its response continues the same turn. the answer is not echoed back either (the client keeps it, as `user_response` in its history)
+    - an allowed permission: the tool's own `tool_result` comes next
+    - anything else (a deny, answered questions, a plan): no `tool_result` (its result is the answer itself)
 - `project` is a file URL. in Swift: `sendMessage(_:to:…)` / `answerUserRequest(_:)` on the Mac, `APIServerClient.sendMessage` / `.answer` on iOS
 
 #### Regular message (new chat)
@@ -540,9 +540,6 @@ data: {"type":"user_request","request":{"permission":{"_0":{"input":{"command":"
 POST /messages
 {"answer":{"_0":{"permission":{"allow":true,"toolUseID":"toolu_019JRJBSVPfCxjfE8nZBjypA"}}}}
 
-event: user_response
-data: {"response":{"permission":{"toolUseID":"toolu_019JRJBSVPfCxjfE8nZBjypA","allow":true}},"type":"user_response"}
-
 event: tool_result
 data: {"is_error":false,"output":"(Bash completed with no output)","type":"tool_result","tool_use_id":"toolu_019JRJBSVPfCxjfE8nZBjypA"}
 
@@ -567,9 +564,6 @@ data: {"type":"user_request","request":{"questions":{"toolUseID":"toolu_014HT2Hp
 POST /messages
 {"answer":{"_0":{"questions":{"toolUseID":"toolu_014HT2HpyJoEaRDU7SWo8T1D","answers":{"Which color do you prefer?":["Green"]}}}}}
 
-event: user_response
-data: {"response":{"questions":{"toolUseID":"toolu_014HT2HpyJoEaRDU7SWo8T1D","answers":{"Which color do you prefer?":["Green"]}}},"type":"user_response"}
-
 event: assistant_message
 data: {"type":"assistant_message","text":"Green"}
 ```
@@ -592,9 +586,6 @@ data: {"type":"user_request","request":{"permission":{"_0":{"input":{"descriptio
 ```
 POST /messages
 {"answer":{"_0":{"permission":{"allow":false,"toolUseID":"toolu_01KZxEH1GRg1fjDY7DXAYyGD","message":"Not now."}}}}
-
-event: user_response
-data: {"response":{"permission":{"allow":false,"toolUseID":"toolu_01KZxEH1GRg1fjDY7DXAYyGD","message":"Not now."}},"type":"user_response"}
 
 event: assistant_message
 data: {"type":"assistant_message","text":"DENIED"}
@@ -620,7 +611,7 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
     - find where the agent keeps its sessions, and how a chat links to one: decode `assistantConfiguration` of `<chat UUID>/conversation.plist` (`{"agent":{"_0":{"sessionID":"…"}}}` for Claude)
 2. **Collect real samples before writing code**: one session file per case of the checklist below, made with Xcode and with the agent run by hand. add them to this README the way [Sample Jsonl (Claude history)](#sample-jsonl-claude-history) does. every case below was guessed wrong at least once for Claude
 3. **Session basics**: `agent`, `modelIdentifier` (Xcode's `chatModelDefinitionIdentifier.modelIdentifier`, e.g. `claude-code`), `newSessionID()`, `transcriptFile(sessionID:)` (also what `ChatWatcher` watches), `workingDirectory(sessionID:)`
-4. **History** (`history(sessionID:)`): the session's lines → `ChatEvent`s, the same events a live turn streams (`userMessage`, `assistantMessage`, `intermediate`, `toolUse`, `toolResult`, `userRequest`, `userResponse`)
+4. **History** (`history(sessionID:)`): the session's lines → `ChatEvent`s, the same events a live turn streams, plus the prompt and the user's answers (`userMessage`, `assistantMessage`, `intermediate`, `toolUse`, `toolResult`, `userRequest`, `userResponse`)
 5. **Run a turn** (`runTurn(_:)`): start the agent like Xcode, send the prompt, stream its output as `ChatEvent`s, and answer its requests to the user (`PendingUserRequestHandler.waitForAnswer`; no answer in `permissionTimeout` is a deny). record file contents around file-changing tools and the denied tool uses in `request.records` (the cards need them)
 6. **Pending requests** (`pendingToolUse(sessionID:)`): the session's last tool use, when it waits for the user, both for the app's own turns and Xcode's ([How to determine whether there is a pending user request](#how-to-determine-whether-there-is-a-pending-user-request))
 7. **Resume and repeat**: `isSameCall(_:_:)`, `removeToolUse(_:sessionID:)`, `removeStoppedResult(of:sessionID:)`, for a request answered after its agent stopped
@@ -649,8 +640,8 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 **Requests in the history and in the stream**
 
 - a request replaces its tool use, the user's answer replaces its result: never both. an allowed permission is the answer, then the tool's own output (`.userResponse`, then `.toolResult`), in that order
-- emit `.userResponse` as soon as the answer is given, not when the result arrives
-- don't echo the prompt as `.userMessage`: the caller has it
+- don't echo what the caller sent: not the prompt (`.userMessage`), not the answer (`.userResponse`). the history has both
+- a question or a plan is always a request: stream only its `.userRequest`, not its `.toolUse` (a permission's tool use can't be known in advance: it streams, then its request)
 - a request that isn't an allowed permission has the user's answer as its result: don't stream that result (the card still needs it: `request.records.setResult`)
 
 **Xcode's chats, closed by the app**
@@ -666,7 +657,7 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 
 - the agent makes the call again under a new id it assigns itself. the app can't choose it: keep the new id everywhere (the response and the result must match it)
 - the repeat may not be asked about at all: Claude's agent allowed it by its own config (`source: config`), so no `can_use_tool` came. match the repeat when the agent sends the call (`isSameCall`), not only when it asks
-- don't stream the repeat's tool use or a second request: the user already answered it. stream only its `.toolResult` (and the `.userResponse` if it was asked)
+- don't stream the repeat's tool use or a second request: the user already answered it. stream only its `.toolResult`
 - once the turn ended, remove the earlier tool use and its interrupted result (`removeToolUse`), whether or not the repeat was asked. a deny is not repeated: the earlier one stays, interrupted
 - `isSameCall`: which input fields identify a call per tool. the agent rewords its description, a plan, a question's options
 

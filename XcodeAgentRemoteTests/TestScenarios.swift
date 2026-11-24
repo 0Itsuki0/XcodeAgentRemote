@@ -97,6 +97,13 @@ nonisolated enum TestScenarios {
         }
     }
 
+    /// A `.toolUse` of this tool is among the events (a question or a plan should only be its `.userRequest`).
+    fileprivate static func streamsToolUse(named tool: String, in events: [ChatEvent]) -> Bool {
+        events.contains {
+            if case .toolUse(let toolUse) = $0 { toolUse.name == tool } else { false }
+        }
+    }
+
     /// The user's answers to the requests (`.userResponse`).
     fileprivate static func userResponses(in events: [ChatEvent]) -> [ChatEvent.UserResponse] {
         events.compactMap { event in
@@ -190,6 +197,10 @@ nonisolated enum TestScenarios {
                     answers.values.first == ["Green"]
                 else { throw CheckFailed(description: "AskUserQuestion: \(answered)") }
                 try check(
+                    !streamsToolUse(named: "AskUserQuestion", in: events),
+                    "the question was streamed as a tool use too: \(events)"
+                )
+                try check(
                     reply(events).contains("Green"),
                     "reply: \(reply(events))"
                 )
@@ -240,6 +251,10 @@ nonisolated enum TestScenarios {
                 guard answered.count == 1, case .planApproval(_, true, _) = answered[0] else {
                     throw CheckFailed(description: "ExitPlanMode: \(answered)")
                 }
+                try check(
+                    !streamsToolUse(named: "ExitPlanMode", in: events),
+                    "the plan was streamed as a tool use too: \(events)"
+                )
                 try check(
                     toolResults(of: "Bash", in: events).contains {
                         $0.output.contains("planned")
@@ -788,10 +803,10 @@ nonisolated enum TestScenarios {
                 guard let request = events.waitingForUser.last else {
                     return events
                 }
-                stream = answerUserRequest(
-                    answering(request),
-                    permissionTimeout: 120
-                )
+                // The answer isn't streamed back: keep it, like the iOS app does.
+                let answer = answering(request)
+                events.append(.userResponse(answer))
+                stream = answerUserRequest(answer, permissionTimeout: 120)
             }
         }
     }
@@ -1029,7 +1044,10 @@ nonisolated enum TestScenarios {
                 guard let waiting = events.waitingForUser.last else {
                     return (events, responses)
                 }
-                stream = client.answer(answering(waiting))
+                // The answer isn't streamed back: keep it, like the iOS app does.
+                let answer = answering(waiting)
+                events.append(.userResponse(answer))
+                stream = client.answer(answer)
             }
         }
     }

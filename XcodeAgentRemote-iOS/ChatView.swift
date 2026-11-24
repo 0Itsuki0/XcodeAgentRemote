@@ -132,6 +132,9 @@ struct ChatView: View {
         .onChange(of: nonResponseHistory, initial: true) {
             self.scrollToEnd()
         }
+        .onChange(of: chatViewModel.pendingUserRequest, initial: true) {
+            self.scrollToEnd()
+        }
         .overlay(alignment: .bottom) {
             let ids = [nonResponseHistory.count - 1] + [bottomSpacer]
             if let scrollPositionID, !ids.contains(scrollPositionID) {
@@ -234,7 +237,7 @@ struct ChatView: View {
         case .planApproval(_, let plan):
             self.planRequest(
                 plan,
-                approve: response?.planResponse?.0 ?? false,
+                approve: response?.planResponse?.0 ?? true,
                 feedback: response?.planResponse?.1
             )
         case .questions(_, let questions):
@@ -256,7 +259,7 @@ struct ChatView: View {
             leadingIcon: "pencil.and.list.clipboard",
             title: "Plan",
             description: plan,
-            showExclamation: approve
+            showExclamation: !approve
         )
         if let feedback {
             self.secondaryMessage(feedback)

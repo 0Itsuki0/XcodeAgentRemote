@@ -56,14 +56,17 @@ struct SendMessageTests {
             for try await event in stream { events.append(event) }
             guard let request = events.waitingForUser.last else { break }
             answered.insert(request.toolUseID)
-            stream = answerUserRequest(.permission(toolUseID: request.toolUseID, allow: false))
+            // The answer isn't streamed back: keep it, like the iOS app does.
+            let answer = ChatEvent.UserResponse.permission(toolUseID: request.toolUseID, allow: false)
+            events.append(.userResponse(answer))
+            stream = answerUserRequest(answer)
         }
 
         #expect(!answered.isEmpty)
-        let denied = events.contains { event in
-            if case .userResponse(.permission(let toolUseID, false, _)) = event { answered.contains(toolUseID) } else { false }
-        }
-        #expect(denied)
+        // A denied tool use's result isn't streamed either (the answer is its result).
+        #expect(!events.contains { event in
+            if case .toolResult(let result) = event { answered.contains(result.toolUseID) } else { false }
+        })
         #expect(events.waitingForUser.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: file.path), "the command ran although it was denied")
     }
