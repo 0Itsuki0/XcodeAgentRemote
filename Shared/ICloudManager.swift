@@ -40,6 +40,7 @@ class ICloudManager {
             #if os(iOS)
                 self.subscribe(to: .pushToIOS)
             #endif
+            self.retryFailedRecords()
         }
     }
 
@@ -168,7 +169,6 @@ class ICloudManager {
 
     private func deleteSubscription(_ id: String) async throws {
         guard checkCommon() else { return }
-
         try await self.privateDatabase.deleteSubscription(withID: id)
     }
 
@@ -184,6 +184,14 @@ class ICloudManager {
         guard id.hasPrefix(subscriptionIdPrefix) else { return nil }
         let raw = id.dropFirst(subscriptionIdPrefix.count)
         return RecordType(rawValue: String(raw))
+    }
+
+    static func extractConversationId(
+        from queryNotification: CKQueryNotification
+    ) -> String? {
+        return queryNotification.recordFields?[
+            PushToIOSRecordKey.conversationId.rawValue
+        ] as? String
     }
 
     private static func subscriptionOptions(for type: RecordType)
@@ -308,7 +316,6 @@ extension ICloudManager {
             }
         }
     }
-
 }
 
 extension CKAccountStatus {

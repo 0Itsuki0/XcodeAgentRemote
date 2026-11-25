@@ -9,23 +9,22 @@ import CloudKit
 import SwiftUI
 import UserNotifications
 
-// Used from callbacks off the main actor too (e.g. the notification permission's).
 nonisolated private let logger = Logger.shared
 nonisolated private let category = Logger.category(#fileID)
 
-class AppDelegate: NSObject {
+@Observable class AppDelegate: NSObject {
     let iCloudManager = ICloudManager()
+
+    var path: NavigationPath = NavigationPath()
 
     private var observationToken: NotificationCenter.ObservationToken?
 
-    private var selectedConversationId: String?
-    
-    /// a list of conversation id delivered but has not opened yet.
-    private var unreadNotifications: [String] = []
+    private var selectedConversationId: XcodeChatConversation.ID?
+
+    private(set) var tappedConversationId: XcodeChatConversation.ID? = DebugConstants.conversationId
 
     /// perform set ups
     private func setupAppOnLaunch() {
-
         UIApplication.shared.registerForRemoteNotifications()
 
         UNUserNotificationCenter.current().delegate = self
@@ -38,6 +37,12 @@ class AppDelegate: NSObject {
         ) { [weak self] message in
             guard let self else { return }
             self.selectedConversationId = message.conversation?.conversationId
+
+            if let tappedConversationId, let selectedConversationId,
+                tappedConversationId == selectedConversationId
+            {
+                self.tappedConversationId = nil
+            }
         }
     }
 
@@ -58,7 +63,7 @@ class AppDelegate: NSObject {
 
     private func didReceiveRemoteNotification(
         userInfo: [AnyHashable: Any]
-    ) {
+    ) -> UIBackgroundFetchResult {
         logger.info(
             category: category,
             message: "\(#function)"
@@ -68,7 +73,7 @@ class AppDelegate: NSObject {
                 fromRemoteNotificationDictionary: userInfo
             )
         else {
-            return
+            return .noData
         }
 
         logger.info(
@@ -91,7 +96,7 @@ class AppDelegate: NSObject {
                 category: category,
                 message: "Unknown notification type."
             )
-            return
+            return .noData
         }
 
         guard
@@ -100,7 +105,7 @@ class AppDelegate: NSObject {
             )
         else {
             logger.info(category: category, message: "Unknown record type.")
-            return
+            return .noData
         }
 
         switch type {
@@ -114,62 +119,50 @@ class AppDelegate: NSObject {
             }
         }
 
-        //        let record = queryNotification.recordFields
-
-        //        let queryNotification = notification as! CKQueryNotification
-        //        queryNotification.recordID
-
-        //        guard
-        //            let notification = CKNotification(
-        //                fromRemoteNotificationDictionary: userInfo
-        //            )
-        //                else {
-        //            return .noData
-        //        }
-        //
-        //        print(notification)
-        //
-        //        if notification.notificationType == .database,
-        //           notification.subscriptionID
-        //            == CloudManager.sharedCloudDatabaseSubscriptionId
-        //        {
-        //            Task {
-        //                do {
-        //                    try await manager.fetchChangesForSharedDBSubscription()
-        //                } catch (let error) {
-        //                    print(
-        //                        "error fetching changes for shared database subscription: \(error)"
-        //                    )
-        //                    manager.error = error
-        //                }
-        //
-        //            }
-        //        }
-        //
-        //        if notification.notificationType == .query,
-        //           notification.subscriptionID
-        //            == CloudManager.privateDatabaseQuerySubscriptionId,
-        //           let queryNotification = notification as? CKQueryNotification
-        //        {
-        //
-        //            Task {
-        //                do {
-        //                    try await manager.fetchChangesForQuerySubscription(
-        //                        queryNotification
-        //                    )
-        //                } catch (let error) {
-        //                    print(
-        //                        "error fetching changes for query subscription: \(error)"
-        //                    )
-        //                    manager.error = error
-        //                }
-        //
-        //            }
-        //        }
-
-        return
+        return .newData
     }
 
+    /// Whether to show the push notification to the user or not.
+    private func shouldNotify(_ notification: UNNotification) -> Bool {
+        guard let conversationId = extractConversationId(from: notification)
+        else {
+            return false
+        }
+        /// the one being notified is the one currently opened in the foreground
+        if UIApplication.shared.applicationState == .active,
+            conversationId == self.selectedConversationId
+        {
+            return false
+        }
+
+        return true
+    }
+
+    private func extractConversationId(
+        from notification: UNNotification
+    ) -> String? {
+        guard
+            let notification = CKNotification(
+                fromRemoteNotificationDictionary: notification.request.content
+                    .userInfo
+            )
+        else {
+            return nil
+        }
+
+        guard let queryNotification = notification as? CKQueryNotification
+        else {
+            logger.info(
+                category: category,
+                message: "Unknown notification type."
+            )
+            return nil
+        }
+
+        return ICloudManager.extractConversationId(
+            from: queryNotification
+        )
+    }
 }
 
 extension AppDelegate: UIApplicationDelegate {
@@ -179,7 +172,6 @@ extension AppDelegate: UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication
             .LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-
         setupAppOnLaunch()
         return true
     }
@@ -190,8 +182,7 @@ extension AppDelegate: UIApplicationDelegate {
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
-        didReceiveRemoteNotification(userInfo: userInfo)
-        return .newData
+        return didReceiveRemoteNotification(userInfo: userInfo)
     }
 
     func application(
@@ -231,11 +222,13 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
+        let shouldNotify = shouldNotify(notification)
         logger.info(
             category: category,
-            message: "\(#function): \(notification)"
+            message: "\(#function). Should notify: \(shouldNotify)"
         )
-        return [[.badge, .sound, .banner, .list]]
+
+        return shouldNotify ? [[.badge, .sound, .banner, .list]] : []
     }
 
     /// handles explicit user interactions (like tapping a notification or action button).
@@ -251,29 +244,9 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                 userInfo: \(response.notification.request.content.userInfo)
                 """
         )
-
-        guard
-            let notification = CKNotification(
-                fromRemoteNotificationDictionary: response.notification.request
-                    .content.userInfo
-            )
-        else {
-            return
-        }
-
-        logger.info(
-            category: category,
-            message: "\(notification.debugDescription)"
+        self.path = NavigationPath()
+        self.tappedConversationId = extractConversationId(
+            from: response.notification
         )
-        /// Sample notification
-        /// ```
-        /// <CKQueryNotification: 0x109435c00; notificationType=1, notificationID=a04efc92-0dfa-48b0-97e6-4751d6d57d16, containerID=iCloud.xxx:Sandbox, subscriptionOwnerUserRecordID=xxx:(_defaultZone:__defaultOwner__), subscriptionID=XcodeAgentRemote.query.subscription.PushToIOS, queryNotificationReason=1, recordFields={
-        ///     Body = "some body";
-        ///     ConversationID = 123;
-        ///     Subtitle = "2026-11-18T02:30:44Z";
-        ///     Title = test;
-        /// }, recordID=96E4847D-78BC-4E94-9FD9-CECE02FC8952:(_defaultZone:xxx), database=Private>
-        /// ```
-
     }
 }

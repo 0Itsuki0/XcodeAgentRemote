@@ -48,6 +48,19 @@ struct XcodeAgentRemoteApp: App {
     }
 }
 
+//@main
+//struct XcodeAgentRemoteApp: App {
+//    
+//    var body: some Scene {
+//        
+//        Window("Dashboard", id: DashboardWindow.identifier) {
+//            ContentView()
+//        }
+//        .defaultSize(width: 720, height: 560)
+//        .restorationBehavior(.automatic)
+//    }
+//}
+
 struct AppMenu: View {
     @Environment(\.openWindow) private var openWindow
 

@@ -15,6 +15,7 @@ struct SelectedConversationDidChange: NotificationCenter.MainActorMessage {
     struct Conversation: Sendable, Hashable, Equatable {
         var conversationId: String
         var projectId: String
+        var lastActivityDate: Date
     }
 
     /// (`ConversationId`, `projectId`)
@@ -48,7 +49,8 @@ where
                     conversationName: "Debug Conversation",
                     projectName: "Debug Project",
                     projectStore: DebugConstants.chatStore,
-                    projectId: DebugConstants.chatStore
+                    projectId: DebugConstants.chatStore,
+                    lastActivityDate: Date()
                 )
             )
 
@@ -63,7 +65,8 @@ extension ChatView {
         conversation: XcodeChatConversation,
         projectName: String,
         projectStore: String,
-        projectId: String
+        projectId: String,
+        lastActivityDate: Date?
     ) {
         self.chatViewModel = ChatViewModel(
             apiClient: apiClient,
@@ -71,7 +74,8 @@ extension ChatView {
             conversationName: conversation.name,
             projectName: projectName,
             projectStore: projectStore,
-            projectId: projectId
+            projectId: projectId,
+            lastActivityDate: lastActivityDate
         )
     }
 }
@@ -94,6 +98,9 @@ struct ChatView: View {
     }
     private var history: [ChatEvent] {
         chatViewModel.history
+    }
+    private var lastActivityDate: Date? {
+        chatViewModel.lastActivityDate
     }
 
     // var focused: FocusState<Bool>.Binding
@@ -167,16 +174,6 @@ struct ChatView: View {
         .task(id: fetchID) {
             await chatViewModel.fetchConversationDetail()
         }
-        .onAppear {
-            NotificationCenter.default.post(
-                SelectedConversationDidChange(
-                    conversation: .init(
-                        conversationId: conversationId,
-                        projectId: projectId
-                    )
-                )
-            )
-        }
         .onDisappear {
             NotificationCenter.default.post(
                 SelectedConversationDidChange(
@@ -189,6 +186,21 @@ struct ChatView: View {
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onChange(of: history, initial: true) {
+            /// Not using `onAppear` to
+            /// 1. only update if there is history / fetch success
+            /// 2. set lastActivityDate as messages sent
+            guard !history.isEmpty, let lastActivityDate else { return }
+            NotificationCenter.default.post(
+                SelectedConversationDidChange(
+                    conversation: .init(
+                        conversationId: conversationId,
+                        projectId: projectId,
+                        lastActivityDate: lastActivityDate
+                    )
+                )
+            )
+        }
         .onChange(of: nonResponseHistory, initial: true) {
             self.scrollToEnd()
         }

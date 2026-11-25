@@ -1,8 +1,8 @@
 //
-//  XcodeChatManager.swift
+//  ServerSettingManager.swift
 //  XcodeAgentRemote
 //
-//  Created by Itsuki on 2026/11/20.
+//  Created by Itsuki on 2026/11/24.
 //
 
 import SwiftUI

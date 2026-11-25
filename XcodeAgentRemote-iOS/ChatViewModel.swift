@@ -12,25 +12,30 @@ private let category = Logger.category(#fileID)
 
 @Observable class ChatViewModel {
 
-    /// NOT using getters so that they can be set before fetching
+    /// NOT using getters from `conversationDetail` so that
+    /// 1. they can be set individually as necessary
+    /// 2. ensure non-nil
+
     let conversationId: String
+    /// should be the same as the store, but here for consistency
+    let projectId: String
+
     private(set) var conversationName: String
     private(set) var projectName: String
-    
-    /// should be the same as the store, but here for consistency
-    private(set) var projectId: String
 
     /// Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
     private var projectStore: String
 
     private(set) var history: [ChatEvent] = []
 
+    private(set) var lastActivityDate: Date?
+
     private(set) var pendingUserRequest: [ChatEvent.UserRequest] = []
 
     private(set) var isResponding: Bool = false
+
     private var isFetching: Bool = false
 
-    //    private(set) var streamingEvents: [ChatEvent]? = nil
     private(set) var error: Error? = nil {
         didSet {
             guard let error else { return }
@@ -58,7 +63,8 @@ private let category = Logger.category(#fileID)
         conversationName: String,
         projectName: String,
         projectStore: String,
-        projectId: String
+        projectId: String,
+        lastActivityDate: Date?
     ) {
         self.apiClient = apiClient
         self.conversationId = conversationId
@@ -66,6 +72,7 @@ private let category = Logger.category(#fileID)
         self.projectName = projectName
         self.projectStore = projectStore
         self.projectId = projectId
+        self.lastActivityDate = lastActivityDate
     }
 
     #if DEBUG
@@ -88,6 +95,7 @@ private let category = Logger.category(#fileID)
             self.projectName = "DebugProject"
             self.projectStore = "Debug-Hash"
             self.projectId = "Debug-Hash"
+            self.lastActivityDate = Date()
         }
 
         private static func loadHistoryFromFile(_ url: URL?) -> [ChatEvent] {
@@ -124,7 +132,8 @@ private let category = Logger.category(#fileID)
         }
     }
 
-    /// Do it in background instead of waiting
+    /// **Best effort** marking a conversation as read.
+    /// Do it in background instead of waiting.
     /// Error: logging only
     private func markConversationAsRead() {
         Task {
@@ -241,6 +250,7 @@ private let category = Logger.category(#fileID)
             guard let self else { return }
             defer { self.isResponding = false }
             do {
+                self.lastActivityDate = Date()
                 for try await event in stream {
                     logger.info(category: category, message: "Event: \(event)")
                     self.appendHistory(event)
@@ -251,6 +261,7 @@ private let category = Logger.category(#fileID)
                     message:
                         "Pending user request count: \(self.pendingUserRequest.count)"
                 )
+                self.lastActivityDate = Date()
             } catch {
                 self.error = error
             }

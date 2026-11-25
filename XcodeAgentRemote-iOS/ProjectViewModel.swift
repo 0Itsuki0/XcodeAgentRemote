@@ -83,10 +83,13 @@ private let category = Logger.category(#fileID)
         guard let conversation = message.conversation else {
             return
         }
+
         self.projects[conversation.projectId]?.conversations[
             conversation.conversationId
-        ]?.isUnread =
-            false
+        ]?.isUnread = false
+        self.projects[conversation.projectId]?.conversations[
+            conversation.conversationId
+        ]?.lastActivityDate = conversation.lastActivityDate
     }
 
     private func projectForConversation(_ id: String) -> XcodeProject? {

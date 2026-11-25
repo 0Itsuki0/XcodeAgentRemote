@@ -26,7 +26,7 @@ struct ContentView: View {
                         title: "test",
                         subtitle: Date().ISO8601Format(),
                         body: "some body",
-                        conversationId: "123"
+                        conversationId: DebugConstants.conversationId
                     )
                 }
 
