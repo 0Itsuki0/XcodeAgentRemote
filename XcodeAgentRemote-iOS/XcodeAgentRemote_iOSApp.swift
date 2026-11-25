@@ -14,8 +14,6 @@ extension EnvironmentValues {
     @Entry var tappedConversationId: XcodeConversation.ID? = nil
 }
 
-nonisolated let gitHubLink = "https://github.com/0Itsuki0/XcodeAgentRemote"
-
 @main
 struct XcodeAgentRemote_iOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -25,7 +23,6 @@ struct XcodeAgentRemote_iOSApp: App {
         @Bindable var appDelegate = appDelegate
         WindowGroup {
             NavigationStack(path: $appDelegate.path) {
-                // ChatView.debugUI()
                 ContentView()
                     .environment(serverSettingManager)
                     .environment(
@@ -34,5 +31,24 @@ struct XcodeAgentRemote_iOSApp: App {
                     )
             }
         }
+    }
+}
+
+
+
+struct SettingHeader: View {
+
+    init(_ text: LocalizedStringKey) {
+        self.text = text
+    }
+
+    private let text: LocalizedStringKey
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline)
+            .padding(.bottom, UIConstants.standardTopMargin)
+            .listRowInsets(.horizontal, 0)
+
     }
 }

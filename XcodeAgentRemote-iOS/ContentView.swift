@@ -40,8 +40,8 @@ struct ContentView: View {
     private var subsequentLaunchRoot: some View {
         Group {
             if let apiClient = serverSettingManager.apiClient {
-//                ProjectListView(apiClient: apiClient)
-                ChatView.debugServerCall(apiClient)
+                ProjectListView(apiClient: apiClient)
+                //                ChatView.debugServerCall(apiClient)
             } else {
                 ContentUnavailableView {
                     Label(
@@ -101,7 +101,7 @@ struct IntroductionView: View {
             Text(
                 """
                 This app works together with the MacOS app.
-                Please download it from [Github](\(gitHubLink)) and set up accordingly.
+                Please download it from [Github](\(String.gitHub)) and set up accordingly.
                 """
             )
             .foregroundStyle(.secondary)
@@ -129,6 +129,7 @@ struct UnreadMark: View {
 
 struct ConversationListView: View {
     // TODO: - add search by conversation name
+    // TODO: - add a create new button (maybe use a menu and show a list of providers upon tap)
 
     let conversations: [XcodeConversation]
     let projectName: String

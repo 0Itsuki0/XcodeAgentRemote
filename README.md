@@ -18,6 +18,15 @@
 - [Additional Notes / Discussions](#additional-notes--discussions)
     - [Running From Terminal?](#running-from-terminal)
 
+## Permissions Required
+
+### MacOS
+
+
+### iOS
+
+
+
 ## Base Approach
 
 1. Local server to receive request from IOS (ping, list projects, get conversation, send message and stream response)

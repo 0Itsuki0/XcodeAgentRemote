@@ -133,7 +133,7 @@ struct NetworkErrorView: View {
         } description: {
             let recovery: String =
                 error.recoverySuggestion.map {
-                    "\n\($0.trimmed)"
+                    "\n\n\($0.trimmed)"
                 } ?? ""
             Text(error.localizedDescription.trimmed + recovery)
                 .padding(.top, UIConstants.standardSpacing)

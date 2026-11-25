@@ -29,7 +29,6 @@ nonisolated private let category = Logger.category(#fileID)
 
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().setBadgeCount(0)
-        requestNotificationPermission()
 
         self.observationToken = NotificationCenter.default.addObserver(
             of: Never.self,
@@ -204,19 +203,6 @@ extension AppDelegate: UIApplicationDelegate {
     }
 }
 extension AppDelegate: UNUserNotificationCenterDelegate {
-
-    // Request user permissions
-    func requestNotificationPermission() {
-        UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound, .badge]) {
-                granted,
-                error in
-                logger.info(
-                    category: category,
-                    message: "Notification permission granted"
-                )
-            }
-    }
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,

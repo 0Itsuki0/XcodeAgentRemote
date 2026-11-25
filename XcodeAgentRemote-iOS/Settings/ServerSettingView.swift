@@ -7,58 +7,6 @@
 
 import SwiftUI
 
-enum SettingRoute: String, Equatable, Hashable, CaseIterable, Identifiable {
-    case server
-    case notification
-
-    var id: String { rawValue }
-}
-
-struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    NavigationLink {
-                        ServerSettingView()
-                    } label: {
-                        Text("Server Setting")
-                    }
-
-                    NavigationLink {
-
-                    } label: {
-                        Text("Push Notification")
-                    }
-                }
-            }
-            .contentMargins(.top, UIConstants.standardTopMargin)
-            .navigationTitle("Settings")
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Close", systemImage: "xmark") {
-                        self.dismiss()
-                    }
-                }
-            }
-            .labelStyle(.iconOnly)
-        }
-    }
-}
-
-// To receive push notifications on conversation
-// 1. start conversation monitor on Mac
-// 2. sign in to same iCloud account on Mac and iOS
-// 3. make sure that both devices are not on low power mode.
-struct NotificationSettingView: View {
-    var body: some View {
-
-    }
-}
-
 extension ServerSettingView {
     init() {
         let savedClient = APIServerClient.saved
@@ -113,6 +61,16 @@ struct ServerSettingView: View {
                         prompt: "Bearer tok_live_9f8e"
                     )
                 }
+            } header: {
+                SettingHeader(
+                    """
+                    The app connects to the server started by the Mac app to obtain necessary Xcode chat data as well as sending chat messages.
+
+                    1. Start the server from the Mac App.
+                    2. Start a tunnel, for example with `ngrok`.
+                    2. Fill in the connection parameters below.
+                    """
+                )
             }
 
             Section {
