@@ -25,6 +25,8 @@ struct XcodeAgentRemoteApp: App {
         )
         self.chatWatcher = chatWatcher
         self.apiServerManager = apiServerManager
+
+        NSApp.appearance = NSAppearance(named: .darkAqua)
     }
 
     var body: some Scene {
@@ -50,9 +52,9 @@ struct XcodeAgentRemoteApp: App {
 
 //@main
 //struct XcodeAgentRemoteApp: App {
-//    
+//
 //    var body: some Scene {
-//        
+//
 //        Window("Dashboard", id: DashboardWindow.identifier) {
 //            ContentView()
 //        }
