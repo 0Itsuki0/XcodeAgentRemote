@@ -29,25 +29,35 @@ private let category = Logger.category(#fileID)
 
     private(set) var pendingUserRequest: [ChatEvent.UserRequest] = []
 
+    /// whether the mac app is watching the chat for updates
+    private(set) var isWatching: Bool
+
+    /// Networking states
     private(set) var isResponding: Bool = false
 
     private(set) var isFetching: Bool = false
 
-    private(set) var error: Error? = nil {
+    private(set) var isProcessingWatch: Bool = false
+
+    private(set) var fetchError: Error? = nil {
         didSet {
-            guard let error else { return }
-            logger.error(category: category, error: error)
+            guard let fetchError else { return }
+            logger.error(category: category, error: fetchError)
         }
     }
 
-    var turnFailed: String? {
-        guard let error = error as? ServerRequestError else {
-            return nil
+    var watchError: Error? = nil {
+        didSet {
+            guard let watchError else { return }
+            logger.error(category: category, error: watchError)
         }
-        if case .turnFailed(let message) = error {
-            return message
+    }
+
+    var turnError: Error? = nil {
+        didSet {
+            guard let turnError else { return }
+            logger.error(category: category, error: turnError)
         }
-        return nil
     }
 
     private var conversationDetail: XcodeConversationDetail? = nil {
@@ -70,7 +80,8 @@ private let category = Logger.category(#fileID)
         conversationName: String,
         projectName: String,
         projectId: String,
-        lastActivityDate: Date?
+        lastActivityDate: Date?,
+        isWatching: Bool
     ) {
         self.apiClient = apiClient
         self.conversationId = conversationId
@@ -78,6 +89,7 @@ private let category = Logger.category(#fileID)
         self.projectName = projectName
         self.projectId = projectId
         self.lastActivityDate = lastActivityDate
+        self.isWatching = isWatching
     }
 
     #if DEBUG
@@ -100,6 +112,7 @@ private let category = Logger.category(#fileID)
             self.projectName = "DebugProject"
             self.projectId = "Debug-Hash"
             self.lastActivityDate = Date()
+            self.isWatching = false
         }
 
         private static func loadHistoryFromFile(_ url: URL?) -> [ChatEvent] {
@@ -121,14 +134,9 @@ private let category = Logger.category(#fileID)
 
     #endif
 
-    func dismissTurnFailedError() {
-        guard self.turnFailed != nil else { return }
-        self.error = nil
-    }
-
     func fetchConversationDetail() async {
         guard !self.isFetching else { return }
-        self.error = nil
+        self.fetchError = nil
         self.isFetching = true
         defer { self.isFetching = false }
         do {
@@ -138,7 +146,26 @@ private let category = Logger.category(#fileID)
             self.conversationDetail = conversationDetail
             self.markConversationAsRead()
         } catch {
-            self.error = error
+            self.fetchError = error
+        }
+    }
+
+    func watchConversation(shouldWatch: Bool) {
+        guard !self.isProcessingWatch else { return }
+        self.watchError = nil
+        self.isProcessingWatch = true
+        defer { self.isProcessingWatch = false }
+
+        Task {
+            do {
+                let _ = try await apiClient.watch(
+                    conversationID: conversationId,
+                    shouldWatch
+                )
+                self.isWatching = shouldWatch
+            } catch {
+                self.watchError = error
+            }
         }
     }
 
@@ -166,6 +193,7 @@ private let category = Logger.category(#fileID)
             !self.history.isEmpty && self.history != conversationDetail.history
         history = conversationDetail.history
         pendingUserRequest = history.waitingForUser
+        isWatching = conversationDetail.isWatching
         logger.info(
             category: category,
             message:
@@ -185,7 +213,7 @@ private let category = Logger.category(#fileID)
         guard !self.isResponding else { return }
         self.appendHistory(.userMessage(prompt))
         self.isResponding = true
-        self.error = nil
+        self.turnError = nil
         let stream = apiClient.sendMessage(
             prompt,
             conversationID: conversationId,
@@ -249,9 +277,12 @@ private let category = Logger.category(#fileID)
             $0.toolUseID == userResponse.toolUseID
         }
         self.appendHistory(.userResponse(userResponse))
-        self.error = nil
+        self.fetchError = nil
         self.isResponding = true
-        let stream = apiClient.answer(userResponse, conversationID: conversationId)
+        let stream = apiClient.answer(
+            userResponse,
+            conversationID: conversationId
+        )
         self.streamEvent(stream)
     }
 
@@ -273,7 +304,7 @@ private let category = Logger.category(#fileID)
                 )
                 self.lastActivityDate = Date()
             } catch {
-                self.error = error
+                self.turnError = error
             }
         }
     }

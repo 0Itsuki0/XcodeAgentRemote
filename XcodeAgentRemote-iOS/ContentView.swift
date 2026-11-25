@@ -40,7 +40,8 @@ struct ContentView: View {
     private var subsequentLaunchRoot: some View {
         Group {
             if let apiClient = serverSettingManager.apiClient {
-                ProjectListView(apiClient: apiClient)
+//                ProjectListView(apiClient: apiClient)
+                ChatView.debugServerCall(apiClient)
             } else {
                 ContentUnavailableView {
                     Label(
@@ -131,7 +132,6 @@ struct ConversationListView: View {
 
     let conversations: [XcodeConversation]
     let projectName: String
-    let projectStore: String
     let projectId: String
     let apiClient: APIServerClient
 
@@ -167,9 +167,9 @@ struct ConversationListView: View {
                         apiClient: apiClient,
                         conversation: conversation,
                         projectName: projectName,
-                        projectStore: projectStore,
                         projectId: projectId,
-                        lastActivityDate: conversation.lastActivityDate
+                        lastActivityDate: conversation.lastActivityDate,
+                        isWatching: conversation.isWatching
                     )
                 } label: {
                     VStack(alignment: .leading, spacing: standardSpacing / 2) {

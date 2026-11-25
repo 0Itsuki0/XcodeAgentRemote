@@ -78,7 +78,6 @@ struct ProjectListView: View {
                     ConversationListView(
                         conversations: project.conversations,
                         projectName: project.name,
-                        projectStore: project.store.lastPathComponent,
                         projectId: project.id,
                         apiClient: projectViewModel.apiClient,
                         refresh: {

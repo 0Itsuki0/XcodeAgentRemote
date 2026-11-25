@@ -486,7 +486,7 @@ nonisolated enum TestScenarios {
                         _ = try await collect(
                             XcodeChat.answerUserRequest(
                                 .permission(
-                                    toolUseID: "tool_unknown",
+                                    toolUseID: "toolu_unknown",
                                     allow: true
                                 )
                             )

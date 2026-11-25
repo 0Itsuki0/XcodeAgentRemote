@@ -19,14 +19,14 @@ struct EntryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: standardSpacing / 2) {
-            if let turnFailed = self.chatViewModel.turnFailed {
-                Text(turnFailed)
+            if let turnError = self.chatViewModel.turnError {
+                Text(turnError.localizedDescription.trimmed)
                     .font(.subheadline)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .task {
                         try? await Task.sleep(for: .seconds(3))
-                        self.chatViewModel.dismissTurnFailedError()
+                        self.chatViewModel.turnError = nil
                     }
             }
 

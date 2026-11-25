@@ -47,7 +47,8 @@ where
                     conversationName: "Debug Conversation",
                     projectName: "Debug Project",
                     projectId: DebugConstants.chatStore,
-                    lastActivityDate: Date()
+                    lastActivityDate: Date(),
+                    isWatching: true
                 )
             )
 
@@ -61,9 +62,9 @@ extension ChatView {
         conversation: XcodeConversation,
         projectName: String,
         /// store: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
-        projectStore: String,
         projectId: String,
-        lastActivityDate: Date?
+        lastActivityDate: Date?,
+        isWatching: Bool
     ) {
         self.chatViewModel = ChatViewModel(
             apiClient: apiClient,
@@ -71,7 +72,8 @@ extension ChatView {
             conversationName: conversation.name,
             projectName: projectName,
             projectId: projectId,
-            lastActivityDate: lastActivityDate
+            lastActivityDate: lastActivityDate,
+            isWatching: isWatching
         )
     }
 }
@@ -114,11 +116,10 @@ struct ChatView: View {
 
     var body: some View {
         Group {
-            if let error = chatViewModel.error, chatViewModel.turnFailed == nil
-            {
+            if let error = chatViewModel.fetchError {
                 self.errorView(error)
             } else {
-                mainChatView
+                self.mainChatView
             }
         }
         .task(id: fetchID) {
@@ -209,7 +210,7 @@ struct ChatView: View {
                 )
             )
         }
-        .onChange(of: chatViewModel.turnFailed, initial: true) {
+        .onChange(of: chatViewModel.turnError == nil, initial: true) {
             self.scrollToEnd()
         }
         .onChange(of: nonResponseHistory, initial: true) {
@@ -233,9 +234,21 @@ struct ChatView: View {
         .safeAreaBar(edge: .bottom) {
             EntryView(focused: $focused)
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(chatViewModel.isWatching ? "Unwatch" : "Watch") {
+                    chatViewModel.watchConversation(
+                        shouldWatch: !chatViewModel.isWatching
+                    )
+                }.buttonStyle(.borderless)
+                    .foregroundStyle(.link)
+            }
+            .sharedBackgroundVisibility(.hidden)
+        }
         .labelsHidden()
         .labelStyle(.iconOnly)
         .multilineTextAlignment(.leading)
+        .alert(error: $chatViewModel.watchError, actions: {})
     }
 
     @ContentBuilder
@@ -244,7 +257,7 @@ struct ChatView: View {
             if chatViewModel.isFetching {
                 ProgressView()
                     .controlSize(.extraLarge)
-            } else if chatViewModel.error == nil {
+            } else if chatViewModel.fetchError == nil {
                 ContentUnavailableView(
                     "No conversations",
                     systemImage: "text.bubble"
