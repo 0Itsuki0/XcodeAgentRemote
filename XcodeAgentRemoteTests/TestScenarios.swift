@@ -787,7 +787,7 @@ nonisolated enum TestScenarios {
         /// The chat store a message goes to.
         private static func store(of target: MessageTarget) -> URL {
             switch target {
-            case .newConversation(let project, _, _), .conversation(_, let project):
+            case .newConversation(let project, _, _, _), .conversation(_, let project):
                 ChatStore.storeDirectory(forProject: project)
             case .conversationInStore(_, let name):
                 ChatStore.storeDirectory(named: name)
@@ -889,14 +889,12 @@ nonisolated enum TestScenarios {
 
             results.append(
                 await scenario("New chat: a Bash command, allowed") {
+                    let newID = UUID().uuidString
                     let (events, responses) = try await sendThroughServer(
                         client,
                         "Use the Bash tool to run: touch \(macFolder)/test-scenarios-\(run)-allowed. Then reply DONE.",
-                        to: .newConversation(
-                            project: project,
-                            agent: .claude,
-                            name: name
-                        ),
+                        conversationID: newID,
+                        newConversation: (project, name),
                         answering: permission(allow: true)
                     )
                     let bash = toolResults(of: "Bash", in: events)
@@ -933,7 +931,7 @@ nonisolated enum TestScenarios {
                     let (events, responses) = try await sendThroughServer(
                         client,
                         "Use the Bash tool to run: touch \(macFolder)/test-scenarios-\(run)-denied. If it is denied, reply DENIED.",
-                        to: .conversation(id: chatID, project: project),
+                        conversationID: chatID,
                         answering: permission(allow: false)
                     )
                     let denied = userResponses(in: events)
@@ -946,17 +944,17 @@ nonisolated enum TestScenarios {
             )
 
             results.append(
-                await scenario("Continue the chat by its store name") {
-                    guard let chatID, let store else {
+                await scenario("Continue the chat: a reply") {
+                    guard let chatID else {
                         throw CheckFailed(
                             description:
-                                "needs the chat and store of the previous scenarios"
+                                "needs the chat of the previous scenarios"
                         )
                     }
                     let (events, _) = try await sendThroughServer(
                         client,
                         "Reply with only the word pong.",
-                        to: .conversationInStore(id: chatID, store: store),
+                        conversationID: chatID,
                         mode: .auto,
                         answering: permission(allow: false)
                     )
@@ -1039,7 +1037,7 @@ nonisolated enum TestScenarios {
                     try await sendThroughServer(
                         client,
                         prompt,
-                        to: .conversation(id: chatID, project: project),
+                        conversationID: chatID,
                         answering: answering
                     ).events
                 }
@@ -1049,7 +1047,8 @@ nonisolated enum TestScenarios {
                 await scenario("Answer to an unknown tool use") {
                     do {
                         for try await _ in client.answer(
-                            .permission(toolUseID: "toolu_unknown", allow: true)
+                            .permission(toolUseID: "toolu_unknown", allow: true),
+                            conversationID: chatID ?? "00000000-0000-0000-0000-000000000000"
                         ) {}
                         throw CheckFailed(description: "it was accepted")
                     } catch NetworkError.badResponse(let code, _)
@@ -1062,23 +1061,37 @@ nonisolated enum TestScenarios {
             return results
         }
 
-        /// Sends one message and follows the turn through the server: each response streams until the turn waits for the
+        /// Sends one message (to a new chat with this id if `newConversation`) and follows the turn through the server: each response streams until the turn waits for the
         /// user, which is answered with `answering`, and the answer's response continues the turn.
         /// Returns the turn's events and how many responses it took.
         private static func sendThroughServer(
             _ client: APIServerClient,
             _ prompt: String,
-            to target: MessageTarget,
+            conversationID: String,
+            newConversation: (project: URL, name: String)? = nil,
             mode: PermissionMode = .manual,
             answering: Answering
         ) async throws -> (events: [ChatEvent], responses: Int) {
             var events: [ChatEvent] = []
-            var stream = client.XcodeChat.sendMessage(
-                prompt,
-                to: target,
-                permissionModeOverride: mode,
-                permissionTimeout: 120
-            )
+            var stream =
+                if let newConversation {
+                    client.startConversation(
+                        id: conversationID,
+                        project: newConversation.project,
+                        agent: .claude,
+                        name: newConversation.name,
+                        prompt: prompt,
+                        permissionModeOverride: mode,
+                        permissionTimeout: 120
+                    )
+                } else {
+                    client.sendMessage(
+                        prompt,
+                        conversationID: conversationID,
+                        permissionModeOverride: mode,
+                        permissionTimeout: 120
+                    )
+                }
             var responses = 0
             while true {
                 responses += 1
@@ -1089,7 +1102,7 @@ nonisolated enum TestScenarios {
                 // The answer isn't streamed back: keep it, like the iOS app does.
                 let answer = answering(waiting)
                 events.append(.userResponse(answer))
-                stream = client.answer(answer)
+                stream = client.answer(answer, conversationID: conversationID)
             }
         }
     }

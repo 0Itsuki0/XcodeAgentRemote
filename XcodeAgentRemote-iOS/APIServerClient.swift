@@ -221,7 +221,36 @@ nonisolated struct APIServerClient: Sendable {
         return try NetworkService.decode(SuccessResponse.self, from: data)
     }
 
-    /// `POST /messages` (`.prompt`): sends one message, the same parameters as the macOS app's `sendMessage`, and
+    /// `POST /conversations`: starts a new chat with the id the caller chose (a UUID; e.g. `UUID().uuidString`) in the
+    /// project (`.xcodeproj` / `.xcworkspace` on the Mac), and streams its first turn like `sendMessage`. Its later
+    /// messages and the answers to its requests (this turn's too) go to that id. Named after the prompt if `name` is nil.
+    /// Throws `NetworkError.badResponse` with 400 if the id is not a UUID, 409 if it is already a chat's, 404 if the
+    /// project doesn't exist, 501 if its agent is not implemented.
+    func startConversation(
+        id: String,
+        project: URL,
+        agent: AgentProviderName,
+        name: String? = nil,
+        prompt: String,
+        permissionModeOverride: PermissionMode? = nil,
+        permissionTimeout: TimeInterval? = nil
+    ) -> AsyncThrowingStream<ChatEvent, Error> {
+        events(
+            url: baseURL.appending(path: APIServerConstants.conversationsPath),
+            body: CreateConversationRequest(
+                id: id,
+                project: project,
+                agent: agent,
+                name: name,
+                prompt: prompt,
+                permissionModeOverride: permissionModeOverride,
+                permissionTimeout: permissionTimeout
+            )
+        )
+    }
+
+    /// `POST /conversations/<Xcode chat UUID>/messages` (`.prompt`): sends one message to the conversation, the same
+    /// parameters as the macOS app's `sendMessage`, and
     /// streams the turn's events as they arrive (intermediate output, assistant messages, tool uses, tool results,
     /// requests to the user and their responses; not the prompt: the caller has it).
     /// The stream ends when the turn ends, or when it waits for the user's answer (a permission, questions, a plan):
@@ -229,38 +258,50 @@ nonisolated struct APIServerClient: Sendable {
     /// Throws `ServerRequestError.turnFailed` if the server reports the turn failed, `NetworkError` for HTTP or
     /// connection errors. Cancelling (or dropping) the stream only closes this connection: the turn keeps running
     /// on the Mac until it finishes.
+    /// Throws `NetworkError.badResponse` with 404 if there is no such chat.
     func sendMessage(
         _ prompt: String,
-        to target: MessageTarget,
+        conversationID: String,
         permissionModeOverride: PermissionMode? = nil,
         permissionTimeout: TimeInterval? = nil
     ) -> AsyncThrowingStream<ChatEvent, Error> {
         events(
             for: .prompt(
                 prompt: prompt,
-                target: target,
                 permissionModeOverride: permissionModeOverride,
                 permissionTimeout: permissionTimeout
-            )
+            ),
+            conversationID: conversationID
         )
     }
 
-    /// `POST /messages` (`.answer`): answers the request the turn waits for (`waitingForUser`), and continues the
+    /// `POST /conversations/<Xcode chat UUID>/messages` (`.answer`): answers the request the turn waits for (`waitingForUser`), and continues the
     /// turn's stream from where the previous one (`sendMessage`, or the previous `answer`) ended: until the next
     /// request to the user or the end of the turn, like `sendMessage`. The answer is not echoed (keep it as
     /// `.userResponse`); an allowed permission's `.toolResult` comes next, other answers have none.
     /// Throws `NetworkError.badResponse` with code 404 if no turn is waiting for tool use `answer.toolUseID`.
-    func answer(_ answer: ChatEvent.UserResponse) -> AsyncThrowingStream<
+    func answer(_ answer: ChatEvent.UserResponse, conversationID: String) -> AsyncThrowingStream<
         ChatEvent, Error
     > {
-        events(for: .answer(answer))
+        events(for: .answer(answer), conversationID: conversationID)
     }
 
-    /// Sends a `POST /messages` and streams the turn's events from its SSE response.
-    private func events(for request: MessageRequest) -> AsyncThrowingStream<
+    /// Sends a `POST /conversations/<Xcode chat UUID>/messages` and streams the turn's events from its SSE response.
+    private func events(for request: MessageRequest, conversationID: String) -> AsyncThrowingStream<
         ChatEvent, Error
     > {
-        let url = baseURL.appending(path: APIServerConstants.messagePath)
+        events(
+            url: baseURL.appending(
+                path: APIServerConstants.path(APIServerConstants.messagePath, conversationID: conversationID)
+            ),
+            body: request
+        )
+    }
+
+    /// Sends a POST with this body and streams the turn's events from its SSE response.
+    private func events<Body: Encodable & Sendable>(url: URL, body request: Body) -> AsyncThrowingStream<
+        ChatEvent, Error
+    > {
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {

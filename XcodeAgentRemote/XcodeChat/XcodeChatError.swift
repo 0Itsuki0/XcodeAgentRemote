@@ -28,6 +28,10 @@ nonisolated enum XcodeChatError: LocalizedError {
     /// The chat is already running a turn (another message to it, or an answer that resumes it).
     case conversationRunning(conversationID: String)
     case noWaitingRequest(toolUseID: String)
+    /// A new chat's id is not a UUID.
+    case invalidConversationID(String)
+    /// A new chat's id is already a chat's.
+    case conversationExists(id: String)
 
     var errorDescription: String? {
         switch self {
@@ -53,6 +57,10 @@ nonisolated enum XcodeChatError: LocalizedError {
             "No session file for agent session \(sessionID)"
         case .noWaitingRequest(let toolUseID):
             "No turn is waiting for an answer to tool use \(toolUseID)"
+        case .invalidConversationID(let id):
+            "Not a UUID: \(id)"
+        case .conversationExists(let id):
+            "Conversation \(id) already exists"
         }
     }
 }

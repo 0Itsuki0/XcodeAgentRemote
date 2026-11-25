@@ -23,9 +23,6 @@ private let category = Logger.category(#fileID)
     private(set) var conversationName: String
     private(set) var projectName: String
 
-    /// Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
-    private var projectStore: String
-
     private(set) var history: [ChatEvent] = []
 
     private(set) var lastActivityDate: Date?
@@ -72,7 +69,6 @@ private let category = Logger.category(#fileID)
         conversationId: String,
         conversationName: String,
         projectName: String,
-        projectStore: String,
         projectId: String,
         lastActivityDate: Date?
     ) {
@@ -80,7 +76,6 @@ private let category = Logger.category(#fileID)
         self.conversationId = conversationId
         self.conversationName = conversationName
         self.projectName = projectName
-        self.projectStore = projectStore
         self.projectId = projectId
         self.lastActivityDate = lastActivityDate
     }
@@ -103,7 +98,6 @@ private let category = Logger.category(#fileID)
             )
             self.conversationName = "DebugConversation"
             self.projectName = "DebugProject"
-            self.projectStore = "Debug-Hash"
             self.projectId = "Debug-Hash"
             self.lastActivityDate = Date()
         }
@@ -168,7 +162,6 @@ private let category = Logger.category(#fileID)
         guard let conversationDetail else { return }
         conversationName = conversationDetail.name
         projectName = conversationDetail.project.name
-        projectStore = conversationDetail.project.store.lastPathComponent
         let resetHistory =
             !self.history.isEmpty && self.history != conversationDetail.history
         history = conversationDetail.history
@@ -185,7 +178,6 @@ private let category = Logger.category(#fileID)
     // 1. with for try loop, if event is a user request, start a timer count down permissionTimeout
     // 2. show a count down in the view
     // 3. on timeout, cancel the task and reload the history
-    /// - `store`: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
     func sendMessage(
         _ prompt: String,
         permissionModeOverride: PermissionMode,
@@ -196,7 +188,7 @@ private let category = Logger.category(#fileID)
         self.error = nil
         let stream = apiClient.sendMessage(
             prompt,
-            to: .conversationInStore(id: conversationId, store: projectStore),
+            conversationID: conversationId,
             permissionModeOverride: permissionModeOverride,
             permissionTimeout: self.permissionTimeout
         )
@@ -259,7 +251,7 @@ private let category = Logger.category(#fileID)
         self.appendHistory(.userResponse(userResponse))
         self.error = nil
         self.isResponding = true
-        let stream = apiClient.answer(userResponse)
+        let stream = apiClient.answer(userResponse, conversationID: conversationId)
         self.streamEvent(stream)
     }
 

@@ -10,17 +10,43 @@ import SwiftData
 import SwiftUI
 
 struct ContentView: View {
+    @AppStorage(
+        UserDefaultsKey.iosFirstLaunch.key,
+        store: UserDefaultsKey.userDefaults
+    ) var firstLaunch: Bool = true
+
     @Environment(ServerSettingManager.self) private var serverSettingManager
     @State private var showSettings: Bool = false
 
     var body: some View {
         Group {
+            if firstLaunch {
+                IntroductionView {
+                    firstLaunch = false
+                    showSettings = true
+                }
+            } else {
+                self.subsequentLaunchRoot
+            }
+        }
+        .animation(.smooth, value: firstLaunch)
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+                .environment(serverSettingManager)
+        }
+    }
+
+    @ContentBuilder
+    private var subsequentLaunchRoot: some View {
+        Group {
             if let apiClient = serverSettingManager.apiClient {
                 ProjectListView(apiClient: apiClient)
-                //                ChatView.debugServerCall(apiClient)
             } else {
                 ContentUnavailableView {
-                    Label("Server not configured", systemImage: "server.rack")
+                    Label(
+                        "Server not configured",
+                        systemImage: "server.rack"
+                    )
                 } description: {
                     Text(
                         "Please set up the configuration parameters for your Mac server."
@@ -45,10 +71,50 @@ struct ContentView: View {
             }
         }
         .labelStyle(.iconOnly)
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-                .environment(serverSettingManager)
+    }
+}
+
+struct IntroductionView: View {
+    let setup: () -> Void
+
+    private let standardSpacing = UIConstants.standardSpacing
+    var body: some View {
+        VStack(spacing: standardSpacing * 2) {
+            VStack(spacing: standardSpacing) {
+
+                Image(.icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 128)
+                VStack(spacing: standardSpacing / 2) {
+
+                    Text("Xcode Agent Remote")
+                        .font(.title)
+                        .fontWeight(.heavy)
+
+                    Text("Continue Xcode chat from anywhere.")
+                        .font(.subheadline)
+                }
+            }
+
+            Text(
+                """
+                This app works together with the MacOS app.
+                Please download it from [Github](\(gitHubLink)) and set up accordingly.
+                """
+            )
+            .foregroundStyle(.secondary)
+            .font(.subheadline)
+
+            Button("Set up iOS", action: setup)
+                .buttonSizing(.flexible)
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.glassProminent)
+                .fontWeight(.medium)
+
         }
+        .multilineTextAlignment(.center)
+        .padding(.all, standardSpacing)
     }
 }
 
@@ -109,7 +175,7 @@ struct ConversationListView: View {
                     VStack(alignment: .leading, spacing: standardSpacing / 2) {
 
                         HStack(spacing: standardSpacing / 2) {
-                            if conversation.isUnread {
+                            if conversation.isUnread || shouldHighlight {
                                 UnreadMark()
                             }
 

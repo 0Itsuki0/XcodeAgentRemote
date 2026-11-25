@@ -1,5 +1,5 @@
 //
-//  AgentModels.swift
+//  ChatGatewayModels.swift
 //  XcodeAgentRemote
 //
 //  The models each provider's agent offers, as Xcode caches them.

@@ -90,6 +90,34 @@ nonisolated enum XcodeChat {
         }
     }
 
+    // MARK: - Check a new chat
+
+    /// Checks a new chat before its first turn (`MessageTarget.newConversation`), and returns its id: the given one in
+    /// its canonical form (any case accepted), or a new one if nil.
+    /// Throws `XcodeChatError`: `.projectNotFound`, `.agentNotImplemented`, `.invalidConversationID` (not a UUID: it
+    /// names the chat's folder), `.conversationExists`.
+    static func checkNewConversation(
+        id: String?,
+        project: URL,
+        agent: AgentProviderName
+    ) throws(XcodeChatError) -> String {
+        let file = project.absoluteURL.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: file.path) else {
+            throw .projectNotFound(file)
+        }
+        guard AgentProviders.provider(for: agent) != nil else {
+            throw .agentNotImplemented(agent)
+        }
+        guard let id else { return ChatStore.newUUID() }
+        guard let uuid = UUID(uuidString: id) else {
+            throw .invalidConversationID(id)
+        }
+        guard (try? ChatStore.chatStore(conversationID: id)) == nil else {
+            throw .conversationExists(id: id)
+        }
+        return uuid.uuidString
+    }
+
     /// Runs one turn and records it, streaming its events: the prompt, then the agent's events.
     /// Throws `XcodeChatError`; `.agentFailed` after the turn's events, the turn recorded.
     /// Cancelling (stopping the iteration) stops the agent; the turn is then not recorded.
@@ -135,7 +163,7 @@ nonisolated enum XcodeChat {
         let store: URL
         let conversationID: String?
         switch target {
-        case .newConversation(let projectFile, _, _),
+        case .newConversation(let projectFile, _, _, _),
             .conversation(_, let projectFile):
             let file = projectFile.absoluteURL.standardizedFileURL
             guard FileManager.default.fileExists(atPath: file.path) else {
@@ -186,9 +214,10 @@ nonisolated enum XcodeChat {
             sessionID = existingSession
             conversation = existing
         } else {
-            guard case .newConversation(_, let agent, let name) = target else {
+            guard case .newConversation(let projectFile, let agent, let name, let id) = target else {
                 return
             }
+            let newID = try checkNewConversation(id: id, project: projectFile, agent: agent)
             guard let newProvider = AgentProviders.provider(for: agent) else {
                 throw XcodeChatError.agentNotImplemented(agent)
             }
@@ -196,6 +225,7 @@ nonisolated enum XcodeChat {
             sessionID = provider.newSessionID()
             conversation = try ChatStore.Chat.create(
                 store: store,
+                id: newID,
                 modelDefinition: .init(
                     modelIdentifier: provider.modelIdentifier,
                     agent: provider.agent
@@ -339,17 +369,6 @@ nonisolated enum XcodeChat {
 
     // MARK: Answering a request no running turn waits for
 
-    /// A request in a chat's session that waits for the user, while no running turn waits for it (the turn ended
-    /// before it was answered: its agent was stopped before it settled the request).
-    struct UnansweredRequest: Sendable {
-        var store: URL
-        var conversationID: String
-        var provider: any AgentProvider.Type
-        var sessionID: String
-        /// The tool use the request is about.
-        var toolUse: ChatEvent.ToolUse
-    }
-
     /// The chat whose session waits for the user on this tool use (its last tool use: `AgentProvider.pendingToolUse`).
     static func unansweredRequest(toolUseID: String) -> UnansweredRequest? {
         for project in ChatStore.listProjects() {
@@ -460,51 +479,5 @@ nonisolated enum XcodeChat {
         else { return nil }
         // Keep every `{% if MCPTool_X %}` section (all Xcode tools are available) and drop the tags.
         return template.replacing(#/\{%[^%]*%\}/#, with: "")
-    }
-}
-
-/// Which of a turn's events go to the caller. The provider streams them all (the turn's cards are built from all of
-/// them); the caller doesn't get what it has already or what stands for something it has:
-/// - a tool use that always waits for the user (a question, a plan): its `.userRequest` stands for it;
-/// - the agent's repeat of the earlier tool use being answered (resuming a chat): its tool use and request (the caller
-///   has the earlier one, and answered it);
-/// - `.userResponse`: the caller sent the answer;
-/// - the result of a tool use the user answered, unless it allowed a permission: the answer is its result. An allowed
-///   permission's result is the tool's output.
-nonisolated private struct ClientEvents {
-    let provider: any AgentProvider.Type
-    /// The earlier tool use being answered, until the agent repeats it.
-    var repeatedToolUse: ChatEvent.ToolUse?
-    private var repeatID: String?
-    private var answers: [String: ChatEvent.UserResponse] = [:]
-
-    init(provider: any AgentProvider.Type, repeatedToolUse: ChatEvent.ToolUse?)
-    {
-        self.provider = provider
-        self.repeatedToolUse = repeatedToolUse
-    }
-
-    /// Whether the caller gets this event (call it for every event, in order).
-    mutating func passes(_ event: ChatEvent) -> Bool {
-        switch event {
-        case .toolUse(let toolUse):
-            if let earlier = repeatedToolUse,
-                provider.isSameCall(earlier, toolUse)
-            {
-                repeatedToolUse = nil
-                repeatID = toolUse.id
-                return false
-            }
-            return !provider.alwaysWaitsForUser(toolUse)
-        case .userRequest(let request):
-            return request.toolUseID != repeatID
-        case .userResponse(let answer):
-            answers[answer.toolUseID] = answer
-            return false
-        case .toolResult(let result):
-            return answers[result.toolUseID]?.isAllowedPermission ?? true
-        default:
-            return true
-        }
     }
 }

@@ -94,7 +94,7 @@ struct ProjectListView: View {
                     HStack(spacing: standardSpacing / 2) {
                         if project.conversations.contains(
                             where: { $0.isUnread && !$0.isArchived }
-                        ) {
+                        ) || shouldHighlight {
                             UnreadMark()
                         }
                         Text(project.name)
@@ -134,9 +134,9 @@ struct NetworkErrorView: View {
         } description: {
             let recovery: String =
                 error.recoverySuggestion.map {
-                    "\n\($0)"
+                    "\n\($0.trimmed)"
                 } ?? ""
-            Text(error.localizedDescription + recovery)
+            Text(error.localizedDescription.trimmed + recovery)
                 .padding(.top, UIConstants.standardSpacing)
         } actions: {
             Button("Retry", action: retry)

@@ -14,6 +14,8 @@ extension EnvironmentValues {
     @Entry var tappedConversationId: XcodeConversation.ID? = nil
 }
 
+nonisolated let gitHubLink = "https://github.com/0Itsuki0/XcodeAgentRemote"
+
 @main
 struct XcodeAgentRemote_iOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate

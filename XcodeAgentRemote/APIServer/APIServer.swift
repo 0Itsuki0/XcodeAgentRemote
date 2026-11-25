@@ -24,12 +24,19 @@ nonisolated private let category = Logger.category(#fileID)
 ///   such chat or its transcript is missing, 501 not implemented. Listed conversations carry `isWatching`.
 /// - `POST /conversations/<Xcode chat UUID>/read` → `{"status": "ok"}` once the chat is marked read in Xcode's navigator
 ///   (`ChatStore.markRead`); 404 no such chat.
-/// - `POST /messages` with `MessageRequest` (Swift's Codable JSON; `project` is a file URL):
-///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
-///     (the stream ends with that `user_request`) or the turn ends. The prompt is not echoed:
+/// - `POST /conversations` with `CreateConversationRequest` (`project` is a file URL): a new chat with the client's id
+///   (a UUID, any case) and its first prompt → SSE stream of the first turn, like a `.prompt` below; the answers to its
+///   requests go to `/conversations/<id>/messages`. Before the stream: 400 the id is not a UUID, 409 it is already a
+///   chat's, 404 the project doesn't exist, 501 not implemented:
 ///     ```
-///     {"prompt": {"prompt": "…", "target": {"conversation": {"id": "<Xcode chat UUID>", "project": "file:///…"}},
-///                 "permissionModeOverride": "manual", "permissionTimeout": 600}}
+///     {"id": "<UUID>", "project": "file:///…/App.xcodeproj", "agent": "claude", "name": "…", "prompt": "…",
+///      "permissionModeOverride": "manual", "permissionTimeout": 600}
+///     ```
+/// - `POST /conversations/<Xcode chat UUID>/messages` with `MessageRequest` (Swift's Codable JSON):
+///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
+///     (the stream ends with that `user_request`) or the turn ends. The prompt is not echoed. 404 no such chat:
+///     ```
+///     {"prompt": {"prompt": "…", "permissionModeOverride": "manual", "permissionTimeout": 600}}
 ///     ```
 ///     Each `ChatEvent` is sent as `event: <its type>` + `data: <its JSON>`. If the turn fails, an `event: error`
 ///     with `{"message": …}` is sent.
@@ -180,7 +187,6 @@ actor APIServer {
             return SuccessResponse()
         }
 
-        // For when iCloud syncing fails: the chats and their histories, read directly from this Mac.
         router.get(RouterPath(APIServerConstants.projectsPath)) { _, _ in
             logger.info(
                 category: category,
@@ -281,6 +287,42 @@ actor APIServer {
             return SuccessResponse()
         }
 
+        router.post(RouterPath(APIServerConstants.conversationsPath)) {
+            request,
+            context -> Response in
+            logger.info(
+                category: category,
+                message: "POST /\(APIServerConstants.conversationsPath)"
+            )
+            let body = try await request.decode(
+                as: CreateConversationRequest.self,
+                context: context
+            )
+            // Checked before the stream starts, so these come back as the response's status.
+            do throws(XcodeChatError) {
+                _ = try XcodeChat.checkNewConversation(
+                    id: body.id,
+                    project: body.project,
+                    agent: body.agent
+                )
+            } catch {
+                throw httpError(error)
+            }
+            return streamResponse(
+                XcodeChat.sendMessage(
+                    body.prompt,
+                    to: .newConversation(
+                        project: body.project,
+                        agent: body.agent,
+                        name: body.name,
+                        id: body.id
+                    ),
+                    permissionModeOverride: body.permissionModeOverride,
+                    permissionTimeout: body.permissionTimeout
+                )
+            )
+        }
+
         router.post(RouterPath(APIServerConstants.messagePath)) {
             request,
             context -> Response in
@@ -288,7 +330,9 @@ actor APIServer {
                 category: category,
                 message: "POST /\(APIServerConstants.messagePath)"
             )
-
+            let conversationID = try context.parameters.require(
+                APIServerConstants.conversationIDParameter
+            )
             let body = try await request.decode(
                 as: MessageRequest.self,
                 context: context
@@ -308,14 +352,19 @@ actor APIServer {
                 return streamResponse(XcodeChat.answerUserRequest(answer))
             case .prompt(
                 let prompt,
-                let target,
                 let permissionModeOverride,
                 let permissionTimeout
             ):
+                let store: URL
+                do throws(XcodeChatError) {
+                    store = try ChatStore.chatStore(conversationID: conversationID)
+                } catch {
+                    throw httpError(error)
+                }
                 return streamResponse(
                     XcodeChat.sendMessage(
                         prompt,
-                        to: target,
+                        to: .conversationInStore(id: conversationID, store: store.path),
                         permissionModeOverride: permissionModeOverride,
                         permissionTimeout: permissionTimeout
                     )
@@ -339,8 +388,10 @@ actor APIServer {
             HTTPError(.internalServerError, message: error.localizedDescription)
         case .conversationRunning(conversationID: _):
             HTTPError(.conflict, message: error.localizedDescription)
-        case .noWaitingRequest(toolUseID: _):
+        case .noWaitingRequest(toolUseID: _), .invalidConversationID(_):
             HTTPError(.badRequest, message: error.localizedDescription)
+        case .conversationExists(id: _):
+            HTTPError(.conflict, message: error.localizedDescription)
         }
     }
 

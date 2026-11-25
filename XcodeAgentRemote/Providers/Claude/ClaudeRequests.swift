@@ -67,8 +67,30 @@ nonisolated extension ClaudeProvider {
 
     /// A question (AskUserQuestion) or a plan (ExitPlanMode): always a request.
     static func alwaysWaitsForUser(_ toolUse: ChatEvent.ToolUse) -> Bool {
-        if case .permission = requestKind(of: toolUse) { false } else { true }
+        if isPlanWithoutPlan(toolUse) { return true }
+        if case .permission = requestKind(of: toolUse) { return false } else { return true }
     }
+
+    /// An ExitPlanMode whose input has no `plan`. Claude fills `plan` in from the plan file when it writes the tool use;
+    /// when the agent writes that file (`Write` to `<config>/plans/`) in the same message, the file may not be written
+    /// yet, and the tool use has no `plan`. Only then is the plan taken from elsewhere: live, the permission request
+    /// (`can_use_tool`, which has it); in history, the result line's `toolUseResult.plan`, or, while it waits, the
+    /// plan file's `Write`. An ExitPlanMode with `plan` is left as it is.
+    static func isPlanWithoutPlan(_ toolUse: ChatEvent.ToolUse) -> Bool {
+        toolUse.name == "ExitPlanMode" && toolUse.input["plan"] == nil
+    }
+
+    /// The tool use the agent asks about (`can_use_tool`), as its request shows it: an ExitPlanMode written without its
+    /// plan (`isPlanWithoutPlan`) gets the plan from the request's input. Any other tool use is left as it is.
+    static func askedToolUse(_ toolUse: ChatEvent.ToolUse, requestInput: [String: JSONValue]?) -> ChatEvent.ToolUse {
+        guard isPlanWithoutPlan(toolUse), let plan = requestInput?["plan"] else { return toolUse }
+        var toolUse = toolUse
+        toolUse.input["plan"] = plan
+        return toolUse
+    }
+
+    /// Where the agent writes its plans.
+    private static let plansDirectory = configDirectory.appending(path: "plans")
 
     /// What a request about this tool use asks: questions (AskUserQuestion's input), a plan (ExitPlanMode's input),
     /// else permission for it.
@@ -122,9 +144,21 @@ nonisolated extension ClaudeProvider {
         }
         var toolUses: [String: ChatEvent.ToolUse] = [:]
         var withRequests: [ChatEvent] = []
+        // The content of the latest `Write` to the plan file (`isPlanWithoutPlan`).
+        var writtenPlan: JSONValue?
         for event in events {
             switch event {
-            case .toolUse(let toolUse):
+            case .toolUse(var toolUse):
+                if toolUse.name == "Write",
+                    toolUse.stringInput("file_path")?.hasPrefix(plansDirectory.path + "/") == true
+                {
+                    writtenPlan = toolUse.input["content"]
+                }
+                if isPlanWithoutPlan(toolUse),
+                    let plan = decisions[toolUse.id]?.plan.map(JSONValue.string) ?? writtenPlan
+                {
+                    toolUse.input["plan"] = plan
+                }
                 toolUses[toolUse.id] = toolUse
                 let request =
                     results[toolUse.id] != nil
@@ -180,13 +214,6 @@ nonisolated extension ClaudeProvider {
     static let declinedMessage = "The user declined to answer."
     static let rejectedPlanMessage = "The user rejected the plan."
 
-    /// How the user settled a request.
-    private enum Settled {
-        /// Allowed (answered, approved) or not.
-        case answered(allowed: Bool)
-        /// Not answered in time: the app denied it.
-        case timedOut
-    }
 
     /// How the user settled a tool use, from its result line's decision; nil if they weren't asked about it:
     /// - `user_temporary`: allowed; `user_reject`: denied, unless it is the app's timeout deny;
@@ -241,15 +268,6 @@ nonisolated extension ClaudeProvider {
         }
     }
 
-    /// What a result line says about the decision.
-    private struct UserDecision {
-        /// `permissionDecision.source`.
-        var source: String
-        /// `permissionDecision.decision`: "accept" or "reject".
-        var decision: String?
-        /// The answers to questions (`toolUseResult.answers`, `{"<question>": "<label>, <label>"}`), by question.
-        var answers: [String: [String]]
-    }
 
     /// The tool uses whose result line has a decision from one of `userDecisionSources`, with that decision.
     private static func userDecisions(_ transcript: Data) -> [String:
@@ -273,12 +291,17 @@ nonisolated extension ClaudeProvider {
                     answers[question] = labels.components(separatedBy: ", ")
                 }
             }
+            var plan: String?
+            if case .object(let result)? = entry.toolUseResult, case .string(let text)? = result["plan"] {
+                plan = text
+            }
             for block in entry.message?.content ?? [] {
                 if let toolUseID = block.toolUseID {
                     decisions[toolUseID] = UserDecision(
                         source: source,
                         decision: entry.permissionDecision?.decision,
-                        answers: answers
+                        answers: answers,
+                        plan: plan
                     )
                 }
             }
@@ -286,32 +309,6 @@ nonisolated extension ClaudeProvider {
         return decisions
     }
 
-    /// A transcript line's tool results, its `permissionDecision` and `toolUseResult` (only the fields read here).
-    private struct DecidedResultLine: Decodable {
-        struct Decision: Decodable {
-            var source: String?
-            var decision: String?
-        }
-        struct Message: Decodable {
-            struct Block: Decodable {
-                var toolUseID: String?
-                enum CodingKeys: String, CodingKey {
-                    case toolUseID = "tool_use_id"
-                }
-            }
-            var content: [Block]?
-
-            init(from decoder: Decoder) throws {
-                // `content` is a string for a prompt: no tool results.
-                content = try? decoder.container(keyedBy: CodingKeys.self)
-                    .decode([Block].self, forKey: .content)
-            }
-            enum CodingKeys: String, CodingKey { case content }
-        }
-        var permissionDecision: Decision?
-        var message: Message?
-        var toolUseResult: JSONValue?
-    }
 
     // MARK: The waiting tool use
 
@@ -336,183 +333,6 @@ nonisolated extension ClaudeProvider {
                 nil
             }
         }.first
-    }
-
-    /// Removes a tool use and its result from the transcript: their lines (or only their blocks, if a message has
-    /// other blocks).
-    static func removeToolUse(_ toolUseID: String, sessionID: String) throws {
-        _ = try removeBlocks(sessionID: sessionID) { _, block in
-            isBlock(block, of: toolUseID)
-        }
-        PendingToolUses.remove(toolUseID, agent: agent)
-    }
-
-    /// The text Claude adds after a tool use's "rejected" result when the user stops it in Xcode (the close button).
-    private static let interruptedText =
-        "[Request interrupted by user for tool use]"
-
-    /// The result Claude writes for a tool killed while it ran (the project closed by the app with AppleScript: Xcode
-    /// doesn't notice, its agent's tool is killed).
-    private static let killedResult = "Exit code 137"
-
-    /// Removes the result the agent wrote when it was stopped while the tool ran, and only that, so a tool that finished
-    /// on its own keeps its result (it is not run again):
-    /// - the project closed by the app (AppleScript): `"content": "Exit code 137"`, `"is_error": true`,
-    ///   `"toolUseResult": "Error: Exit code 137"`;
-    /// - the user stopping it in Xcode (the close button): `"toolDenialKind": "user-rejected"`, then the interrupted
-    ///   text;
-    /// - the project closed by the app while Xcode's prompt was still open: `"toolDenialKind": "cancelled"` ("The user
-    ///   doesn't want to take this action right now…").
-    static func removeStoppedResult(of toolUseID: String, sessionID: String)
-        throws -> Bool
-    {
-        let transcript = try transcriptFile(sessionID: sessionID)
-        // The result's line, if it is one of those.
-        var resultLine: String?
-        for line in try String(contentsOf: transcript, encoding: .utf8).split(
-            separator: "\n"
-        ) where line.contains(toolUseID) {
-            guard
-                let entry = try? JSONDecoder().decode(
-                    [String: JSONValue].self,
-                    from: Data(line.utf8)
-                ),
-                case .object(let message)? = entry["message"],
-                case .array(let blocks)? = message["content"],
-                let result = blocks.first(where: {
-                    isResultBlock($0, of: toolUseID)
-                }), case .object(let fields) = result,
-                case .string(let uuid)? = entry["uuid"]
-            else { continue }
-            let rejected = entry["toolDenialKind"] == .string("user-rejected")
-                || entry["toolDenialKind"] == .string("cancelled")
-            let killed =
-                fields["content"] == .string(killedResult)
-                && fields["is_error"] == .bool(true)
-                && entry["toolUseResult"] == .string("Error: \(killedResult)")
-            if rejected || killed { resultLine = uuid }
-        }
-        guard let resultLine else { return false }
-        return try removeBlocks(sessionID: sessionID) { entry, block in
-            if isResultBlock(block, of: toolUseID) {
-                return entry["uuid"] == .string(resultLine)
-            }
-            // The interrupted text right after it (only when the user stopped it in Xcode).
-            guard entry["parentUuid"] == .string(resultLine),
-                case .object(let fields) = block
-            else { return false }
-            return fields["type"] == .string("text")
-                && fields["text"] == .string(interruptedText)
-        }
-    }
-
-    /// Removes the content blocks `isRemoved` picks (given the block's line), and the lines left without blocks. Lines
-    /// that point at a removed line (`parentUuid`, `leafUuid`) are pointed past it, to the nearest line that stays, so
-    /// the chain stays. Returns whether anything was removed.
-    private static func removeBlocks(
-        sessionID: String,
-        where isRemoved: ([String: JSONValue], JSONValue) -> Bool
-    ) throws -> Bool {
-        let transcript = try transcriptFile(sessionID: sessionID)
-        let lines = try String(contentsOf: transcript, encoding: .utf8)
-            .split(separator: "\n", omittingEmptySubsequences: false).map(
-                String.init
-            )
-        var removedAny = false
-        // Removed line uuid → its parent uuid.
-        var removedParents: [String: JSONValue] = [:]
-        var kept: [String] = []
-        for line in lines {
-            guard
-                var entry = try? JSONDecoder().decode(
-                    [String: JSONValue].self,
-                    from: Data(line.utf8)
-                ),
-                case .object(var message)? = entry["message"],
-                case .array(let blocks)? = message["content"]
-            else {
-                kept.append(line)
-                continue
-            }
-            let others = blocks.filter { !isRemoved(entry, $0) }
-            if others.count == blocks.count {
-                kept.append(line)
-                continue
-            }
-            removedAny = true
-            if others.isEmpty {
-                if case .string(let uuid)? = entry["uuid"] {
-                    removedParents[uuid] = entry["parentUuid"] ?? .null
-                }
-            } else {
-                message["content"] = .array(others)
-                entry["message"] = .object(message)
-                kept.append(try encodedLine(entry))
-            }
-        }
-        /// The nearest line that stays, going up from a removed one.
-        func survivingParent(of uuid: String) -> JSONValue {
-            var parent = removedParents[uuid] ?? .null
-            while case .string(let next) = parent, let up = removedParents[next]
-            { parent = up }
-            return parent
-        }
-        let relinked = try kept.map { line in
-            guard !removedParents.isEmpty,
-                var entry = try? JSONDecoder().decode(
-                    [String: JSONValue].self,
-                    from: Data(line.utf8)
-                )
-            else { return line }
-            var changed = false
-            for key in ["parentUuid", "leafUuid"] {
-                if case .string(let uuid)? = entry[key],
-                    removedParents[uuid] != nil
-                {
-                    entry[key] = survivingParent(of: uuid)
-                    changed = true
-                }
-            }
-            return changed ? try encodedLine(entry) : line
-        }
-        if removedAny {
-            try relinked.joined(separator: "\n").write(
-                to: transcript,
-                atomically: true,
-                encoding: .utf8
-            )
-        }
-        return removedAny
-    }
-
-    private static func isResultBlock(_ block: JSONValue, of toolUseID: String)
-        -> Bool
-    {
-        guard case .object(let fields) = block else { return false }
-        return fields["type"] == .string("tool_result")
-            && fields["tool_use_id"] == .string(toolUseID)
-    }
-
-    /// Whether a content block is the tool use with this id, or its result.
-    private static func isBlock(_ block: JSONValue, of toolUseID: String)
-        -> Bool
-    {
-        guard case .object(let fields) = block else { return false }
-        switch fields["type"] {
-        case .string("tool_use")?: return fields["id"] == .string(toolUseID)
-        case .string("tool_result")?:
-            return fields["tool_use_id"] == .string(toolUseID)
-        default: return false
-        }
-    }
-
-    /// One transcript line: compact JSON, slashes unescaped (as Claude writes them).
-    private static func encodedLine(_ entry: [String: JSONValue]) throws
-        -> String
-    {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.withoutEscapingSlashes]
-        return String(decoding: try encoder.encode(entry), as: UTF8.self)
     }
 
     // MARK: Repeated calls

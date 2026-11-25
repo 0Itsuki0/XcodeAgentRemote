@@ -232,11 +232,11 @@ nonisolated extension ChatStore {
         /// A new chat (not written until `save`), for an agent session.
         static func create(
             store: URL,
+            id: String,
             modelDefinition: ChatStore.AgentModel,
             sessionID: String,
             name: String
         ) throws -> Chat {
-            let id = newUUID()
             let configuration = ChatStore.AssistantConfiguration(
                 agent: .init(_0: .init(sessionID: sessionID))
             )

@@ -22,6 +22,7 @@ nonisolated enum UserDefaultsKey: String, CaseIterable {
     case startNgrokTunnelOnServerStart
 
     case apiServerURL
+    case iosFirstLaunch
 
     static var userDefaults: UserDefaults { .standard }
 

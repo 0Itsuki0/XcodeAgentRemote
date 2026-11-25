@@ -1,52 +1,13 @@
 //
-//  Message.swift
+//  ChatEvent.swift
 //  XcodeAgentRemote
 //
-//  Types shared by the macOS app (sendMessage / server) and the iOS app (server client).
+//  Created by Itsuki on 2026/11/25.
 //
 
 import Foundation
 
-// MARK: - Input
-
-/// The agents Xcode can run: `xcrun mcpbridge run-agent <agent>`
-/// ("Supported agents: antigravity, claude, claude-ext, codex, copilot, mock-agent").
-nonisolated enum AgentProviderName: String, Codable, CaseIterable, Sendable,
-    Hashable, Equatable
-{
-    case antigravity
-    case claude
-    case claudeExt = "claude-ext"
-    case codex
-    case copilot
-    case mockAgent = "mock-agent"
-}
-
-/// Which chat a message goes to (`sendMessage`).
-nonisolated enum MessageTarget: Codable, Sendable {
-    /// Start a new chat in the project (`.xcodeproj` / `.xcworkspace`) with this agent.
-    case newConversation(
-        project: URL,
-        agent: AgentProviderName,
-        name: String? = nil
-    )
-    /// Continue a chat of the project.
-    case conversation(id: String, project: URL)
-    /// Continue a chat, given its Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
-    case conversationInStore(id: String, store: String)
-}
-
-/// Manual / Auto, to override Xcode's setting for one message.
-nonisolated enum PermissionMode: String, Identifiable, Codable, Sendable,
-    Hashable, Equatable,
-    CaseIterable
-{
-    case manual, auto
-
-    var id: String { self.rawValue }
-}
-
-// MARK: - Events
+// MARK: - Chat Events (used in history as well as live streaming)
 
 /// One event of a conversation. The same type for a turn streaming live (`sendMessage`) and for a chat's history.
 /// JSON (the server's SSE events), discriminated by "type".
@@ -266,19 +227,4 @@ nonisolated extension ChatEvent {
             }
         }
     }
-}
-
-// MARK: - Request body
-
-/// The JSON body of `POST /messages`: a new message (the parameters of `sendMessage`),
-/// or the user's answer to a request the running turn waits for (`answerUserRequest`).
-nonisolated enum MessageRequest: Codable, Sendable {
-    /// Seconds a request to the user (permission, questions, plan) waits for its answer before it is denied; nil: 600.
-    case prompt(
-        prompt: String,
-        target: MessageTarget,
-        permissionModeOverride: PermissionMode? = nil,
-        permissionTimeout: TimeInterval? = nil
-    )
-    case answer(ChatEvent.UserResponse)
 }

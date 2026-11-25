@@ -230,6 +230,13 @@ Real lines from Claude's session files (`ClaudeAgentConfig/projects/<cwd>/<sessi
 {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_0175xuriiSDtDrK73TPskQw3", "name": "ExitPlanMode", "input": {"plan": "# Plan\n\n## Context\nYou asked for a one-step plan that runs `echo planned`.\n\n## Steps\n1. Ru…", "planFilePath": "/Users/itsuki/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/plans/synthetic-gr…"}, "caller": {"type": "direct"}}]}}
 ```
 
+- without `plan`: the agent may write the plan file (`Write` to `ClaudeAgentConfig/plans/<name>.md`) in the same message as `ExitPlanMode`. Claude fills `plan` in from that file when it writes the tool use; if the file isn't written yet, the tool use has no `plan` (seen 3 times in 88 calls). the permission request (`can_use_tool`) still has it, with `planFilePath`; the result line's `toolUseResult.plan` too
+
+```json
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_0128WXcMvNn9bNx6A8sPbsUv", "name": "ExitPlanMode", "input": {}, "caller": {"type": "direct"}}]}}
+{"type": "control_request", "request_id": "…", "request": {"subtype": "can_use_tool", "tool_name": "ExitPlanMode", "input": {"plan": "# Plan\n\n…", "planFilePath": "/Users/itsuki/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/plans/abstract-percolating-meadow.md"}, "tool_use_id": "toolu_…"}}
+```
+
 - approved, rejected with feedback
 
 ```json
@@ -328,7 +335,7 @@ We need to tell it apart from other tool user so that we can have the user to an
     - it has a result decided by the user: `permissionDecision.source` `user_temporary` (allowed / answered / approved) or `user_reject` (denied / declined / rejected; `No answer to this …` is the app's timeout: still a request, but no response)
     - it has no result yet, and it is a question or a plan
     - it has no result yet, it is marked, and it is the session's last message (else the mark is stale)
-- `POST /messages`:  the request is a `user_request` event, and the stream ends there.
+- `POST /conversations` / `POST /conversations/<id>/messages`:  the request is a `user_request` event, and the stream ends there.
 - `GET /conversations/<id>`: the conversation's `history` has the same event
 - the app quitting (or the turn being stopped) is not a pending request: the agent sees its stdin close, settles the request itself (`Tool permission request failed: … stream closed …`), finishes the turn
 - the agent terminated while waiting is: the tool use stays without a result. If the user answers the request, the app resumes the chat with the answer as the prompt:
@@ -500,34 +507,34 @@ What that means for us:
 
 ### Sample Send Message Calls
 
-Real calls to the server (`POST /messages`, JSON body, SSE response), from one chat.
+Calls to the server (JSON body, SSE response), from one chat: `POST /conversations` starts it (with the id the client chose, and its first prompt), `POST /conversations/<id>/messages` takes its next prompts and the answers to its requests.
 
 - every response is `HTTP 200 text/event-stream`: `event: <type>` + `data: <ChatEvent JSON>` per event
 - the prompt is not echoed back: the caller has it
 - a response ends where the turn waits for the user (its last event is a `user_request`), or where the turn ends
-- the answer to that request is another `POST /messages`, and its response continues the same turn. the answer is not echoed back either (the client keeps it, as `user_response` in its history)
+- the answer to that request is a `POST /conversations/<id>/messages`, and its response continues the same turn (also in a chat's first turn: the client has its id). the answer is not echoed back either (the client keeps it, as `user_response` in its history)
     - an allowed permission: the tool's own `tool_result` comes next
     - anything else (a deny, answered questions, a plan): no `tool_result` (its result is the answer itself)
-- `project` is a file URL. in Swift: `sendMessage(_:to:…)` / `answerUserRequest(_:)` on the Mac, `APIServerClient.sendMessage` / `.answer` on iOS
+- `project` is a file URL. in Swift: `sendMessage(_:to:…)` / `answerUserRequest(_:)` on the Mac, `APIServerClient.startConversation` / `.sendMessage` / `.answer` on iOS
 
 #### Regular message (new chat)
 
 ```
-POST /messages
-{"prompt":{"permissionModeOverride":"manual","prompt":"Reply with only the word pong.","target":{"newConversation":{"project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj","name":"Sample calls","agent":"claude"}}}}
+POST /conversations
+{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj","agent":"claude","name":"Sample calls","prompt":"Reply with only the word pong.","permissionModeOverride":"manual"}
 
 event: assistant_message
 data: {"text":"pong","type":"assistant_message"}
 ```
 
-- other targets: `{"conversation":{"id":"<Xcode chat UUID>","project":"file:///…"}}`, `{"conversationInStore":{"id":"<Xcode chat UUID>","store":"<ProjectName>-<hash>"}}`
-- optional: `"permissionModeOverride": "manual" | "auto"`, `"permissionTimeout": <seconds>` (default 600)
+- `id`: chosen by the client, a UUID in any case. before the stream: 400 not a UUID, 409 already a chat's, 404 no such project, 501 agent not implemented
+- optional: `"name"` (default: the start of the prompt), `"permissionModeOverride": "manual" | "auto"`, `"permissionTimeout": <seconds>` (default 600). the same two in a `prompt` to `/conversations/<id>/messages`
 
 #### Tool call → approve
 
 ```
-POST /messages
-{"prompt":{"permissionModeOverride":"manual","prompt":"Use the Bash tool to run: touch /tmp/sample-calls-allowed. Then reply DONE.","target":{"conversation":{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj"}}}}
+POST /conversations/7F58BC9E-9D95-4896-9FF2-F857662167F9/messages
+{"prompt":{"permissionModeOverride":"manual","prompt":"Use the Bash tool to run: touch /tmp/sample-calls-allowed. Then reply DONE."}}
 
 event: tool_use
 data: {"input":{"command":"touch \/tmp\/sample-calls-allowed","description":"Create empty marker file in \/tmp"},"name":"Bash","type":"tool_use","id":"toolu_019JRJBSVPfCxjfE8nZBjypA"}
@@ -537,7 +544,7 @@ data: {"type":"user_request","request":{"permission":{"_0":{"input":{"command":"
 ```
 
 ```
-POST /messages
+POST /conversations/7F58BC9E-9D95-4896-9FF2-F857662167F9/messages
 {"answer":{"_0":{"permission":{"allow":true,"toolUseID":"toolu_019JRJBSVPfCxjfE8nZBjypA"}}}}
 
 event: tool_result
@@ -550,8 +557,8 @@ data: {"type":"assistant_message","text":"DONE"}
 #### Question → choice
 
 ```
-POST /messages
-{"prompt":{"permissionModeOverride":"manual","prompt":"Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose.","target":{"conversation":{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj"}}}}
+POST /conversations/7F58BC9E-9D95-4896-9FF2-F857662167F9/messages
+{"prompt":{"permissionModeOverride":"manual","prompt":"Use the AskUserQuestion tool to ask me which color I prefer, with exactly these options: Red, Green, Blue. Then reply with only the color I chose."}}
 
 event: tool_use
 data: {"name":"AskUserQuestion","input":{"questions":[{"header":"Color","options":[{"label":"Red","description":"The color red"},{"label":"Green","description":"The color green"},{"label":"Blue","description":"The color blue"}],"question":"Which color do you prefer?","multiSelect":false}]},"type":"tool_use","id":"toolu_014HT2HpyJoEaRDU7SWo8T1D"}
@@ -561,7 +568,7 @@ data: {"type":"user_request","request":{"questions":{"toolUseID":"toolu_014HT2Hp
 ```
 
 ```
-POST /messages
+POST /conversations/7F58BC9E-9D95-4896-9FF2-F857662167F9/messages
 {"answer":{"_0":{"questions":{"toolUseID":"toolu_014HT2HpyJoEaRDU7SWo8T1D","answers":{"Which color do you prefer?":["Green"]}}}}}
 
 event: assistant_message
@@ -573,8 +580,8 @@ data: {"type":"assistant_message","text":"Green"}
 #### Tool call → deny
 
 ```
-POST /messages
-{"prompt":{"permissionModeOverride":"manual","prompt":"Use the Bash tool to run: touch /tmp/sample-calls-denied. If it is denied, reply DENIED.","target":{"conversation":{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj"}}}}
+POST /conversations/7F58BC9E-9D95-4896-9FF2-F857662167F9/messages
+{"prompt":{"permissionModeOverride":"manual","prompt":"Use the Bash tool to run: touch /tmp/sample-calls-denied. If it is denied, reply DENIED."}}
 
 event: tool_use
 data: {"name":"Bash","input":{"description":"Create empty marker file in \/tmp","command":"touch \/tmp\/sample-calls-denied"},"type":"tool_use","id":"toolu_01KZxEH1GRg1fjDY7DXAYyGD"}
@@ -584,7 +591,7 @@ data: {"type":"user_request","request":{"permission":{"_0":{"input":{"descriptio
 ```
 
 ```
-POST /messages
+POST /conversations/7F58BC9E-9D95-4896-9FF2-F857662167F9/messages
 {"answer":{"_0":{"permission":{"allow":false,"toolUseID":"toolu_01KZxEH1GRg1fjDY7DXAYyGD","message":"Not now."}}}}
 
 event: assistant_message
@@ -596,6 +603,7 @@ data: {"type":"assistant_message","text":"DENIED"}
 - decline the questions: `{"answer":{"_0":{"declineQuestions":{"toolUseID":"toolu_…"}}}}` (optional `"message"`)
 - approve a plan (ExitPlanMode): `{"answer":{"_0":{"planApproval":{"approve":true,"toolUseID":"toolu_…"}}}}`
 - reject a plan: `{"answer":{"_0":{"planApproval":{"approve":false,"feedback":"Run `echo second` instead.","toolUseID":"toolu_…"}}}}`
+- no such chat (`/conversations/<id>/messages`): `404`
 - no turn waiting for that tool use: `404`, `{"error":{"message":"No turn is waiting for an answer to tool use toolu_…"}}`
 - the turn failed: the response ends with `event: error`, `data: {"message":"…"}`
 
@@ -629,6 +637,7 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 - how the agent asks the user, for each kind: permission, questions, plan. for Claude all three are the same `can_use_tool` request, answered allow / deny
 - what the answer looks like in the session file, for each kind and each answer (allowed, denied with / without a message, questions answered / declined, plan approved / rejected with feedback)
 - multi-select answers: Claude joins the labels with `, ` (`"Red, Blue"`). a label that itself contains `, ` can't be split back. check whether the new agent keeps them apart
+- a request's input may be incomplete in the tool use and complete only in the request: Claude's `ExitPlanMode` has no `plan` when the agent writes the plan file in the same message ([Plan](#plan-exitplanmode)). only then is the plan taken from elsewhere (`isPlanWithoutPlan`): live, the `can_use_tool` input (`askedToolUse`); in history, `toolUseResult.plan`, or the plan file's `Write` while it waits. without it, the plan was asked as a permission, and the caller got its `.toolUse`. it happened in a test run, not in the earlier ones: the agent's choice to write both in one message is random
 - the app's own timeout deny: give it a text you can recognise later (Claude: `No answer to this …`). it is a request that was asked and never answered: no `userResponse`
 
 **Who decided (history)**

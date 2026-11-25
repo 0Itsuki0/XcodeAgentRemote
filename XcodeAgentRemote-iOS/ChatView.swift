@@ -46,7 +46,6 @@ where
                     conversationId: DebugConstants.conversationId,
                     conversationName: "Debug Conversation",
                     projectName: "Debug Project",
-                    projectStore: DebugConstants.chatStore,
                     projectId: DebugConstants.chatStore,
                     lastActivityDate: Date()
                 )
@@ -71,7 +70,6 @@ extension ChatView {
             conversationId: conversation.id,
             conversationName: conversation.name,
             projectName: projectName,
-            projectStore: projectStore,
             projectId: projectId,
             lastActivityDate: lastActivityDate
         )
@@ -143,7 +141,7 @@ struct ChatView: View {
                 systemImage: "laptopcomputer.trianglebadge.exclamationmark"
             )
         } description: {
-            Text(error.localizedDescription)
+            Text(error.localizedDescription.trimmed)
                 .padding(.top, UIConstants.standardSpacing)
         } actions: {
             Button("Retry") {

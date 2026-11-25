@@ -2,12 +2,12 @@
 //  ChatTypes.swift
 //  XcodeAgentRemote
 //
-//  The Xcode projects and conversations listed by the macOS app (`XcodeChat.listProjects`, `GET /projects`), and one
-//  conversation in full (`XcodeChat.conversation(id:)`, `GET /conversations/<id>`), shared with the iOS app.
+//  Created by Itsuki on 2026/11/21.
 //
 
 import Foundation
 
+/// Type for `GET /projects`
 /// A project that has Xcode chats: one chat store folder `<ProjectName>-<hash>`.
 nonisolated struct XcodeProject: Codable, Identifiable, Sendable, Hashable,
     Equatable
@@ -51,7 +51,8 @@ nonisolated struct XcodeConversation: Codable, Identifiable, Sendable,
     var isWatching: Bool = false
 }
 
-/// One Xcode conversation in full (`GET /conversations/<id>`): its fields, its history, and the project it belongs to.
+/// Type for `GET /conversations/<id>`
+/// One Xcode conversation in full: its fields, its history, and the project it belongs to.
 nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable,
     Hashable, Equatable
 {

@@ -14,9 +14,15 @@ nonisolated enum APIServerConstants {
 
     /// `GET /health` → `SuccessResponse`
     static let healthPath = "health"
-    /// `POST /messages` with a `MessageRequest` body: `.prompt` → SSE stream of `ChatEvent`s (event name =
-    /// `ChatEvent.type`), or an `errorEvent` if the turn fails; `.answer` → the same turn's events, continued, or 404.
-    static let messagePath = "messages"
+    /// `POST /conversations` with a `CreateConversationRequest` body: a new chat with the client's id, and its first
+    /// prompt → SSE stream of the first turn's events, like `messagePath`'s `.prompt` (its answers go to `messagePath`).
+    /// Before the stream: 400 if the id is not a UUID, 409 if it is already a chat's, 404 if the project doesn't exist,
+    /// 501 if its agent is not implemented.
+    static let conversationsPath = "conversations"
+    /// `POST /conversations/<Xcode chat UUID>/messages` with a `MessageRequest` body: `.prompt` → SSE stream of
+    /// `ChatEvent`s (event name = `ChatEvent.type`), or an `errorEvent` if the turn fails, 404 if there is no such chat;
+    /// `.answer` → the same turn's events, continued, or 404.
+    static let messagePath = "conversations/:\(conversationIDParameter)/messages"
     /// `GET /projects` → `[XcodeProject]`: every project with Xcode chats, with its conversations, no histories
     /// (`XcodeChat.listProjects`).
     static let projectsPath = "projects"
@@ -36,7 +42,7 @@ nonisolated enum APIServerConstants {
     static let providersPath = "providers"
 
     // MARK: - Path parameters
-    /// The path parameter for Xcode's chat UUID in `conversationPath`, `watchPath` and `readPath`.
+    /// The path parameter for Xcode's chat UUID in `conversationPath`, `messagePath`, `watchPath` and `readPath`.
     static let conversationIDParameter = "conversationID"
 
     /// The path with its `:conversationID` replaced by `conversationID` (what the client requests).

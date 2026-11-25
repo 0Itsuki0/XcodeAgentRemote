@@ -49,32 +49,6 @@ struct SettingsView: View {
     }
 }
 
-//extension ToolbarItem where ID == () {
-//    @ToolbarContentBuilder
-//    static func closeButton(onClose: @escaping () -> Void) -> ToolbarItem {
-//        ToolbarItem(placement: .topBarTrailing) {
-//            Button("Close", systemImage: "xmark") {
-////                onClose()
-//            }
-//        }
-//
-//    }
-//}
-
-//struct ServerConfigurationDidChange: NotificationCenter.MainActorMessage {
-//    typealias Subject = Never
-//    let apiClient: APIServerClient?
-//}
-//
-//extension NotificationCenter.MessageIdentifier
-//where
-//    Self == NotificationCenter.BaseMessageIdentifier<
-//        ServerConfigurationDidChange
-//    >
-//{
-//    static var serverConfigurationDidChange: Self { .init() }
-//}
-
 // To receive push notifications on conversation
 // 1. start conversation monitor on Mac
 // 2. sign in to same iCloud account on Mac and iOS
@@ -210,7 +184,7 @@ struct ServerSettingView: View {
             .buttonSizing(.flexible)
 
             if let error {
-                Text(error)
+                Text(error.trimmed)
                     .foregroundStyle(.red)
                     .font(.footnote)
                     .multilineTextAlignment(.leading)
