@@ -21,7 +21,7 @@
             withExtension: "json"
         )
 
-        static let conversations: [XcodeChatConversation] = [
+        static let conversations: [XcodeConversation] = [
             .init(
                 id: conversationId,
                 name: "Debug1",

@@ -78,7 +78,7 @@
 
         /// A Claude chat of Xcode's chat store whose agent session has a transcript.
         static func claudeChat() -> (
-            project: XcodeProject, chat: XcodeChatConversation,
+            project: XcodeProject, chat: XcodeConversation,
             sessionID: String
         )? {
             for project in ChatStore.listProjects() {
@@ -132,8 +132,8 @@
             )
         }
 
-        @Test func unknownConversationNotFound() {
-            #expect(throws: ChatStoreError.self) {
+        @Test func unknownchatNotFound() {
+            #expect(throws: XcodeChatError.self) {
                 try ChatStore.conversation(
                     id: "00000000-0000-0000-0000-000000000000"
                 )

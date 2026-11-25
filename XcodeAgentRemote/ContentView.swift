@@ -137,7 +137,7 @@ struct ContentView: View {
         )
         Task {
             do {
-                for try await event in sendMessage(
+                for try await event in  XcodeChat.sendMessage(
                     "Reply with only the word pong.",
                     to: target
                 ) {

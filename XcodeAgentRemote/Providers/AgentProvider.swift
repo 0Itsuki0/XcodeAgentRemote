@@ -17,14 +17,14 @@ nonisolated protocol AgentProvider: SendableMetatype {
     /// The folder the agent ran a session in, if the session records it.
     static func workingDirectory(sessionID: String) -> URL?
 
-    // MARK: Running a turn (XcodeChat/XcodeChat.swift)
+    // MARK: - Running a turn (XcodeChat/XcodeChat.swift)
 
     /// `chatModelDefinitionIdentifier.modelIdentifier` of the agent's chats, e.g. "claude-code".
     static var modelIdentifier: String { get }
     /// A session id for a new chat.
     static func newSessionID() -> String
     /// File that stores the transcript for a session
-    static func transcriptFile(sessionID: String) throws(ChatStoreError) -> URL
+    static func transcriptFile(sessionID: String) throws(XcodeChatError) -> URL
     /// Runs one turn of the agent in `request.workingDirectory` and streams its events (not the prompt).
     /// If the agent asks the user (permission to use a tool, questions, a plan), waits for the answer to that tool use
     /// (`PendingUserRequestHandler.waitForAnswer`); no answer is a deny. Records the file content around its

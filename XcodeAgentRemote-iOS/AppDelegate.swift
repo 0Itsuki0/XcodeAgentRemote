@@ -19,9 +19,9 @@ nonisolated private let category = Logger.category(#fileID)
 
     private var observationToken: NotificationCenter.ObservationToken?
 
-    private var selectedConversationId: XcodeChatConversation.ID?
+    private var selectedConversationId: XcodeConversation.ID?
 
-    private(set) var tappedConversationId: XcodeChatConversation.ID? = DebugConstants.conversationId
+    private(set) var tappedConversationId: XcodeConversation.ID? = nil
 
     /// perform set ups
     private func setupAppOnLaunch() {

@@ -33,7 +33,7 @@
 
         @Test func unknownConversationThrows() async {
             let watcher = ChatWatcher()
-            await #expect(throws: ChatStoreError.self) {
+            await #expect(throws: XcodeChatError.self) {
                 try await watcher.watchConversation(unknownID)
             }
             #expect(watcher.watchingConversationIds.isEmpty)

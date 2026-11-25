@@ -38,18 +38,6 @@ nonisolated extension ClaudeProvider {
         }
     }
 
-    /// Xcode's system prompt addition, rendered from its template inside Xcode.
-    private static func xcodeSystemPrompt() -> String? {
-        guard let developer = CommandExecutor.runCommand(["xcode-select", "-p"])?.trimmingCharacters(in: .whitespacesAndNewlines)
-        else { return nil }
-        let path = (developer as NSString).appendingPathComponent(
-            "../PlugIns/IDEIntelligenceChat.framework/Resources/AgentSystemPromptAddition.idechatprompttemplate")
-        guard let template = try? String(contentsOfFile: (path as NSString).standardizingPath, encoding: .utf8)
-        else { return nil }
-        // Keep every `{% if MCPTool_X %}` section (all Xcode tools are available) and drop the tags.
-        return template.replacing(#/\{%[^%]*%\}/#, with: "")
-    }
-
     /// The command line, after `xcrun`.
     private static func launchArguments(sessionID: String, resume: Bool, permissionMode: XcodeAgentConfiguration.PermissionMode)
         -> [String]
@@ -65,7 +53,7 @@ nonisolated extension ClaudeProvider {
             "--thinking-display", "summarized",
             "--allowedTools", xcodeAllowedTools.joined(separator: ","),
         ]
-        if let prompt = xcodeSystemPrompt() {
+        if let prompt = XcodeChat.xcodeSystemPrompt() {
             arguments += ["--append-system-prompt", prompt]
         }
         if let pluginDirectory = CommandExecutor.runCommand(["xcrun", "mcpbridge", "run-agent", "plugin", "path", "--plugin-format", agent.rawValue])?

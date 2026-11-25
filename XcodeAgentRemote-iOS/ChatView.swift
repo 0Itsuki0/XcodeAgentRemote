@@ -62,7 +62,7 @@ extension ChatView {
     /// store: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
     init(
         apiClient: APIServerClient,
-        conversation: XcodeChatConversation,
+        conversation: XcodeConversation,
         projectName: String,
         projectStore: String,
         projectId: String,

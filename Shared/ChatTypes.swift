@@ -19,14 +19,14 @@ nonisolated struct XcodeProject: Codable, Identifiable, Sendable, Hashable,
     /// The chat store folder: `~/Library/Developer/Xcode/UserData/CodingAssistant/<ProjectName>-<hash>`.
     var store: URL
     /// Most recent first.
-    var conversations: [XcodeChatConversation]
+    var conversations: [XcodeConversation]
 
     var id: String { store.lastPathComponent }
 }
 
 /// One Xcode conversation, as a project lists it (no history: `XcodeConversationDetail` has it).
 /// It runs in one agent session (`providerSessionID`).
-nonisolated struct XcodeChatConversation: Codable, Identifiable, Sendable,
+nonisolated struct XcodeConversation: Codable, Identifiable, Sendable,
     Hashable, Equatable
 {
     /// Xcode's chat UUID (the chat's folder name in the store).
@@ -82,11 +82,15 @@ nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable,
 }
 
 /// The project a conversation belongs to: the project's own fields, without its conversations.
-nonisolated struct ProjectReference: Codable, Sendable, Hashable, Equatable {
+nonisolated struct ProjectReference: Identifiable, Codable, Sendable, Hashable,
+    Equatable
+{
     /// `<ProjectName>` of the store folder (the project file's name without extension).
     var name: String
     /// The `.xcodeproj` / `.xcworkspace`, or nil if it could not be found (moved, deleted, ...).
     var projectFile: URL?
     /// The chat store folder: `~/Library/Developer/Xcode/UserData/CodingAssistant/<ProjectName>-<hash>`.
     var store: URL
+
+    var id: String { store.lastPathComponent }
 }

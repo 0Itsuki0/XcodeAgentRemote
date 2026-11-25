@@ -63,7 +63,7 @@ struct UnreadMark: View {
 struct ConversationListView: View {
     // TODO: - add search by conversation name
 
-    let conversations: [XcodeChatConversation]
+    let conversations: [XcodeConversation]
     let projectName: String
     let projectStore: String
     let projectId: String
@@ -128,7 +128,7 @@ struct ConversationListView: View {
     }
 }
 
-extension Array where Element == XcodeChatConversation {
+extension Array where Element == XcodeConversation {
     var sortedByLastActivity: Self {
         return self.sorted(by: {
             ($0.lastActivityDate?.timeIntervalSince1970 ?? 0)

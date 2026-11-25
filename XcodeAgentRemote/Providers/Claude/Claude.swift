@@ -811,7 +811,7 @@ nonisolated extension ClaudeProvider: AgentProvider {
         )
 
     /// `<config>/projects/<project-dir>/<sessionID>.jsonl`
-    static func transcriptFile(sessionID: String) throws(ChatStoreError) -> URL
+    static func transcriptFile(sessionID: String) throws(XcodeChatError) -> URL
     {
         let projects = configDirectory.appending(path: "projects")
         let folders =
@@ -825,7 +825,7 @@ nonisolated extension ClaudeProvider: AgentProvider {
         }.first
 
         guard let url else {
-            throw ChatStoreError.transcriptMissing(sessionID: sessionID)
+            throw XcodeChatError.transcriptMissing(sessionID: sessionID)
         }
         return url
 

@@ -11,7 +11,7 @@ import SwiftUI
 // TODO: - add a link to get mac app somewhere
 
 extension EnvironmentValues {
-    @Entry var tappedConversationId: XcodeChatConversation.ID? = nil
+    @Entry var tappedConversationId: XcodeConversation.ID? = nil
 }
 
 @main

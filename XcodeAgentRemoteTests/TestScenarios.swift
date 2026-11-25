@@ -470,7 +470,7 @@ nonisolated enum TestScenarios {
                         throw CheckFailed(
                             description: "an unknown chat did not fail"
                         )
-                    } catch XcodeChatError.conversationNotFound {}
+                    } catch XcodeChatError.chatNotFound {}
                     do {
                         _ = try await sendDirect(
                             "hi",
@@ -484,9 +484,9 @@ nonisolated enum TestScenarios {
                     } catch XcodeChatError.agentNotImplemented {}
                     do {
                         _ = try await collect(
-                            answerUserRequest(
+                            XcodeChat.answerUserRequest(
                                 .permission(
-                                    toolUseID: "toolu_unknown",
+                                    toolUseID: "tool_unknown",
                                     allow: true
                                 )
                             )
@@ -495,7 +495,7 @@ nonisolated enum TestScenarios {
                             description:
                                 "an answer to an unknown tool use was accepted"
                         )
-                    } catch SendMessageError.noWaitingRequest {}
+                    } catch XcodeChatError.noWaitingRequest {}
                     return
                         "unknown chat, agent not implemented, answer to an unknown tool use"
                 }
@@ -529,7 +529,7 @@ nonisolated enum TestScenarios {
                         chatID: chatID
                     )
                     let events = try await collect(
-                        answerUserRequest(
+                        XcodeChat.answerUserRequest(
                             .permission(toolUseID: toolUse.id, allow: true),
                             permissionTimeout: 120
                         )
@@ -574,7 +574,7 @@ nonisolated enum TestScenarios {
                         chatID: chatID
                     )
                     let events = try await collect(
-                        answerUserRequest(
+                        XcodeChat.answerUserRequest(
                             .permission(toolUseID: toolUse.id, allow: false),
                             permissionTimeout: 120
                         )
@@ -611,7 +611,7 @@ nonisolated enum TestScenarios {
                         )
                     }
                     let events = try await collect(
-                        answerUserRequest(
+                        XcodeChat.answerUserRequest(
                             .questions(
                                 toolUseID: toolUseID,
                                 answers: Dictionary(
@@ -738,7 +738,7 @@ nonisolated enum TestScenarios {
                 ).first(where: { $0.id == chatID })?.providerSessionID
             else { throw CheckFailed(description: "no session for the chat") }
             let events = try await collect(
-                sendMessage(
+                XcodeChat.sendMessage(
                     prompt,
                     to: target,
                     permissionModeOverride: .manual,
@@ -833,7 +833,7 @@ nonisolated enum TestScenarios {
         ) async throws -> [ChatEvent] {
             // Each stream ends where the turn waits for the user; the answer's stream continues the turn.
             var events: [ChatEvent] = []
-            var stream = sendMessage(
+            var stream = XcodeChat.sendMessage(
                 prompt,
                 to: target,
                 permissionModeOverride: mode,
@@ -848,7 +848,7 @@ nonisolated enum TestScenarios {
                 // The answer isn't streamed back: keep it, like the iOS app does.
                 let answer = answering(request)
                 events.append(.userResponse(answer))
-                stream = answerUserRequest(answer, permissionTimeout: 120)
+                stream = XcodeChat.answerUserRequest(answer, permissionTimeout: 120)
             }
         }
     }
@@ -1073,7 +1073,7 @@ nonisolated enum TestScenarios {
             answering: Answering
         ) async throws -> (events: [ChatEvent], responses: Int) {
             var events: [ChatEvent] = []
-            var stream = client.sendMessage(
+            var stream = client.XcodeChat.sendMessage(
                 prompt,
                 to: target,
                 permissionModeOverride: mode,

@@ -45,7 +45,7 @@ actor PendingUserRequestHandler {
 
     /// Takes the answer to a tool use: hands it to the waiting provider, or keeps it until the provider asks.
     /// Throws `noWaitingRequest` if the tool use is not answerable or was already answered.
-    func answer(_ answer: ChatEvent.UserResponse) throws(SendMessageError) {
+    func answer(_ answer: ChatEvent.UserResponse) throws(XcodeChatError) {
         let toolUseID = answer.toolUseID
         switch requests[toolUseID] {
         case .registered:

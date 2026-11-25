@@ -22,7 +22,7 @@ struct SendMessageTests {
     static func events(_ prompt: String, to target: MessageTarget,
                        permissionModeOverride: PermissionMode? = nil) async throws -> [ChatEvent] {
         var events: [ChatEvent] = []
-        for try await event in sendMessage(prompt, to: target, permissionModeOverride: permissionModeOverride) {
+        for try await event in XcodeChat.sendMessage(prompt, to: target, permissionModeOverride: permissionModeOverride) {
             events.append(event)
         }
         return events
@@ -46,7 +46,7 @@ struct SendMessageTests {
         var events: [ChatEvent] = []
         var answered = Set<String>()
         // Each stream ends where the turn waits for the user; the answer's stream continues the turn.
-        var stream = sendMessage(
+        var stream = XcodeChat.sendMessage(
             "Use the Bash tool to run: touch \(file.path). If it is denied, say DENIED and stop.",
             to: .conversation(id: Self.conversationID, project: Self.project),
             permissionModeOverride: .manual
@@ -58,7 +58,7 @@ struct SendMessageTests {
             // The answer isn't streamed back: keep it, like the iOS app does.
             let answer = ChatEvent.UserResponse.permission(toolUseID: request.toolUseID, allow: false)
             events.append(.userResponse(answer))
-            stream = answerUserRequest(answer)
+            stream = XcodeChat.answerUserRequest(answer)
         }
 
         #expect(!answered.isEmpty)
@@ -76,7 +76,7 @@ struct SendMessageTests {
         let file = URL(filePath: NSTemporaryDirectory()).appending(path: "busy-test-\(UUID().uuidString)")
         let target = MessageTarget.conversation(id: Self.conversationID, project: Self.project)
         var events: [ChatEvent] = []
-        for try await event in sendMessage(
+        for try await event in XcodeChat.sendMessage(
             "Use the Bash tool to run: touch \(file.path). If it is denied, say DENIED and stop.",
             to: target, permissionModeOverride: .manual
         ) { events.append(event) }
@@ -89,7 +89,7 @@ struct SendMessageTests {
         }
 
         // End the first turn, then the chat takes a message again.
-        for try await _ in answerUserRequest(.permission(toolUseID: request.toolUseID, allow: false)) {}
+        for try await _ in XcodeChat.answerUserRequest(.permission(toolUseID: request.toolUseID, allow: false)) {}
         let reply = try await Self.events("Reply with only the word pong.", to: target)
         #expect(reply.contains { if case .assistantMessage = $0 { true } else { false } })
     }
@@ -98,7 +98,7 @@ struct SendMessageTests {
     @Test func recordsPlanCard() async throws {
         let target = MessageTarget.conversation(id: Self.conversationID, project: Self.project)
         var events: [ChatEvent] = []
-        var stream = sendMessage(
+        var stream = XcodeChat.sendMessage(
             "Enter plan mode with the EnterPlanMode tool, then present a one-step plan to run `echo planned` with the ExitPlanMode tool. After it is approved, run it with Bash and reply with the output.",
             to: target, permissionModeOverride: .manual)
         var planID: String?
@@ -113,7 +113,7 @@ struct SendMessageTests {
                 answer = .permission(toolUseID: request.toolUseID, allow: true)
             }
             events.append(.userResponse(answer))
-            stream = answerUserRequest(answer)
+            stream = XcodeChat.answerUserRequest(answer)
         }
         let id = try #require(planID, "no plan was presented")
         #expect(!events.contains { if case .toolUse(let toolUse) = $0 { toolUse.id == id } else { false } })

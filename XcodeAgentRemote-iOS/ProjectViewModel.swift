@@ -7,8 +7,8 @@
 
 import SwiftUI
 
-extension Array where Element == XcodeChatConversation {
-    subscript(_ id: String) -> XcodeChatConversation? {
+extension Array where Element == XcodeConversation {
+    subscript(_ id: String) -> XcodeConversation? {
         get {
             return self.first(where: { $0.id.lowercased() == id.lowercased() })
         }

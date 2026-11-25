@@ -2,104 +2,98 @@
 //  XcodeChat.swift
 //  XcodeAgentRemote
 //
-//  Runs one Xcode coding-assistant turn the way Xcode does and records it in Xcode's chat store:
-//  snapshot the project's git state, run the agent (provider-specific, `AgentProvider.runTurn`), snapshot again,
-//  and append the turn to the chat (conversation.plist, metadata.plist, the manifest).
+//  Created by Itsuki on 2026/11/25.
 //
 
 import Foundation
 
-/// Why a turn could not run, or that the agent failed.
-nonisolated enum XcodeChatError: LocalizedError {
-    case projectNotFound(URL)
-    case storeNotFound(URL)
-    case conversationNotFound(id: String, store: URL)
-    /// Running turns is not implemented for this agent (only Claude is).
-    case agentNotImplemented(AgentProviderName)
-    /// The chat's agent is not one of the agents Xcode can run (`Agent`), or the chat doesn't say.
-    case unknownAgent(conversationID: String)
-    /// The chat has no agent session id.
-    case sessionMissing(conversationID: String)
-    /// `.conversationInStore`: the project file of the store could not be found.
-    case projectFileNotFound(store: URL)
-    /// The turn ran (and was recorded) but the agent reported an error.
-    case agentFailed(message: String)
-    /// The chat is already running a turn (another message to it, or an answer that resumes it).
-    case conversationRunning(conversationID: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .projectNotFound(let project):
-            "No such project: \(project.path)"
-        case .storeNotFound(let store):
-            "No such chat store: \(store.path)"
-        case .conversationNotFound(let id, let store):
-            "No conversation \(id) in \(store.path)"
-        case .agentNotImplemented(let agent):
-            "Agent \(agent.rawValue) is not implemented; implemented: \(AgentProviders.all.map { $0.agent.rawValue }.joined(separator: ", "))"
-        case .unknownAgent(let id):
-            "Unknown agent for Xcode chat \(id)"
-        case .sessionMissing(let id):
-            "Chat \(id) has no agent session"
-        case .projectFileNotFound(let store):
-            "Could not find the project file for \(store.path)"
-        case .agentFailed(let message):
-            "The agent failed: \(message)"
-        case .conversationRunning(let id):
-            "Chat \(id) is already running a turn: wait for it to end (or answer its request)"
-        }
-    }
-}
-
-/// Which of a turn's events go to the caller. The provider streams them all (the turn's cards are built from all of
-/// them); the caller doesn't get what it has already or what stands for something it has:
-/// - a tool use that always waits for the user (a question, a plan): its `.userRequest` stands for it;
-/// - the agent's repeat of the earlier tool use being answered (resuming a chat): its tool use and request (the caller
-///   has the earlier one, and answered it);
-/// - `.userResponse`: the caller sent the answer;
-/// - the result of a tool use the user answered, unless it allowed a permission: the answer is its result. An allowed
-///   permission's result is the tool's output.
-nonisolated struct ClientEvents {
-    let provider: any AgentProvider.Type
-    /// The earlier tool use being answered, until the agent repeats it.
-    var repeatedToolUse: ChatEvent.ToolUse?
-    private var repeatID: String?
-    private var answers: [String: ChatEvent.UserResponse] = [:]
-
-    init(provider: any AgentProvider.Type, repeatedToolUse: ChatEvent.ToolUse?) {
-        self.provider = provider
-        self.repeatedToolUse = repeatedToolUse
-    }
-
-    /// Whether the caller gets this event (call it for every event, in order).
-    mutating func passes(_ event: ChatEvent) -> Bool {
-        switch event {
-        case .toolUse(let toolUse):
-            if let earlier = repeatedToolUse, provider.isSameCall(earlier, toolUse) {
-                repeatedToolUse = nil
-                repeatID = toolUse.id
-                return false
-            }
-            return !provider.alwaysWaitsForUser(toolUse)
-        case .userRequest(let request):
-            return request.toolUseID != repeatID
-        case .userResponse(let answer):
-            answers[answer.toolUseID] = answer
-            return false
-        case .toolResult(let result):
-            return answers[result.toolUseID]?.isAllowedPermission ?? true
-        default:
-            return true
-        }
-    }
-}
-
+// MARK: - Xcode Chat
 /// Running one turn of a chat the way Xcode does, and recording it in Xcode's chat store.
+/// snapshot the project's git state, run the agent (provider-specific, `AgentProvider.runTurn`), snapshot again,
+/// and append the turn to the chat (conversation.plist, metadata.plist, the manifest).
 nonisolated enum XcodeChat {
+    // MARK: - Send
+
+    /// Runs one turn and streams its events as they happen: `.intermediate`, `.assistantMessage`, `.toolUse`,
+    /// `.toolResult` and `.userRequest` events (not the prompt, nor the answers to its requests: the caller has them). The
+    /// turn is recorded in Xcode's chat store when it ends.
+    ///
+    /// The stream ends when the turn ends, or when the agent waits for the user (permission to use a tool, questions, a
+    /// plan): then it ends with that `.userRequest` (`waitingForUser`), and `answerUserRequest(_:)` continues the turn's
+    /// stream from there. With no answer within `permissionTimeout` seconds (nil: 600) the request is denied.
+    ///
+    /// The turn runs on its own until it ends, whether or not its stream is read.
+    /// Throws `XcodeChatError`; `.agentFailed` comes after the turn's events, the turn recorded.
+    static func sendMessage(
+        _ prompt: String,
+        to target: MessageTarget,
+        permissionModeOverride: PermissionMode? = nil,
+        permissionTimeout: TimeInterval? = nil
+    ) -> AsyncThrowingStream<ChatEvent, Error> {
+        let turn = RunningTurn.start(
+            runTurn(
+                prompt,
+                to: target,
+                permissionModeOverride: permissionModeOverride,
+                permissionTimeout: permissionTimeout ?? 600
+            )
+        )
+        return turn.untilWaitingForUser()
+    }
+
+    // MARK: - Answer a request to the user
+
+    /// Answers a request from a chat's history (`waitingForUser`): a permission, questions or a plan. Streams the rest of
+    /// that turn like `sendMessage`: until the next request to the user, or the end of the turn.
+    /// - If the turn's agent still waits for it, the answer goes to it and the stream continues that turn.
+    /// - If not (its agent was stopped before it settled the request), the chat is resumed with the answer: the agent
+    ///   usually makes the same tool use again, and that request is answered with the same answer without asking
+    ///   (unless the answer is a deny). `permissionTimeout` applies to that resumed turn.
+    /// Throws `XcodeChatError.noWaitingRequest` if no chat waits for the user on that tool use.
+    static func answerUserRequest(
+        _ answer: ChatEvent.UserResponse,
+        permissionTimeout: TimeInterval? = nil
+    ) -> AsyncThrowingStream<ChatEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let events: AsyncThrowingStream<ChatEvent, Error>
+                    if let turn = RunningTurns.take(
+                        waitingFor: answer.toolUseID
+                    ) {
+                        // If the wait timed out meanwhile, the turn went on without this answer; it still continues here.
+                        try? await PendingUserRequestHandler.shared.answer(
+                            answer
+                        )
+                        events = turn.untilWaitingForUser()
+                    } else if XcodeChat.unansweredRequest(
+                        toolUseID: answer.toolUseID
+                    ) != nil {
+                        events = RunningTurn.start(
+                            XcodeChat.resume(
+                                answering: answer,
+                                permissionTimeout: permissionTimeout ?? 600
+                            )
+                        ).untilWaitingForUser()
+                    } else {
+                        throw XcodeChatError.noWaitingRequest(
+                            toolUseID: answer.toolUseID
+                        )
+                    }
+                    for try await event in events { continuation.yield(event) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     /// Runs one turn and records it, streaming its events: the prompt, then the agent's events.
     /// Throws `XcodeChatError`; `.agentFailed` after the turn's events, the turn recorded.
     /// Cancelling (stopping the iteration) stops the agent; the turn is then not recorded.
-    static func runTurn(
+    private static func runTurn(
         _ prompt: String,
         to target: MessageTarget,
         permissionModeOverride: PermissionMode?,
@@ -176,9 +170,8 @@ nonisolated enum XcodeChat {
                     id: conversationID
                 )
             else {
-                throw XcodeChatError.conversationNotFound(
+                throw XcodeChatError.chatNotFound(
                     id: conversationID,
-                    store: store
                 )
             }
             guard let agent = existing.agent else {
@@ -213,7 +206,9 @@ nonisolated enum XcodeChat {
         }
         // One turn per chat at a time: claimed until this turn is recorded.
         guard RunningSessions.insert(sessionID) else {
-            throw XcodeChatError.conversationRunning(conversationID: conversation.id)
+            throw XcodeChatError.conversationRunning(
+                conversationID: conversation.id
+            )
         }
         defer { RunningSessions.remove(sessionID) }
 
@@ -281,7 +276,9 @@ nonisolated enum XcodeChat {
         var events: [ChatEvent] = []
         var clientEvents = ClientEvents(
             provider: provider,
-            repeatedToolUse: repeatedAnswer.flatMap { $0.answer.isDeny ? nil : $0.toolUse }
+            repeatedToolUse: repeatedAnswer.flatMap {
+                $0.answer.isDeny ? nil : $0.toolUse
+            }
         )
         // An agent error still records the turn, then is thrown; any other error (or cancelling) does not record it.
         var agentError: XcodeChatError?
@@ -379,7 +376,7 @@ nonisolated enum XcodeChat {
     /// the chat with the answer as the prompt (the agent marks the waiting tool use interrupted), and gives the same
     /// answer to the agent's repeat of that tool use without asking. Once the turn ended, if the agent did repeat it,
     /// the earlier tool use and its interrupted result are removed from the session: only the repeat remains.
-    /// Throws `SendMessageError.noWaitingRequest` if no chat waits on that tool use.
+    /// Throws `XcodeChatError.noWaitingRequest` if no chat waits on that tool use.
     static func resume(
         answering answer: ChatEvent.UserResponse,
         permissionTimeout: TimeInterval
@@ -392,7 +389,7 @@ nonisolated enum XcodeChat {
                             toolUseID: answer.toolUseID
                         )
                     else {
-                        throw SendMessageError.noWaitingRequest(
+                        throw XcodeChatError.noWaitingRequest(
                             toolUseID: answer.toolUseID
                         )
                     }
@@ -420,7 +417,7 @@ nonisolated enum XcodeChat {
     }
 
     /// The answer as the prompt the chat is resumed with: what the agent reads as the user's message.
-    static func prompt(
+    private static func prompt(
         answering answer: ChatEvent.UserResponse,
         about toolUse: ChatEvent.ToolUse
     ) -> String {
@@ -443,6 +440,71 @@ nonisolated enum XcodeChat {
             "Your plan is approved: go ahead."
         case .planApproval(_, false, let feedback):
             "Your plan is rejected." + (feedback.map { " \($0)" } ?? "")
+        }
+    }
+
+    /// Xcode's system prompt addition, rendered from its template inside Xcode.
+    static func xcodeSystemPrompt() -> String? {
+        guard
+            let developer = CommandExecutor.runCommand(["xcode-select", "-p"])?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        else { return nil }
+        let path = (developer as NSString).appendingPathComponent(
+            "../PlugIns/IDEIntelligenceChat.framework/Resources/AgentSystemPromptAddition.idechatprompttemplate"
+        )
+        guard
+            let template = try? String(
+                contentsOfFile: (path as NSString).standardizingPath,
+                encoding: .utf8
+            )
+        else { return nil }
+        // Keep every `{% if MCPTool_X %}` section (all Xcode tools are available) and drop the tags.
+        return template.replacing(#/\{%[^%]*%\}/#, with: "")
+    }
+}
+
+/// Which of a turn's events go to the caller. The provider streams them all (the turn's cards are built from all of
+/// them); the caller doesn't get what it has already or what stands for something it has:
+/// - a tool use that always waits for the user (a question, a plan): its `.userRequest` stands for it;
+/// - the agent's repeat of the earlier tool use being answered (resuming a chat): its tool use and request (the caller
+///   has the earlier one, and answered it);
+/// - `.userResponse`: the caller sent the answer;
+/// - the result of a tool use the user answered, unless it allowed a permission: the answer is its result. An allowed
+///   permission's result is the tool's output.
+nonisolated private struct ClientEvents {
+    let provider: any AgentProvider.Type
+    /// The earlier tool use being answered, until the agent repeats it.
+    var repeatedToolUse: ChatEvent.ToolUse?
+    private var repeatID: String?
+    private var answers: [String: ChatEvent.UserResponse] = [:]
+
+    init(provider: any AgentProvider.Type, repeatedToolUse: ChatEvent.ToolUse?)
+    {
+        self.provider = provider
+        self.repeatedToolUse = repeatedToolUse
+    }
+
+    /// Whether the caller gets this event (call it for every event, in order).
+    mutating func passes(_ event: ChatEvent) -> Bool {
+        switch event {
+        case .toolUse(let toolUse):
+            if let earlier = repeatedToolUse,
+                provider.isSameCall(earlier, toolUse)
+            {
+                repeatedToolUse = nil
+                repeatID = toolUse.id
+                return false
+            }
+            return !provider.alwaysWaitsForUser(toolUse)
+        case .userRequest(let request):
+            return request.toolUseID != repeatID
+        case .userResponse(let answer):
+            answers[answer.toolUseID] = answer
+            return false
+        case .toolResult(let result):
+            return answers[result.toolUseID]?.isAllowedPermission ?? true
+        default:
+            return true
         }
     }
 }

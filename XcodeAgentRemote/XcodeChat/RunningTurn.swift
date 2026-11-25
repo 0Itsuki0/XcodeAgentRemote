@@ -1,111 +1,19 @@
 //
-//  SendMessage.swift
+//  RunningTurn.swift
 //  XcodeAgentRemote
 //
-//  Created by Itsuki on 2026/11/15.
+//  Created by Itsuki on 2026/11/25.
 //
-
-/// Invoke XcodeChat (`XcodeChat/`) to send a message.
-/// Input: new conversation / conversationId / project (whatever is required by the script)
-
-// TODO: - refactor to be under XcodeChat namespace
 
 import Foundation
 import Synchronization
-
-/// Why the user's answer to a request could not be delivered.
-nonisolated enum SendMessageError: LocalizedError {
-    /// No chat waits for an answer to this tool use (unknown id, already answered, or settled without it).
-    case noWaitingRequest(toolUseID: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .noWaitingRequest(let toolUseID):
-            "No turn is waiting for an answer to tool use \(toolUseID)"
-        }
-    }
-}
-
-// MARK: - Send
-
-/// Runs one turn and streams its events as they happen: `.intermediate`, `.assistantMessage`, `.toolUse`,
-/// `.toolResult` and `.userRequest` events (not the prompt, nor the answers to its requests: the caller has them). The
-/// turn is recorded in Xcode's chat store when it ends.
-///
-/// The stream ends when the turn ends, or when the agent waits for the user (permission to use a tool, questions, a
-/// plan): then it ends with that `.userRequest` (`waitingForUser`), and `answerUserRequest(_:)` continues the turn's
-/// stream from there. With no answer within `permissionTimeout` seconds (nil: 600) the request is denied.
-///
-/// The turn runs on its own until it ends, whether or not its stream is read.
-/// Throws `XcodeChatError`; `.agentFailed` comes after the turn's events, the turn recorded.
-nonisolated func sendMessage(
-    _ prompt: String,
-    to target: MessageTarget,
-    permissionModeOverride: PermissionMode? = nil,
-    permissionTimeout: TimeInterval? = nil
-) -> AsyncThrowingStream<ChatEvent, Error> {
-    let turn = RunningTurn.start(
-        XcodeChat.runTurn(
-            prompt,
-            to: target,
-            permissionModeOverride: permissionModeOverride,
-            permissionTimeout: permissionTimeout ?? 600
-        )
-    )
-    return turn.untilWaitingForUser()
-}
-
-// MARK: - Answer a request to the user
-
-/// Answers a request from a chat's history (`waitingForUser`): a permission, questions or a plan. Streams the rest of
-/// that turn like `sendMessage`: until the next request to the user, or the end of the turn.
-/// - If the turn's agent still waits for it, the answer goes to it and the stream continues that turn.
-/// - If not (its agent was stopped before it settled the request), the chat is resumed with the answer: the agent
-///   usually makes the same tool use again, and that request is answered with the same answer without asking
-///   (unless the answer is a deny). `permissionTimeout` applies to that resumed turn.
-/// Throws `SendMessageError.noWaitingRequest` if no chat waits for the user on that tool use.
-nonisolated func answerUserRequest(
-    _ answer: ChatEvent.UserResponse,
-    permissionTimeout: TimeInterval? = nil
-) -> AsyncThrowingStream<ChatEvent, Error> {
-    AsyncThrowingStream { continuation in
-        let task = Task {
-            do {
-                let events: AsyncThrowingStream<ChatEvent, Error>
-                if let turn = RunningTurns.take(waitingFor: answer.toolUseID) {
-                    // If the wait timed out meanwhile, the turn went on without this answer; it still continues here.
-                    try? await PendingUserRequestHandler.shared.answer(answer)
-                    events = turn.untilWaitingForUser()
-                } else if XcodeChat.unansweredRequest(
-                    toolUseID: answer.toolUseID
-                ) != nil {
-                    events = RunningTurn.start(
-                        XcodeChat.resume(
-                            answering: answer,
-                            permissionTimeout: permissionTimeout ?? 600
-                        )
-                    ).untilWaitingForUser()
-                } else {
-                    throw SendMessageError.noWaitingRequest(
-                        toolUseID: answer.toolUseID
-                    )
-                }
-                for try await event in events { continuation.yield(event) }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
-            }
-        }
-        continuation.onTermination = { _ in task.cancel() }
-    }
-}
 
 // MARK: - Running turns
 
 /// A turn running on its own, its events saved so a chain of streams reads them in order: `sendMessage`'s until the
 /// turn waits for the user, `answerUserRequest`'s from there until the next request, and so on to the end.
 /// Its tool uses are answerable (`PendingUserRequestHandler`) until they have a result.
-private actor RunningTurn {
+actor RunningTurn {
     /// One event, the point where the turn waits for the user (a stream ends there), or the turn's error.
     private enum Item {
         case event(ChatEvent)
@@ -233,16 +141,16 @@ nonisolated enum RunningTurns {
     }
 
     /// The turn waiting for the answer to this tool use, removed (an answer continues it once).
-    fileprivate static func take(waitingFor toolUseID: String) -> RunningTurn? {
+    static func take(waitingFor toolUseID: String) -> RunningTurn? {
         byToolUseID.withLock { $0.removeValue(forKey: toolUseID) }
     }
 
-    fileprivate static func isWaiting(for toolUseID: String) -> Bool {
+    static func isWaiting(for toolUseID: String) -> Bool {
         byToolUseID.withLock { $0[toolUseID] != nil }
     }
 
     /// Forgets a turn that ended.
-    fileprivate static func remove(_ turn: RunningTurn) {
+    static func remove(_ turn: RunningTurn) {
         byToolUseID.withLock { $0 = $0.filter { $0.value !== turn } }
     }
 

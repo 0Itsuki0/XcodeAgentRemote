@@ -221,7 +221,7 @@ actor APIServer {
                     in: watchingConversations()
                 )
                 return conversation
-            } catch let error as ChatStoreError {
+            } catch let error as XcodeChatError {
                 throw httpError(error)
             }
         }
@@ -246,7 +246,7 @@ actor APIServer {
             )
             do {
                 try ChatStore.markRead(conversationID: conversationID)
-            } catch let error as ChatStoreError {
+            } catch let error as XcodeChatError {
                 throw httpError(error)
             }
             return SuccessResponse()
@@ -272,7 +272,7 @@ actor APIServer {
             }
             do {
                 try await watchConversation(conversationID)
-            } catch let error as ChatStoreError {
+            } catch let error as XcodeChatError {
                 throw httpError(error)
             } catch let error as FileWatcherError {
                 // The session's transcript could not be opened.
@@ -300,12 +300,12 @@ actor APIServer {
                 else {
                     throw HTTPError(
                         .notFound,
-                        message: SendMessageError.noWaitingRequest(
+                        message: XcodeChatError.noWaitingRequest(
                             toolUseID: answer.toolUseID
                         ).localizedDescription
                     )
                 }
-                return streamResponse(answerUserRequest(answer))
+                return streamResponse(XcodeChat.answerUserRequest(answer))
             case .prompt(
                 let prompt,
                 let target,
@@ -313,7 +313,7 @@ actor APIServer {
                 let permissionTimeout
             ):
                 return streamResponse(
-                    sendMessage(
+                    XcodeChat.sendMessage(
                         prompt,
                         to: target,
                         permissionModeOverride: permissionModeOverride,
@@ -326,14 +326,21 @@ actor APIServer {
         return router
     }
 
-    /// The response to a `ChatStoreError`: 501 not implemented for the chat's agent, 404 anything else.
-    private static func httpError(_ error: ChatStoreError) -> HTTPError {
+    /// The response to a `XcodeChatError`: 501 not implemented for the chat's agent, 404 anything else.
+    private static func httpError(_ error: XcodeChatError) -> HTTPError {
         switch error {
-        case .notImplemented:
+        case .agentNotImplemented(_):
             HTTPError(.notImplemented, message: error.localizedDescription)
-        case .chatNotFound, .unknownProvider, .sessionMissing,
-            .transcriptMissing:
+        case .chatNotFound, .unknownAgent(conversationID: _), .sessionMissing,
+            .transcriptMissing, .projectNotFound(_), .storeNotFound(_),
+            .projectFileNotFound(store: _):
             HTTPError(.notFound, message: error.localizedDescription)
+        case .agentFailed(_):
+            HTTPError(.internalServerError, message: error.localizedDescription)
+        case .conversationRunning(conversationID: _):
+            HTTPError(.conflict, message: error.localizedDescription)
+        case .noWaitingRequest(toolUseID: _):
+            HTTPError(.badRequest, message: error.localizedDescription)
         }
     }
 
