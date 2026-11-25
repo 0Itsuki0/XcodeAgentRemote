@@ -58,7 +58,7 @@ private let category = Logger.category(#fileID)
 
     let apiClient: APIServerClient
 
-    private var isFetching: Bool = false
+    private(set) var isFetching: Bool = false
 
     private(set) var initialized = false
 

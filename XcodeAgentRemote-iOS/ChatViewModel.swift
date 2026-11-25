@@ -34,13 +34,23 @@ private let category = Logger.category(#fileID)
 
     private(set) var isResponding: Bool = false
 
-    private var isFetching: Bool = false
+    private(set) var isFetching: Bool = false
 
     private(set) var error: Error? = nil {
         didSet {
             guard let error else { return }
             logger.error(category: category, error: error)
         }
+    }
+
+    var turnFailed: String? {
+        guard let error = error as? ServerRequestError else {
+            return nil
+        }
+        if case .turnFailed(let message) = error {
+            return message
+        }
+        return nil
     }
 
     private var conversationDetail: XcodeConversationDetail? = nil {
@@ -117,8 +127,14 @@ private let category = Logger.category(#fileID)
 
     #endif
 
+    func dismissTurnFailedError() {
+        guard self.turnFailed != nil else { return }
+        self.error = nil
+    }
+
     func fetchConversationDetail() async {
         guard !self.isFetching else { return }
+        self.error = nil
         self.isFetching = true
         defer { self.isFetching = false }
         do {
@@ -177,6 +193,7 @@ private let category = Logger.category(#fileID)
         guard !self.isResponding else { return }
         self.appendHistory(.userMessage(prompt))
         self.isResponding = true
+        self.error = nil
         let stream = apiClient.sendMessage(
             prompt,
             to: .conversationInStore(id: conversationId, store: projectStore),
@@ -240,6 +257,7 @@ private let category = Logger.category(#fileID)
             $0.toolUseID == userResponse.toolUseID
         }
         self.appendHistory(.userResponse(userResponse))
+        self.error = nil
         self.isResponding = true
         let stream = apiClient.answer(userResponse)
         self.streamEvent(stream)

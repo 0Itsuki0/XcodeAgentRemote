@@ -19,6 +19,12 @@ struct ProjectListView: View {
 
     private let standardSpacing = UIConstants.standardSpacing
 
+    private var projects: [XcodeProject] {
+        projectViewModel.projects.filter {
+            $0.projectFile != nil
+        }
+    }
+
     var body: some View {
         Group {
             if let error = projectViewModel.error {
@@ -33,33 +39,36 @@ struct ProjectListView: View {
     }
 
     @ContentBuilder
-    private func errorView(_ error: NetworkError) -> some View {
-        ContentUnavailableView {
-            Label(
-                "Error fetching projects",
-                systemImage: "laptopcomputer.trianglebadge.exclamationmark"
-            )
-        } description: {
-            let recovery: String =
-                error.recoverySuggestion.map {
-                    "\n\($0)"
-                } ?? ""
-            Text(error.localizedDescription + recovery)
-                .padding(.top, UIConstants.standardSpacing)
-        } actions: {
-            Button("Retry") {
-                Task {
-                    await projectViewModel.loadProjects(checkInitial: false)
-                }
+    private var centerOverlay: some View {
+        if projects.isEmpty {
+            if projectViewModel.isFetching {
+                ProgressView()
+                    .controlSize(.extraLarge)
+            } else if projectViewModel.error == nil {
+                ContentUnavailableView(
+                    "No projects",
+                    systemImage: "rectangle.stack"
+                )
+                .frame(maxHeight: .infinity, alignment: .center)
             }
         }
     }
 
     @ContentBuilder
+    private func errorView(_ error: NetworkError) -> some View {
+        NetworkErrorView(
+            error: error,
+            retry: {
+                Task {
+                    await projectViewModel.loadProjects(checkInitial: false)
+                }
+            },
+            retryDisabled: projectViewModel.isFetching
+        )
+    }
+
+    @ContentBuilder
     private var projectList: some View {
-        let projects = projectViewModel.projects.filter {
-            $0.projectFile != nil
-        }
         List {
             ForEach(projects) { project in
                 let shouldHighlight = project.conversations.contains {
@@ -76,7 +85,9 @@ struct ProjectListView: View {
                             await projectViewModel.loadProjects(
                                 checkInitial: false
                             )
-                        }
+                        },
+                        error: projectViewModel.error,
+                        fetching: projectViewModel.isFetching
                     )
                     .environment(\.tappedConversationId, tappedConversationId)
                 } label: {
@@ -105,6 +116,31 @@ struct ProjectListView: View {
         .contentMargins(.top, UIConstants.standardTopMargin)
         .refreshable {
             await projectViewModel.loadProjects(checkInitial: false)
+        }
+        .overlay { centerOverlay }
+    }
+}
+
+struct NetworkErrorView: View {
+    let error: NetworkError
+    let retry: () -> Void
+    let retryDisabled: Bool
+    var body: some View {
+        ContentUnavailableView {
+            Label(
+                "Error fetching data",
+                systemImage: "laptopcomputer.trianglebadge.exclamationmark"
+            )
+        } description: {
+            let recovery: String =
+                error.recoverySuggestion.map {
+                    "\n\($0)"
+                } ?? ""
+            Text(error.localizedDescription + recovery)
+                .padding(.top, UIConstants.standardSpacing)
+        } actions: {
+            Button("Retry", action: retry)
+                .disabled(retryDisabled)
         }
     }
 }

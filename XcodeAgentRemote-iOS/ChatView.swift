@@ -7,8 +7,6 @@
 
 import SwiftUI
 
-// TODO: - show errors
-
 struct SelectedConversationDidChange: NotificationCenter.MainActorMessage {
     typealias Subject = Never
 
@@ -59,11 +57,11 @@ where
 #endif
 
 extension ChatView {
-    /// store: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
     init(
         apiClient: APIServerClient,
         conversation: XcodeConversation,
         projectName: String,
+        /// store: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
         projectStore: String,
         projectId: String,
         lastActivityDate: Date?
@@ -81,40 +79,32 @@ extension ChatView {
 }
 
 struct ChatView: View {
-    //    @Environment(XcodeChatManager.self) private var chatManager
     @State private var chatViewModel: ChatViewModel
 
-    private var conversationId: String {
-        chatViewModel.conversationId
-    }
-    private var conversationName: String {
-        chatViewModel.conversationName
-    }
-    private var projectName: String {
-        chatViewModel.projectName
-    }
-    private var projectId: String {
-        chatViewModel.projectId
-    }
     private var history: [ChatEvent] {
         chatViewModel.history
     }
-    private var lastActivityDate: Date? {
-        chatViewModel.lastActivityDate
+
+    /// user response will be cover together with
+    private var nonResponseHistory: [ChatEvent] {
+        return history.filter {
+            $0.userResponse == nil
+        }
+    }
+    /// id to force the entire history to refresh
+    private var historyViewID: UUID {
+        chatViewModel.historyViewID
     }
 
-    // var focused: FocusState<Bool>.Binding
     @FocusState private var focused
 
     @State private var scrollPositionID: Int? = nil
 
-    @State private var entryHeight: CGFloat = 24
-
-    private let streamingMessageID = UUID()
+    @State private var fetchID: Int = 0
 
     private let standardSpacing: CGFloat = UIConstants.standardSpacing
 
-    @State private var bottomSpacer = Int.max
+    private let bottomSpacer = Int.max
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: standardSpacing).fill(
@@ -124,28 +114,49 @@ struct ChatView: View {
 
     private var cardPadding: CGFloat { standardSpacing * 2 / 3 }
 
-    /// user response will be cover together with
-    private var nonResponseHistory: [ChatEvent] {
-        return history.filter {
-            $0.userResponse == nil
+    var body: some View {
+        Group {
+            if let error = chatViewModel.error, chatViewModel.turnFailed == nil
+            {
+                self.errorView(error)
+            } else {
+                mainChatView
+            }
+        }
+        .task(id: fetchID) {
+            await chatViewModel.fetchConversationDetail()
+        }
+        .navigationTitle(chatViewModel.conversationName)
+        .navigationSubtitle(chatViewModel.projectName)
+        .navigationBarTitleDisplayMode(.inline)
+        .onTapGesture {
+            self.focused = false
+        }
+        .environment(self.chatViewModel)
+    }
+
+    @ContentBuilder
+    private func errorView(_ error: Error) -> some View {
+        ContentUnavailableView {
+            Label(
+                "Error fetching conversations",
+                systemImage: "laptopcomputer.trianglebadge.exclamationmark"
+            )
+        } description: {
+            Text(error.localizedDescription)
+                .padding(.top, UIConstants.standardSpacing)
+        } actions: {
+            Button("Retry") {
+                fetchID += 1
+            }
+            .disabled(chatViewModel.isFetching)
         }
     }
 
-    /// id to force the entire history to refresh
-    private var historyViewID: UUID {
-        chatViewModel.historyViewID
-    }
-
-    @State private var fetchID: Int = 0
-
-    var body: some View {
+    @ContentBuilder
+    private var mainChatView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: standardSpacing) {
-                // TODO: - add Error
-                // TODO: - add `ContentUnavailableView`
-                /// 1. unsupported agent type
-                /// 2. empty history
-                /// 3. request error
                 ForEach(nonResponseHistory.enumerated(), id: \.offset) {
                     _,
                     event in
@@ -171,9 +182,6 @@ struct ChatView: View {
             /// Calling `fetchConversationDetail` here will cause the request getting cancelled immediately
             self.fetchID += 1
         }
-        .task(id: fetchID) {
-            await chatViewModel.fetchConversationDetail()
-        }
         .onDisappear {
             NotificationCenter.default.post(
                 SelectedConversationDidChange(
@@ -190,16 +198,21 @@ struct ChatView: View {
             /// Not using `onAppear` to
             /// 1. only update if there is history / fetch success
             /// 2. set lastActivityDate as messages sent
-            guard !history.isEmpty, let lastActivityDate else { return }
+            guard !history.isEmpty,
+                let lastActivityDate = chatViewModel.lastActivityDate
+            else { return }
             NotificationCenter.default.post(
                 SelectedConversationDidChange(
                     conversation: .init(
-                        conversationId: conversationId,
-                        projectId: projectId,
+                        conversationId: chatViewModel.conversationId,
+                        projectId: chatViewModel.projectId,
                         lastActivityDate: lastActivityDate
                     )
                 )
             )
+        }
+        .onChange(of: chatViewModel.turnFailed, initial: true) {
+            self.scrollToEnd()
         }
         .onChange(of: nonResponseHistory, initial: true) {
             self.scrollToEnd()
@@ -207,6 +220,7 @@ struct ChatView: View {
         .onChange(of: chatViewModel.pendingUserRequest, initial: true) {
             self.scrollToEnd()
         }
+        .overlay { centerOverlay }
         .overlay(alignment: .bottom) {
             let ids = [nonResponseHistory.count - 1] + [bottomSpacer]
             if let scrollPositionID, !ids.contains(scrollPositionID) {
@@ -224,16 +238,25 @@ struct ChatView: View {
         .labelsHidden()
         .labelStyle(.iconOnly)
         .multilineTextAlignment(.leading)
-        .navigationTitle(conversationName)
-        .navigationSubtitle(projectName)
-        .navigationBarTitleDisplayMode(.inline)
-        .onTapGesture {
-            self.focused = false
-        }
-        .environment(self.chatViewModel)
     }
 
-    @ViewBuilder
+    @ContentBuilder
+    private var centerOverlay: some View {
+        if nonResponseHistory.isEmpty {
+            if chatViewModel.isFetching {
+                ProgressView()
+                    .controlSize(.extraLarge)
+            } else if chatViewModel.error == nil {
+                ContentUnavailableView(
+                    "No conversations",
+                    systemImage: "text.bubble"
+                )
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+        }
+    }
+
+    @ContentBuilder
     private func eventView(_ event: ChatEvent) -> some View {
         switch event {
         case .userMessage(let text):

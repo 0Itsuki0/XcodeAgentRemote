@@ -18,71 +18,84 @@ struct EntryView: View {
     private let standardSpacing: CGFloat = UIConstants.standardSpacing
 
     var body: some View {
-        Group {
-            if let userRequest = chatViewModel.pendingUserRequest.last {
-                switch userRequest {
-                case .permission(let toolUse):
-                    ApprovalView(
-                        title: "Allow using tool above?",
-                        approveButtonTitle: "Allow",
-                        textFieldPrompt: "Any message...",
-                        onAnswer: { allowed, message in
-                            self.answerPermission(
-                                toolUseID: toolUse.id,
-                                allow: allowed,
-                                message: message
-                            )
-                        },
-                        focused: focused
-                    )
-                case .planApproval(toolUseID: let toolUseId, plan: _):
-                    ApprovalView(
-                        title: "Approve plan above?",
-                        approveButtonTitle: "Approve",
-                        textFieldPrompt: "Any feedback...",
-                        onAnswer: { allowed, message in
-                            self.approvePlan(
-                                toolUseID: toolUseId,
-                                approve: allowed,
-                                message: message
-                            )
-                        },
-                        focused: focused
-                    )
-                case .questions(toolUseID: let toolUseId, let questions):
-                    AnswerQuestionView(
-                        questions: questions,
+        VStack(alignment: .leading, spacing: standardSpacing / 2) {
+            if let turnFailed = self.chatViewModel.turnFailed {
+                Text(turnFailed)
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .task {
+                        try? await Task.sleep(for: .seconds(3))
+                        self.chatViewModel.dismissTurnFailedError()
+                    }
+            }
+
+            Group {
+                if let userRequest = chatViewModel.pendingUserRequest.last {
+                    switch userRequest {
+                    case .permission(let toolUse):
+                        ApprovalView(
+                            title: "Allow using tool above?",
+                            approveButtonTitle: "Allow",
+                            textFieldPrompt: "Any message...",
+                            onAnswer: { allowed, message in
+                                self.answerPermission(
+                                    toolUseID: toolUse.id,
+                                    allow: allowed,
+                                    message: message
+                                )
+                            },
+                            focused: focused
+                        )
+                    case .planApproval(toolUseID: let toolUseId, plan: _):
+                        ApprovalView(
+                            title: "Approve plan above?",
+                            approveButtonTitle: "Approve",
+                            textFieldPrompt: "Any feedback...",
+                            onAnswer: { allowed, message in
+                                self.approvePlan(
+                                    toolUseID: toolUseId,
+                                    approve: allowed,
+                                    message: message
+                                )
+                            },
+                            focused: focused
+                        )
+                    case .questions(toolUseID: let toolUseId, let questions):
+                        AnswerQuestionView(
+                            questions: questions,
+                            focused: focused,
+                            onAnswer: {
+                                self.answerQuestions(
+                                    toolUseID: toolUseId,
+                                    answers: $0
+                                )
+                            },
+                            onDecline: {
+                                self.declineQuestions(
+                                    toolUseID: toolUseId,
+                                    message: $0
+                                )
+                            }
+                        )
+                    }
+                } else {
+                    TextEntryView(
                         focused: focused,
-                        onAnswer: {
-                            self.answerQuestions(
-                                toolUseID: toolUseId,
-                                answers: $0
-                            )
-                        },
-                        onDecline: {
-                            self.declineQuestions(
-                                toolUseID: toolUseId,
-                                message: $0
-                            )
-                        }
+                        text: $text,
+                        selectedPermissionMode: $selectedPermissionMode,
+                        sendPrompt: sendPrompt
                     )
                 }
-            } else {
-                TextEntryView(
-                    focused: focused,
-                    text: $text,
-                    selectedPermissionMode: $selectedPermissionMode,
-                    sendPrompt: sendPrompt
-                )
             }
+            .frame(maxWidth: .infinity)
+            .disabled(chatViewModel.isResponding)
+            .glassEffect(
+                .regular.tint(.clear),
+                in: .rect(cornerRadius: standardSpacing * 2)
+            )
         }
         .multilineTextAlignment(.leading)
-        .frame(maxWidth: .infinity)
-        .disabled(chatViewModel.isResponding)
-        .glassEffect(
-            .regular.tint(.clear),
-            in: .rect(cornerRadius: standardSpacing * 2)
-        )
         .padding(.horizontal, standardSpacing)
         .simultaneousGesture(
             TapGesture().onEnded {
@@ -161,7 +174,6 @@ struct EntryView: View {
         guard !chatViewModel.isResponding else { return }
         request()
     }
-
 }
 
 private struct TextEntryView: View {

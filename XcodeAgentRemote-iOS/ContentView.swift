@@ -70,12 +70,29 @@ struct ConversationListView: View {
     let apiClient: APIServerClient
 
     let refresh: () async -> Void
+    let error: NetworkError?
+    let fetching: Bool
 
     @Environment(\.tappedConversationId) private var tappedConversationId
 
     private let standardSpacing = UIConstants.standardSpacing
 
     var body: some View {
+        Group {
+            if let error = error {
+                self.errorView(error)
+            } else {
+                self.conversationList
+            }
+        }
+        .navigationTitle("Conversations")
+        .navigationSubtitle(projectName)
+        .toolbarTitleDisplayMode(.inline)
+
+    }
+
+    @ContentBuilder
+    private var conversationList: some View {
         List {
             ForEach(conversations.filter { !$0.isArchived }) { conversation in
                 let shouldHighlight = conversation.id == tappedConversationId
@@ -119,12 +136,39 @@ struct ConversationListView: View {
             }
         }
         .contentMargins(.top, UIConstants.standardTopMargin)
-        .navigationTitle("Conversations")
-        .navigationSubtitle(projectName)
-        .toolbarTitleDisplayMode(.inline)
         .refreshable {
             await self.refresh()
         }
+        .overlay { centerOverlay }
+    }
+
+    @ContentBuilder
+    private var centerOverlay: some View {
+        if conversations.isEmpty {
+            if fetching {
+                ProgressView()
+                    .controlSize(.extraLarge)
+            } else if error == nil {
+                ContentUnavailableView(
+                    "No conversations",
+                    systemImage: "list.bullet"
+                )
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+        }
+    }
+
+    @ContentBuilder
+    private func errorView(_ error: NetworkError) -> some View {
+        NetworkErrorView(
+            error: error,
+            retry: {
+                Task {
+                    await refresh()
+                }
+            },
+            retryDisabled: fetching
+        )
     }
 }
 
