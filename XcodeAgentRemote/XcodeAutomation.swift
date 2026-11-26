@@ -34,7 +34,7 @@ nonisolated enum XcodeAutomation {
     static private let bundleIdentifier = "com.apple.dt.Xcode"
 
     /// setting URL to open up System Settings → Privacy & Security → Automation directly
-    static private let settingURL =
+    static let settingURL =
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
 
     static private var isXcodeRunning: Bool {
@@ -116,38 +116,26 @@ extension XcodeAutomation {
     ///
     /// Note
     /// -  Runs off the main thread: the call waits while the prompt is shown.
-    @MainActor
+    @concurrent
     static func automationPermission(askIfNeeded: Bool = true) async
         -> PermissionStatus
     {
-        await Task.detached {
-            let target = NSAppleEventDescriptor(
-                bundleIdentifier: bundleIdentifier
-            )
-            let status = AEDeterminePermissionToAutomateTarget(
-                target.aeDesc,
-                typeWildCard,
-                typeWildCard,
-                askIfNeeded
-            )
-            switch status {
-            case noErr: return .granted
-            case OSStatus(errAEEventNotPermitted): return .denied
-            case OSStatus(errAEEventWouldRequireUserConsent):
-                return .notDetermined
-            case OSStatus(procNotFound): return .xcodeNotRunning
-            default: return .unknown(status)
-            }
-        }.value
-    }
-
-    /// Opens System Settings → Privacy & Security → Automation (to change a denied permission).
-    @MainActor
-    static func openAutomationSettings() {
-        if let url = URL(
-            string: self.settingURL
-        ) {
-            NSWorkspace.shared.open(url)
+        let target = NSAppleEventDescriptor(
+            bundleIdentifier: bundleIdentifier
+        )
+        let status = AEDeterminePermissionToAutomateTarget(
+            target.aeDesc,
+            typeWildCard,
+            typeWildCard,
+            askIfNeeded
+        )
+        switch status {
+        case noErr: return .granted
+        case OSStatus(errAEEventNotPermitted): return .denied
+        case OSStatus(errAEEventWouldRequireUserConsent):
+            return .notDetermined
+        case OSStatus(procNotFound): return .xcodeNotRunning
+        default: return .unknown(status)
         }
     }
 }

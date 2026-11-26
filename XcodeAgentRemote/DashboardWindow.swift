@@ -5,11 +5,13 @@
 //  Created by Itsuki on 2026/11/18.
 //
 
+import Combine
 import SwiftUI
 
 enum DashboardOption: String, Hashable, CaseIterable {
     case server
     case watcher
+    case appleEvent
 
     var label: String {
         switch self {
@@ -17,6 +19,8 @@ enum DashboardOption: String, Hashable, CaseIterable {
             "API Server"
         case .watcher:
             "Chat Watcher"
+        case .appleEvent:
+            "Apple Event"
         }
     }
 
@@ -26,6 +30,8 @@ enum DashboardOption: String, Hashable, CaseIterable {
             "API Server Setting"
         case .watcher:
             "Chat Watcher"
+        case .appleEvent:
+            "Apple Event Permission"
         }
     }
 }
@@ -33,7 +39,7 @@ enum DashboardOption: String, Hashable, CaseIterable {
 struct DashboardWindow: View {
     static let identifier = "DashboardWindow"
 
-    @State private var selection: DashboardOption = .server
+    @State private var selection: DashboardOption = .appleEvent
 
     var body: some View {
         NavigationSplitView {
@@ -50,6 +56,8 @@ struct DashboardWindow: View {
                 ServerSettingView()
             case .watcher:
                 ChatWatcherConfigurationView()
+            case .appleEvent:
+                AppleEventView()
             }
 
         }
@@ -78,6 +86,24 @@ struct ChatWatcherConfigurationView: View {
     }
 }
 
+struct SettingForm<Content: View>: View {
+    @ContentBuilder let content: Content
+
+    var body: some View {
+        Form {
+            self.content
+        }
+        .contentMargins(.top, 0)
+        .formStyle(.grouped)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: .topLeading
+        )
+    }
+}
+
 // TODO: add auto ngrok. Force kill app may not stop ngrok correctly. run `killall ngrok` if needed.
 struct ServerSettingView: View {
     @Environment(APIServerManager.self) private var serverManager
@@ -92,7 +118,7 @@ struct ServerSettingView: View {
 
     var body: some View {
         @Bindable var serverManager = serverManager
-        Form {
+        SettingForm {
             Section {
                 TextField(
                     "Port",
@@ -135,11 +161,7 @@ struct ServerSettingView: View {
                     }
                     .font(.subheadline)
 
-                    Text(explanationText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                    ExplanationText(explanationText)
 
                     InlineErrorView(
                         error: $serverManager.serverError,
@@ -155,14 +177,6 @@ struct ServerSettingView: View {
 
             NgrokSettingSection()
         }
-        .contentMargins(.top, 0)
-        .formStyle(.grouped)
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(
-            maxWidth: .infinity,
-            maxHeight: .infinity,
-            alignment: .topLeading
-        )
         .navigationTitle(DashboardOption.server.navigationTitle)
 
     }
@@ -262,11 +276,7 @@ struct NgrokSettingSection: View {
                 }
                 .font(.subheadline)
 
-                Text(explanationText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                ExplanationText(explanationText)
 
                 InlineErrorView(
                     error: $serverManager.ngrokError,
@@ -295,5 +305,114 @@ struct NgrokSettingSection: View {
                 [Static dev domains is supported for all users for free](https://ngrok.com/blog/free-static-domains-ngrok-users)
                 """
         }
+    }
+}
+
+struct ExplanationText: View {
+    private let text: LocalizedStringKey
+    init(_ text: LocalizedStringKey) {
+        self.text = text
+    }
+    var body: some View {
+        Text(text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+
+    }
+}
+
+struct AppleEventView: View {
+    @State private var permissionGranted: Bool = false
+    @State private var automationStatus: XcodeAutomation.PermissionStatus =
+        .notDetermined
+
+    @State private var processing: Bool = false
+
+    @Environment(\.openURL) private var openURL
+
+    /// whether the window has focus
+    @Environment(\.appearsActive) private var appearsActive
+
+    var body: some View {
+        SettingForm {
+            Section {
+                Toggle(
+                    "Automation Permission",
+                    isOn: $permissionGranted
+                )
+            } header: {
+                ExplanationText(
+                    """
+                    Apple event / Automation used for closing Xcode project before 
+                    running the agent Programmatically to process the message and get response.
+
+                    This is needed because Xcode only loads chat data on project opening.
+                    It then keeps the project's chats in memory and 
+                    may overwrite the turns this app records.
+
+                    For more details, please refer to [Why not keep Xcode open](\(String.gitHub)#why-not-keep-xcode-open)
+                    """
+                )
+            }
+        }
+        .navigationTitle(DashboardOption.appleEvent.navigationTitle)
+        .onChange(of: self.permissionGranted) {
+            self.handlePermissionToggle()
+        }
+        .onChange(of: appearsActive, initial: true) {
+            guard appearsActive else { return }
+            self.refreshPermissionStates(prompt: false)
+        }
+    }
+
+    private func refreshPermissionStates(prompt: Bool) {
+        self.processing = true
+        Task {
+            defer { processing = false }
+            self.automationStatus = await XcodeAutomation.automationPermission(
+                askIfNeeded: false
+            )
+            self.permissionGranted = automationStatus == .granted
+        }
+    }
+
+    private func handlePermissionToggle() {
+        print(
+            #function,
+            processing,
+            self.permissionGranted,
+            self.automationStatus
+        )
+        guard !self.processing else { return }
+        if self.equal(
+            granted: self.permissionGranted,
+            automationStatus: automationStatus
+        ) {
+            print("same")
+            return
+        }
+
+        guard self.automationStatus == .notDetermined else {
+            openAutomationSettings()
+            return
+        }
+
+        self.refreshPermissionStates(prompt: true)
+    }
+
+    private func openAutomationSettings() {
+        print(#function)
+        if let url = URL(string: XcodeAutomation.settingURL) {
+            self.openURL(url)
+        }
+    }
+
+    private func equal(
+        granted: Bool,
+        automationStatus: XcodeAutomation.PermissionStatus
+    ) -> Bool {
+        granted == (automationStatus == .granted)
     }
 }
