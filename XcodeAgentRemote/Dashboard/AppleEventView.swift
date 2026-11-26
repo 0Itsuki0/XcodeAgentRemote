@@ -1,3 +1,11 @@
+//
+//  AppleEventView.swift
+//  XcodeAgentRemote
+//
+//  Created by Itsuki on 2026/11/26.
+//
+
+import SwiftUI
 
 struct AppleEventView: View {
     @State private var permissionGranted: Bool = false

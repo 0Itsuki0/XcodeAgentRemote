@@ -88,7 +88,17 @@ nonisolated
         return _watchingConversations.withLock { $0 }.filter { $0.isWatching }
     }
     var watchingConversationIds: [String] {
+        access(keyPath: \.watchingConversationIds)
         return watchingConversations.map(\.conversationId)
+    }
+    /// [conversationId: error] for conversations whose watcher failed
+    var erroredConversations: [String: Error] {
+        access(keyPath: \.erroredConversations)
+        return _watchingConversations.withLock { $0 }.reduce(into: [:]) {
+            if let error = $1.error {
+                $0[$1.conversationId] = error
+            }
+        }
     }
     var watchingFileURLs: [URL] {
         return watchingConversations.map(\.fileURL)
@@ -133,8 +143,12 @@ nonisolated
             .withLock { $0[conversationId] }
         conversation?.task.cancel()
         await conversation?.watcher.stop()
-        self._watchingConversations.withLock {
-            $0.removeAll { $0.conversationId == conversationId }
+        withMutation(keyPath: \.watchingConversationIds) {
+            withMutation(keyPath: \.erroredConversations) {
+                self._watchingConversations.withLock {
+                    $0.removeAll { $0.conversationId == conversationId }
+                }
+            }
         }
         logger.info(
             category: category,
@@ -143,8 +157,10 @@ nonisolated
     }
 
     private func stopWatcherTask(_ conversationId: String) {
-        self._watchingConversations.withLock {
-            $0[conversationId]?.task.cancel()
+        withMutation(keyPath: \.watchingConversationIds) {
+            self._watchingConversations.withLock {
+                $0[conversationId]?.task.cancel()
+            }
         }
     }
 
@@ -183,15 +199,21 @@ nonisolated
                 self.setError(conversationId, error: error)
             }
         }
-        self._watchingConversations.withLock {
-            $0.append(
-                WatchingConversation(
-                    conversationId: conversationId,
-                    fileURL: url,
-                    watcher: watcher,
-                    task: task
-                )
-            )
+        withMutation(keyPath: \.watchingConversationIds) {
+            withMutation(keyPath: \.erroredConversations) {
+                self._watchingConversations.withLock {
+                    /// remove the previous (errored / stopped) entry for the same conversation
+                    $0.removeAll { $0.conversationId == conversationId }
+                    $0.append(
+                        WatchingConversation(
+                            conversationId: conversationId,
+                            fileURL: url,
+                            watcher: watcher,
+                            task: task
+                        )
+                    )
+                }
+            }
         }
         logger.info(
             category: category,
@@ -242,8 +264,12 @@ nonisolated
     }
 
     private func setError(_ conversationId: String, error: Error) {
-        self._watchingConversations.withLock {
-            $0[conversationId]?.error = error
+        withMutation(keyPath: \.watchingConversationIds) {
+            withMutation(keyPath: \.erroredConversations) {
+                self._watchingConversations.withLock {
+                    $0[conversationId]?.error = error
+                }
+            }
         }
     }
 }

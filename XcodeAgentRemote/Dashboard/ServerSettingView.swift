@@ -1,3 +1,11 @@
+//
+//  ServerSettingView.swift
+//  XcodeAgentRemote
+//
+//  Created by Itsuki on 2026/11/26.
+//
+
+import SwiftUI
 
 struct ServerSettingView: View {
     @Environment(APIServerManager.self) private var serverManager
@@ -103,14 +111,7 @@ struct ServerSettingView: View {
     }
 }
 
-struct StateSymbol: View {
-    var body: some View {
-        Image(systemName: "circle.fill")
-            .font(.system(size: 8))
-    }
-}
-
-struct NgrokSettingSection: View {
+private struct NgrokSettingSection: View {
     @Environment(APIServerManager.self) private var serverManager
     private var running: Bool {
         serverManager.ngrokRunning
@@ -180,5 +181,12 @@ struct NgrokSettingSection: View {
                 [Static dev domains is supported for all users for free](https://ngrok.com/blog/free-static-domains-ngrok-users)
                 """
         }
+    }
+}
+
+private struct StateSymbol: View {
+    var body: some View {
+        Image(systemName: "circle.fill")
+            .font(.system(size: 8))
     }
 }
