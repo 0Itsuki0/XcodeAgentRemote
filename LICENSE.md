@@ -3,7 +3,24 @@ Copyright (c) 2026 Itsuki Kamizuru. All rights reserved.
 This source code is made available for viewing purposes only.
 No permission is granted to use, copy, modify, merge, publish,
 distribute, sublicense, or sell copies of this software, in whole
-or in part, without prior written permission from the copyright holder.
+or in part, without prior written permission from the copyright holder,
+except as expressly permitted under "Application Binary" below.
+
+## Application Binary
+
+Subject to the Territorial Restriction below, you are granted a personal,
+non-exclusive, non-transferable, revocable license to download, install,
+and use the compiled application (.dmg) distributed by the copyright
+holder on the official Releases page of this repository.
+
+This license does not permit you to:
+
+- Redistribute, sell, rent, or share the application or its installer.
+- Modify, decompile, disassemble, or reverse engineer the application.
+- Use the application in violation of any applicable law.
+
+This license applies only to the compiled application. It grants no
+rights to the source code in this repository.
 
 ## Territorial Restriction
 
