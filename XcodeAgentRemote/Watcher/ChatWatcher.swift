@@ -13,7 +13,9 @@ nonisolated private let category = Logger.category(#fileID)
 
 nonisolated struct ChatHistoryDidChange: NotificationCenter.AsyncMessage {
     typealias Subject = Never
-    let conversationId: String
+    let conversation: XcodeConversationDetail
+    /// Will only fire for userRequest / assistantMessage
+    let chatEvent: ChatEvent
 }
 
 nonisolated extension NotificationCenter.MessageIdentifier
@@ -172,9 +174,28 @@ nonisolated
             message: "Watched conversation changed for id: \(conversationId)"
         )
 
+        /// Only fire notification for assistant response / user request
+        guard
+            let conversation = try? ChatStore.conversation(id: conversationId)
+        else { return }
+        let history = conversation.history
+        guard let last = history.last else { return }
+        let chatEvent: ChatEvent
+        switch history.last {
+        case .assistantMessage(let message):
+            chatEvent = .assistantMessage(message)
+        case .userRequest(let request):
+            chatEvent = .userRequest(request)
+        default:
+            return
+        }
+
         throttler.run {
             NotificationCenter.default.post(
-                ChatHistoryDidChange(conversationId: conversationId)
+                ChatHistoryDidChange(
+                    conversation: conversation,
+                    chatEvent: chatEvent
+                )
             )
         }
     }

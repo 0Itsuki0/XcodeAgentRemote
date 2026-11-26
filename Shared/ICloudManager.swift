@@ -6,12 +6,14 @@
 //
 
 import CloudKit
+import Synchronization
 
-private let logger = Logger.shared
-private let category = Logger.category(#fileID)
+nonisolated private let logger = Logger.shared
+nonisolated private let category = Logger.category(#fileID)
 
 /// Using iCloud / CloudKit for sending Push Notifications between MacOS and iOS
-class ICloudManager {
+/// Not tied to an actor: the mutable state is kept behind a lock.
+nonisolated final class ICloudManager: Sendable {
 
     enum RecordType: String, Sendable {
         case pushToIOS = "PushToIOS"
@@ -35,25 +37,32 @@ class ICloudManager {
         container.privateCloudDatabase
     }
 
-    private(set) var accountStatus: CKAccountStatus = .couldNotDetermine {
-        didSet {
-            #if os(iOS)
-                self.subscribe(to: .pushToIOS)
-            #endif
-            self.retryFailedRecords()
-        }
+    private struct State {
+        var accountStatus: CKAccountStatus = .couldNotDetermine
+        var subscriptions: Set<RecordType> = []
+        var failedSavingRecords: Set<CKRecord> = []
+        var failedDeletingRecords: Set<CKRecord.ID> = []
     }
 
-    private var accountTask: Task<Void, Never>?
-    private(set) var subscriptions: Set<RecordType> = []
+    private let state = Mutex(State())
+    var accountStatus: CKAccountStatus { state.withLock { $0.accountStatus } }
+    var subscriptions: Set<RecordType> { state.withLock { $0.subscriptions } }
 
-    private var failedSavingRecords: Set<CKRecord> = []
-    private var failedDeletingRecords: Set<CKRecord.ID> = []
+    private let accountTask = Mutex<Task<Void, Never>?>(nil)
 
     private let networkMonitor = NetworkMonitor()
 
+    private static let subscriptionIdPrefix =
+        "XcodeAgentRemote.query.subscription."
+
+    private static func subscriptionId(for type: RecordType) -> String {
+        return "\(subscriptionIdPrefix)\(type.rawValue)"
+    }
+
     #if os(macOS)
-        private var chatHistoryChangeToken: NotificationCenter.ObservationToken?
+        private let chatHistoryChangeToken = Mutex<
+            NotificationCenter.ObservationToken?
+        >(nil)
     #endif
 
     init() {
@@ -61,22 +70,38 @@ class ICloudManager {
         self.watchForAccountChange()
 
         #if os(macOS)
-            self.chatHistoryChangeToken = NotificationCenter.default
+            let token = NotificationCenter.default
                 .addObserver(
                     of: Never.self,
                     for: .chatHistoryDidChange
                 ) { [weak self] message in
                     guard let self else { return }
-//                    self.handleChatHistoryDidChange(message.conversationId)
+                    self.handleChatHistoryDidChange(
+                        conversation: message.conversation,
+                        chatEvent: message.chatEvent
+                    )
                 }
+            self.chatHistoryChangeToken.withLock { $0 = token }
         #endif
     }
 
-    private func handleChatHistoryDidChange(_ conversationId: String) {
+    deinit {
+        self.accountTask.withLock { task in
+            task?.cancel()
+            task = nil
+        }
+    }
 
+    private func setAccountStatus(_ status: CKAccountStatus) {
+        self.state.withLock { $0.accountStatus = status }
+        #if os(iOS)
+            self.subscribe(to: .pushToIOS)
+        #endif
+        self.retryFailedRecords()
     }
 
     private func checkCommon() -> Bool {
+        let accountStatus = self.accountStatus
         guard accountStatus == .available else {
             logger.info(
                 category: category,
@@ -92,45 +117,16 @@ class ICloudManager {
         return true
     }
 
-    /// send a push notification to iOS by creating and saving a new record of type `RecordType.pushToIOS`
-    func sendPushToIOS(
-        title: String,
-        subtitle: String,
-        body: String,
-        conversationId: String
-    ) {
-        /// Saving a record works only if the user has signed into their iCloud account on their device.
-        guard checkCommon() else { return }
-
-        let record = CKRecord(recordType: RecordType.pushToIOS.rawValue)
-        record.setValuesForKeys([
-            PushToIOSRecordKey.title.rawValue: title,
-            PushToIOSRecordKey.subtitle.rawValue: subtitle,
-            PushToIOSRecordKey.body.rawValue: body,
-            PushToIOSRecordKey.conversationId.rawValue: conversationId,
-        ])
-
-        Task {
-            do {
-                /// When adding a record for the first time (in sandbox / development env),
-                /// CloudKit add record type to the schema automatically before saving the record.
-                /// If the record type already exists in the schema, iCloud uses the existing type.
-                let _ = try await self.privateDatabase.save(record)
-            } catch {
-                logger.error(category: category, error: error)
-                self.failedSavingRecords.insert(record)
-            }
-        }
-    }
-
     private func retryFailedRecords() {
         guard checkCommon() else { return }
 
-        let savingRecords = self.failedSavingRecords
-        self.failedSavingRecords.removeAll()
-
-        let deletingRecords = self.failedDeletingRecords
-        self.failedDeletingRecords.removeAll()
+        let (savingRecords, deletingRecords) = self.state.withLock { state in
+            let saving = state.failedSavingRecords
+            state.failedSavingRecords.removeAll()
+            let deleting = state.failedDeletingRecords
+            state.failedDeletingRecords.removeAll()
+            return (saving, deleting)
+        }
 
         Task {
             do {
@@ -146,14 +142,11 @@ class ICloudManager {
                         /// Atomic changes are only applicable in record zones that have the atomic capability.
                         atomically: false
                     )
-                let savedSuccess =
-                    saved
-                    .compactMapValues { try? $0.get() }
+
+                let savedSuccess = saved.compactMapValues { try? $0.get() }
                     .map(\.key)
 
-                let deleteSuccess =
-                    deleted
-                    .compactMapValues { try? $0.get() }
+                let deleteSuccess = deleted.compactMapValues { try? $0.get() }
                     .map(\.key)
 
                 let failedSave = savingRecords.filter {
@@ -164,13 +157,16 @@ class ICloudManager {
                     !deleteSuccess.contains($0)
                 }
 
-                self.failedSavingRecords = failedSave
-                self.failedDeletingRecords = failedDelete
-
+                self.state.withLock { state in
+                    state.failedSavingRecords.formUnion(failedSave)
+                    state.failedDeletingRecords.formUnion(failedDelete)
+                }
             } catch {
                 logger.error(category: category, error: error)
-                self.failedSavingRecords = savingRecords
-                self.failedDeletingRecords = deletingRecords
+                self.state.withLock { state in
+                    state.failedSavingRecords.formUnion(savingRecords)
+                    state.failedDeletingRecords.formUnion(deletingRecords)
+                }
             }
         }
     }
@@ -178,10 +174,11 @@ class ICloudManager {
     private func updateAccountStatus() {
         Task {
             do {
-                self.accountStatus = try await container.accountStatus()
+                let status = try await container.accountStatus()
+                self.setAccountStatus(status)
             } catch {
                 logger.error(category: category, error: error)
-                self.accountStatus = .temporarilyUnavailable
+                self.setAccountStatus(.temporarilyUnavailable)
             }
         }
     }
@@ -189,13 +186,6 @@ class ICloudManager {
     private func deleteSubscription(_ id: String) async throws {
         guard checkCommon() else { return }
         try await self.privateDatabase.deleteSubscription(withID: id)
-    }
-
-    private static let subscriptionIdPrefix =
-        "XcodeAgentRemote.query.subscription."
-
-    private static func subscriptionId(for type: RecordType) -> String {
-        return "\(subscriptionIdPrefix)\(type.rawValue)"
     }
 
     static func recordTypeFromSubscriptionId(_ id: String?) -> RecordType? {
@@ -226,7 +216,9 @@ class ICloudManager {
     /// Make sure the record type is deployed before subscribing.
     /// Otherwise, the subscription may fail silently.
     private func subscribe(to type: RecordType) {
-        guard !self.subscriptions.contains(type) else { return }
+        guard !self.state.withLock({ $0.subscriptions.contains(type) }) else {
+            return
+        }
         guard checkCommon() else { return }
 
         logger.info(category: category, message: "Subscribe to \(type)")
@@ -247,7 +239,7 @@ class ICloudManager {
                 let _ = try await self.privateDatabase.save(
                     querySubscription
                 )
-                self.subscriptions.insert(type)
+                self.state.withLock { _ = $0.subscriptions.insert(type) }
             } catch {
                 logger.error(category: category, error: error)
             }
@@ -270,13 +262,13 @@ class ICloudManager {
 
         switch type {
         case .pushToIOS:
-            updateForPushToIOS(notificationInfo)
+            updateNotificationInfoForPushToIOS(notificationInfo)
         }
 
         return notificationInfo
     }
 
-    private static func updateForPushToIOS(
+    private static func updateNotificationInfoForPushToIOS(
         _ notificationInfo: CKSubscription.NotificationInfo
     ) {
         /// The names of fields to include in the push notification’s payload
@@ -312,32 +304,120 @@ class ICloudManager {
                 try await privateDatabase.deleteRecord(withID: recordId)
             } catch {
                 logger.error(category: category, error: error)
-                self.failedDeletingRecords.insert(recordId)
+                self.state.withLock {
+                    _ = $0.failedDeletingRecords.insert(recordId)
+                }
             }
         }
     }
 }
 
-extension NSPredicate {
+nonisolated extension NSPredicate {
     static var truePredicate: NSPredicate {
         NSPredicate(format: "TRUEPREDICATE")
     }
 }
 
-extension ICloudManager {
+nonisolated extension ICloudManager {
     func watchForAccountChange() {
-        accountTask = Task {
+        // `self` weakly: the task runs until it is cancelled, which `deinit` does, so holding `self` would keep both
+        // alive forever.
+        let task = Task { [weak self, container] in
             for await _ in NotificationCenter.default.notifications(
                 named: .CKAccountChanged,
-                object: self.container
+                object: container
             ) {
+                guard let self else { return }
                 self.updateAccountStatus()
             }
         }
+        self.accountTask.withLock { $0 = task }
     }
 }
 
-extension CKAccountStatus {
+#if os(macOS)
+    nonisolated extension ICloudManager {
+        private func handleChatHistoryDidChange(
+            conversation: XcodeConversationDetail,
+            chatEvent: ChatEvent
+        ) {
+            print(#function)
+            let subtitle = "[\(conversation.project.name)] \(conversation.name)"
+
+            switch chatEvent {
+            case .assistantMessage(let message):
+                self.sendPushToIOS(
+                    title: "New message",
+                    subtitle: subtitle,
+                    body: message,
+                    conversationId: conversation.id
+                )
+            case .userRequest(let request):
+                switch request {
+                case .permission(let permission):
+                    self.sendPushToIOS(
+                        title: "New permission request",
+                        subtitle: subtitle,
+                        body: permission.jsonInput,
+                        conversationId: conversation.id
+                    )
+                case .questions(let toolUseID, let questions):
+                    self.sendPushToIOS(
+                        title: "New questions",
+                        subtitle: subtitle,
+                        body: questions.map(\.question).joined(separator: "\n"),
+                        conversationId: conversation.id
+                    )
+                case .planApproval(let toolUseID, let plan):
+                    self.sendPushToIOS(
+                        title: "New plan",
+                        subtitle: subtitle,
+                        body: plan,
+                        conversationId: conversation.id
+                    )
+                }
+            default:
+                return
+            }
+        }
+
+        /// send a push notification to iOS by creating and saving a new record of type `RecordType.pushToIOS`
+        func sendPushToIOS(
+            title: String,
+            subtitle: String,
+            body: String,
+            conversationId: String
+        ) {
+            /// Saving a record works only if the user has signed into their iCloud account on their device.
+            guard checkCommon() else { return }
+
+            let record = CKRecord(recordType: RecordType.pushToIOS.rawValue)
+            record.setValuesForKeys([
+                PushToIOSRecordKey.title.rawValue: title,
+                PushToIOSRecordKey.subtitle.rawValue: subtitle,
+                PushToIOSRecordKey.body.rawValue: body,
+                PushToIOSRecordKey.conversationId.rawValue: conversationId,
+            ])
+
+            Task {
+                do {
+                    /// When adding a record for the first time (in sandbox / development env),
+                    /// CloudKit add record type to the schema automatically before saving the record.
+                    /// If the record type already exists in the schema, iCloud uses the existing type.
+                    let _ = try await self.privateDatabase.save(record)
+                } catch {
+                    logger.error(category: category, error: error)
+                    self.state.withLock {
+                        _ = $0.failedSavingRecords.insert(record)
+                    }
+                }
+            }
+        }
+
+    }
+#endif
+
+nonisolated extension CKAccountStatus {
     var stringRepresentation: String {
         switch self {
         case .couldNotDetermine:

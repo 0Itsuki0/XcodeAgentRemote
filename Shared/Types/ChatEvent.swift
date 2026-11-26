@@ -228,3 +228,15 @@ nonisolated extension ChatEvent {
         }
     }
 }
+
+nonisolated extension ChatEvent.ToolUse {
+    var jsonInput: String {
+        var jsonInputs: [String] = []
+        for (key, value) in self.input {
+            jsonInputs.append(
+                "\(key): \(value.jsonString, default: String(describing: value))"
+            )
+        }
+        return jsonInputs.joined(separator: "\n")
+    }
+}
