@@ -39,7 +39,7 @@ enum DashboardOption: String, Hashable, CaseIterable {
 struct DashboardWindow: View {
     static let identifier = "DashboardWindow"
 
-    @State private var selection: DashboardOption = .appleEvent
+    @State private var selection: DashboardOption = .watcher
 
     var body: some View {
         NavigationSplitView {
@@ -74,14 +74,15 @@ struct ChatWatcherConfigurationView: View {
 
     var body: some View {
         Button("watch") {
-            //            let url = URL.desktopDirectory.appending(path: "test.txt")
-            //            Task {
-            //                do {
-            ////                    try await chatWatcher.watchFile(at: url)
-            //                } catch {
-            //                    print(error)
-            //                }
-            //            }
+            Task {
+                do {
+                    try await chatWatcher.watchConversation(
+                        DebugConstants.conversationId
+                    )
+                } catch {
+                    print("Err", error)
+                }
+            }
         }
     }
 }

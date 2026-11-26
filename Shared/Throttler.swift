@@ -20,7 +20,7 @@ import Synchronization
 /// }
 /// ```
 nonisolated final class Throttler: Sendable {
-    private let lastFire: Mutex<Date> = Mutex(.distantPast)
+    private let lastFire: Mutex<Date?> = Mutex(nil)
     private let interval: TimeInterval
 
     init(interval: TimeInterval = 0.5) {
@@ -30,7 +30,10 @@ nonisolated final class Throttler: Sendable {
     func run(_ action: () -> Void) {
         let lastFire = lastFire.withLock { $0 }
         let now = Date()
-        guard now.timeIntervalSince(lastFire) >= interval else { return }
+        if let lastFire, now.timeIntervalSince(lastFire) < interval {
+            print("early return")
+            return
+        }
         self.lastFire.withLock { $0 = now }
         action()
     }

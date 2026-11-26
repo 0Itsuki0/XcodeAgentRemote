@@ -52,13 +52,30 @@ nonisolated
 /// Notes:
 /// - Not preserving the watching URL between app launches to avoid watching unnecessary amount of chats simultaneously
 @Observable nonisolated final class ChatWatcher: Sendable {
+    /// Note:
+    /// 1. not putting  throttler/debouncer on the send side (iCloudManager) because this is suppose to be per-conversation
     fileprivate struct WatchingConversation: Sendable, Identifiable {
+        #if DEBUG
+            static let throttlerInterval: TimeInterval = 1
+            static let debouncerDelay: Duration = .seconds(1)
+        #else
+            /// 5 minutes
+            static let throttlerInterval: TimeInterval = 5 * 60
+            /// 5 seconds
+            static let debouncerDelay: Duration = .seconds(5)
+        #endif
+
         var id: String { conversationId }
         var conversationId: String
         var fileURL: URL
         var watcher: FileWatcher
         var error: Error?
         var task: Task<Void, Never>
+
+        /// Throttler to make sure the push notification is only sent every 10 minutes
+        let throttler = Throttler(interval: Self.throttlerInterval)
+        /// Debouncer to handle rapid change events
+        let debouncer = Debouncer(delay: Self.debouncerDelay)
     }
 
     private let _watchingConversations: Mutex<[WatchingConversation]> =
@@ -72,12 +89,6 @@ nonisolated
     var watchingFileURLs: [URL] {
         return watchingConversations.map(\.fileURL)
     }
-
-    /// Throttler to make sure the push notification is only sent every 10 minutes
-    ///
-    /// Note:
-    /// 1. not putting on the send side (iCloudManager) because this is suppose to be per-conversation
-    private let throttler = Throttler(interval: 10 * 60)
 
     /// Start watching a conversation.
     ///
@@ -113,6 +124,10 @@ nonisolated
         self._watchingConversations.withLock {
             $0.removeAll { $0.conversationId == conversationId }
         }
+        logger.info(
+            category: category,
+            message: "Stop watching conversation: \(conversationId)"
+        )
     }
 
     private func stopWatcherTask(_ conversationId: String) {
@@ -166,6 +181,10 @@ nonisolated
                 )
             )
         }
+        logger.info(
+            category: category,
+            message: "Start watching conversation: \(conversationId)"
+        )
     }
 
     private func handleChange(conversationId: String) {
@@ -174,29 +193,39 @@ nonisolated
             message: "Watched conversation changed for id: \(conversationId)"
         )
 
-        /// Only fire notification for assistant response / user request
-        guard
-            let conversation = try? ChatStore.conversation(id: conversationId)
-        else { return }
-        let history = conversation.history
-        guard let last = history.last else { return }
-        let chatEvent: ChatEvent
-        switch history.last {
-        case .assistantMessage(let message):
-            chatEvent = .assistantMessage(message)
-        case .userRequest(let request):
-            chatEvent = .userRequest(request)
-        default:
+        guard let watching = self.watchingConversations[conversationId] else {
             return
         }
 
-        throttler.run {
-            NotificationCenter.default.post(
-                ChatHistoryDidChange(
-                    conversation: conversation,
-                    chatEvent: chatEvent
+        /// Fetch the conversation history within the debouncer to make sure it is the latest
+        watching.debouncer.run {
+            guard
+                let conversation = try? ChatStore.conversation(
+                    id: conversationId
                 )
-            )
+            else { return }
+
+            let history = conversation.history
+
+            /// Only fire notification for assistant response / user request
+            let chatEvent: ChatEvent
+            switch history.last {
+            case .assistantMessage(let message):
+                chatEvent = .assistantMessage(message)
+            case .userRequest(let request):
+                chatEvent = .userRequest(request)
+            default:
+                return
+            }
+
+            watching.throttler.run {
+                NotificationCenter.default.post(
+                    ChatHistoryDidChange(
+                        conversation: conversation,
+                        chatEvent: chatEvent
+                    )
+                )
+            }
         }
     }
 

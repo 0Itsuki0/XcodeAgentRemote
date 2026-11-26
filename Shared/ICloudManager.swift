@@ -361,14 +361,14 @@ nonisolated extension ICloudManager {
                         body: permission.jsonInput,
                         conversationId: conversation.id
                     )
-                case .questions(let toolUseID, let questions):
+                case .questions(_, let questions):
                     self.sendPushToIOS(
                         title: "New questions",
                         subtitle: subtitle,
                         body: questions.map(\.question).joined(separator: "\n"),
                         conversationId: conversation.id
                     )
-                case .planApproval(let toolUseID, let plan):
+                case .planApproval(_, let plan):
                     self.sendPushToIOS(
                         title: "New plan",
                         subtitle: subtitle,

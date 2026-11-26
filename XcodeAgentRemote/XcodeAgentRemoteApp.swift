@@ -13,6 +13,7 @@ struct XcodeAgentRemoteApp: App {
 
     private let apiServerManager: APIServerManager
     private let chatWatcher: ChatWatcher
+    private let iCloudManager = ICloudManager()
 
     @Environment(\.openWindow) private var openWindow
 
