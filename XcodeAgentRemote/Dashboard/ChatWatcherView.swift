@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-struct ChatWatcherConfigurationView: View {
+struct ChatWatcherView: View {
     @Environment(ChatWatcher.self) private var chatWatcher
 
     @State private var projects: [XcodeProject] = Self.listProject()
@@ -166,11 +166,17 @@ private struct ConversationView: View {
             self.onWatchingToggle()
         }
         .onChange(of: chatWatcher.watchingConversationIds, initial: true) {
-            print("changed")
             guard !self.processing else { return }
             self.watching = chatWatcher.watchingConversationIds.contains(
                 self.conversation.id
             )
+        }
+        .onChange(of: chatWatcher.erroredConversations.keys) {
+            if let error = chatWatcher.erroredConversations[
+                self.conversation.id
+            ] {
+                self.error = error
+            }
         }
     }
 

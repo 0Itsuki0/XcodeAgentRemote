@@ -65,9 +65,23 @@ nonisolated final class ICloudManager: Sendable {
         >(nil)
     #endif
 
+    private let connectivityChangeToken = Mutex<
+        NotificationCenter.ObservationToken?
+    >(nil)
+
     init() {
         self.updateAccountStatus()
         self.watchForAccountChange()
+
+        let connectivityToken = NotificationCenter.default
+            .addObserver(
+                of: Never.self,
+                for: .connectivityDidChange
+            ) { [weak self] message in
+                guard let self, message.isConnected else { return }
+                self.retryFailedRecords()
+            }
+        self.connectivityChangeToken.withLock { $0 = connectivityToken }
 
         #if os(macOS)
             let token = NotificationCenter.default
@@ -320,8 +334,6 @@ nonisolated extension NSPredicate {
 
 nonisolated extension ICloudManager {
     func watchForAccountChange() {
-        // `self` weakly: the task runs until it is cancelled, which `deinit` does, so holding `self` would keep both
-        // alive forever.
         let task = Task { [weak self, container] in
             for await _ in NotificationCenter.default.notifications(
                 named: .CKAccountChanged,
