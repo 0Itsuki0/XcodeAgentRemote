@@ -158,7 +158,98 @@ nonisolated enum XcodeChat {
         repeatedAnswer: RepeatedAnswer?,
         continuation: AsyncThrowingStream<ChatEvent, Error>.Continuation
     ) async throws {
-        // Store and existing chat.
+        let (knownProject, store, conversationID) = try resolveTarget(target)
+        guard
+            let (provider, sessionID, chat) = try resolveChat(
+                prompt: prompt,
+                target: target,
+                store: store,
+                conversationID: conversationID
+            )
+        else { return }
+        var conversation = chat
+        // One turn per chat at a time: claimed until this turn is recorded.
+        guard RunningSessions.insert(sessionID) else {
+            throw XcodeChatError.conversationRunning(
+                conversationID: conversation.id
+            )
+        }
+        defer { RunningSessions.remove(sessionID) }
+
+        let project = try resolveProject(
+            knownProject,
+            provider: provider,
+            sessionID: sessionID,
+            store: store
+        )
+        await closeProjectInXcode(project, sessionID: sessionID)
+        // Answering a request of Xcode's chat whose tool was running after all: closing the project killed it, and its
+        // agent wrote that as its result (`Exit code 137`). Remove that result: the tool use is left without one like a
+        // waiting one, and the agent's repeat runs with the user's answer. (A tool that finished before the close keeps
+        // its result.)
+        if let repeatedAnswer {
+            _ = try provider.removeStoppedResult(
+                of: repeatedAnswer.toolUse.id,
+                sessionID: sessionID
+            )
+        }
+        let workingDirectory = project.deletingLastPathComponent()
+
+        // One turn, like Xcode: snapshot, run the agent, snapshot, record.
+        let snapshotBefore = try ChatStore.writeGitSnapshot(
+            store: store,
+            workingDirectory: workingDirectory
+        )
+        let startDate = Date()
+        let records = ToolUseRecords()
+        let request = TurnRequest(
+            workingDirectory: workingDirectory,
+            sessionID: sessionID,
+            resume: conversationID != nil,
+            prompt: prompt,
+            permissionMode: permissionMode(for: permissionModeOverride),
+            permissionTimeout: permissionTimeout,
+            records: records,
+            repeatedAnswer: repeatedAnswer
+        )
+        let (events, agentError) = try await runAgent(
+            provider: provider,
+            request: request,
+            repeatedAnswer: repeatedAnswer,
+            continuation: continuation
+        )
+        let finishedDate = Date()
+        let snapshotAfter = try ChatStore.writeGitSnapshot(
+            store: store,
+            workingDirectory: workingDirectory
+        )
+
+        try recordTurn(
+            in: &conversation,
+            prompt: prompt,
+            events: events,
+            provider: provider,
+            records: records,
+            startDate: startDate,
+            finishedDate: finishedDate,
+            snapshotBefore: snapshotBefore,
+            snapshotAfter: snapshotAfter
+        )
+
+        try removeRepeatedEarlierToolUse(
+            repeatedAnswer: repeatedAnswer,
+            records: records,
+            provider: provider,
+            sessionID: sessionID
+        )
+
+        if let agentError { throw agentError }
+    }
+
+    /// The target's store and existing chat, and its project if the target names it.
+    private static func resolveTarget(
+        _ target: MessageTarget
+    ) throws -> (project: URL?, store: URL, conversationID: String?) {
         var project: URL?
         let store: URL
         let conversationID: String?
@@ -186,11 +277,20 @@ nonisolated enum XcodeChat {
         case .conversation(let id, _), .conversationInStore(let id, _):
             conversationID = id
         }
+        return (project, store, conversationID)
+    }
 
-        // Provider and session: the chat's own for an existing chat, the given agent for a new one.
-        let provider: any AgentProvider.Type
-        let sessionID: String
-        var conversation: ChatStore.Chat
+    /// Provider and session: the chat's own for an existing chat, the given agent for a new one (created here).
+    /// nil if there is no existing chat and the target is not a new one.
+    private static func resolveChat(
+        prompt: String,
+        target: MessageTarget,
+        store: URL,
+        conversationID: String?
+    ) throws -> (
+        provider: any AgentProvider.Type, sessionID: String,
+        conversation: ChatStore.Chat
+    )? {
         if let conversationID {
             guard
                 let existing = ChatStore.Chat.load(
@@ -210,20 +310,28 @@ nonisolated enum XcodeChat {
             guard let existingSession = existing.sessionID else {
                 throw XcodeChatError.sessionMissing(conversationID: existing.id)
             }
-            provider = existingProvider
-            sessionID = existingSession
-            conversation = existing
+            return (existingProvider, existingSession, existing)
         } else {
-            guard case .newConversation(let projectFile, let agent, let name, let id) = target else {
-                return
+            guard
+                case .newConversation(
+                    let projectFile,
+                    let agent,
+                    let name,
+                    let id
+                ) = target
+            else {
+                return nil
             }
-            let newID = try checkNewConversation(id: id, project: projectFile, agent: agent)
-            guard let newProvider = AgentProviders.provider(for: agent) else {
+            let newID = try checkNewConversation(
+                id: id,
+                project: projectFile,
+                agent: agent
+            )
+            guard let provider = AgentProviders.provider(for: agent) else {
                 throw XcodeChatError.agentNotImplemented(agent)
             }
-            provider = newProvider
-            sessionID = provider.newSessionID()
-            conversation = try ChatStore.Chat.create(
+            let sessionID = provider.newSessionID()
+            let conversation = try ChatStore.Chat.create(
                 store: store,
                 id: newID,
                 modelDefinition: .init(
@@ -233,76 +341,72 @@ nonisolated enum XcodeChat {
                 sessionID: sessionID,
                 name: name ?? String(prompt.prefix(40))
             )
+            return (provider, sessionID, conversation)
         }
-        // One turn per chat at a time: claimed until this turn is recorded.
-        guard RunningSessions.insert(sessionID) else {
-            throw XcodeChatError.conversationRunning(
-                conversationID: conversation.id
-            )
-        }
-        defer { RunningSessions.remove(sessionID) }
+    }
 
-        if project == nil {  // a store only: find the project from the session's folder and the snapshots
-            let folders =
-                [provider.workingDirectory(sessionID: sessionID)].compactMap {
-                    $0
-                }
-                + ChatStore.snapshotRoots(store: store)
-            guard
-                let found = ChatStore.projectFile(
-                    store: store,
-                    folders: folders
-                )
-            else {
-                throw XcodeChatError.projectFileNotFound(store: store)
-            }
-            project = found
+    /// The given project, or for a store only: the project found from the session's folder and the snapshots.
+    private static func resolveProject(
+        _ project: URL?,
+        provider: any AgentProvider.Type,
+        sessionID: String,
+        store: URL
+    ) throws -> URL {
+        if let project { return project }
+        let folders =
+            [provider.workingDirectory(sessionID: sessionID)]
+            .compactMap { $0 }
+            + ChatStore.snapshotRoots(store: store)
+        guard
+            let found = ChatStore.projectFile(
+                store: store,
+                folders: folders
+            )
+        else {
+            throw XcodeChatError.projectFileNotFound(store: store)
         }
-        guard let project else { return }
-        // Xcode keeps the project's chats in memory: it would write over what this turn records, and a request it
-        // shows could still be answered there. Close the project in Xcode before the turn (nothing if it isn't open).
-        if try await MainActor.run(body: {
-            try XcodeAutomation.closeProject(at: project)
-        }) {
+        return found
+    }
+
+    /// Xcode keeps the project's chats in memory: it would write over what this turn records, and a request it
+    /// shows could still be answered there.
+    /// Close the project in Xcode before the turn (nothing if it isn't open).
+    /// Best effort: only when automation is already allowed (never shows the prompt), and a failed close doesn't fail the turn.
+    private static func closeProjectInXcode(
+        _ project: URL,
+        sessionID: String
+    ) async {
+        if await XcodeAutomation.automationPermission(askIfNeeded: false)
+            == .granted,
+            (try? await MainActor.run(body: {
+                try XcodeAutomation.closeProject(at: project)
+            })) == true
+        {
             // Its agent for this session writes what it settles as it stops: wait for it to be gone.
             await waitForAgentToStop(sessionID: sessionID)
         }
-        // Answering a request of Xcode's chat whose tool was running after all: closing the project killed it, and its
-        // agent wrote that as its result (`Exit code 137`). Remove that result: the tool use is left without one like a
-        // waiting one, and the agent's repeat runs with the user's answer. (A tool that finished before the close keeps
-        // its result.)
-        if let repeatedAnswer {
-            _ = try provider.removeStoppedResult(
-                of: repeatedAnswer.toolUse.id,
-                sessionID: sessionID
-            )
-        }
-        let workingDirectory = project.deletingLastPathComponent()
-        let permissionMode: XcodeAgentConfiguration.PermissionMode =
-            switch permissionModeOverride {
-            case .manual: .manual
-            case .auto: .auto
-            case nil: XcodeAgentConfiguration.PermissionMode.currentMode
-            }
+    }
 
-        // One turn, like Xcode: snapshot, run the agent, snapshot, record.
-        let snapshotBefore = try ChatStore.writeGitSnapshot(
-            store: store,
-            workingDirectory: workingDirectory
-        )
-        let startDate = Date()
-        let records = ToolUseRecords()
-        let request = TurnRequest(
-            workingDirectory: workingDirectory,
-            sessionID: sessionID,
-            resume: conversationID != nil,
-            prompt: prompt,
-            permissionMode: permissionMode,
-            permissionTimeout: permissionTimeout,
-            records: records,
-            repeatedAnswer: repeatedAnswer
-        )
-        // All the turn's events, for its cards; the caller gets only what it doesn't have already (`ClientEvents`).
+    /// The turn's permission mode: the override, or the current one.
+    private static func permissionMode(
+        for override: PermissionMode?
+    ) -> XcodeAgentConfiguration.PermissionMode {
+        switch override {
+        case .manual: .manual
+        case .auto: .auto
+        case nil: XcodeAgentConfiguration.PermissionMode.currentMode
+        }
+    }
+
+    /// Runs the agent's turn, streaming to the caller only what it doesn't have already (`ClientEvents`).
+    /// Returns all the turn's events (for its cards) and the agent's error, if any: an agent error still records the
+    /// turn, then is thrown; any other error (or cancelling) is thrown here and does not record it.
+    private static func runAgent(
+        provider: any AgentProvider.Type,
+        request: TurnRequest,
+        repeatedAnswer: RepeatedAnswer?,
+        continuation: AsyncThrowingStream<ChatEvent, Error>.Continuation
+    ) async throws -> (events: [ChatEvent], agentError: XcodeChatError?) {
         var events: [ChatEvent] = []
         var clientEvents = ClientEvents(
             provider: provider,
@@ -310,7 +414,6 @@ nonisolated enum XcodeChat {
                 $0.answer.isDeny ? nil : $0.toolUse
             }
         )
-        // An agent error still records the turn, then is thrown; any other error (or cancelling) does not record it.
         var agentError: XcodeChatError?
         do {
             for try await event in provider.runTurn(request) {
@@ -321,12 +424,21 @@ nonisolated enum XcodeChat {
             guard case .agentFailed = error else { throw error }
             agentError = error
         }
-        let finishedDate = Date()
-        let snapshotAfter = try ChatStore.writeGitSnapshot(
-            store: store,
-            workingDirectory: workingDirectory
-        )
+        return (events, agentError)
+    }
 
+    /// Appends the turn (its cards from the events) to the chat and saves it.
+    private static func recordTurn(
+        in conversation: inout ChatStore.Chat,
+        prompt: String,
+        events: [ChatEvent],
+        provider: any AgentProvider.Type,
+        records: ToolUseRecords,
+        startDate: Date,
+        finishedDate: Date,
+        snapshotBefore: String?,
+        snapshotAfter: String?
+    ) throws {
         let toolUseRecords = records.byToolUseID
         let response = ChatCard.turnCards(for: events) { toolUse, result in
             provider.card(
@@ -344,17 +456,22 @@ nonisolated enum XcodeChat {
             snapshotAfter: snapshotAfter
         )
         try conversation.save()
+    }
 
-        // The agent repeated the earlier tool use and was given its answer: the earlier one (left without a result
-        // when its agent was stopped, then marked interrupted on resume) is replaced by the repeat, so remove it.
+    /// The agent repeated the earlier tool use and was given its answer: the earlier one (left without a result
+    /// when its agent was stopped, then marked interrupted on resume) is replaced by the repeat, so remove it.
+    private static func removeRepeatedEarlierToolUse(
+        repeatedAnswer: RepeatedAnswer?,
+        records: ToolUseRecords,
+        provider: any AgentProvider.Type,
+        sessionID: String
+    ) throws {
         if let repeatedAnswer, records.repeatedEarlierToolUse {
             try provider.removeToolUse(
                 repeatedAnswer.toolUse.id,
                 sessionID: sessionID
             )
         }
-
-        if let agentError { throw agentError }
     }
 
     /// Waits (up to 10 seconds) until no process runs with the session id in its arguments: the agent Xcode ran it in.
