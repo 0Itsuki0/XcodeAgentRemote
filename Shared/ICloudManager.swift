@@ -52,9 +52,28 @@ class ICloudManager {
 
     private let networkMonitor = NetworkMonitor()
 
+    #if os(macOS)
+        private var chatHistoryChangeToken: NotificationCenter.ObservationToken?
+    #endif
+
     init() {
         self.updateAccountStatus()
         self.watchForAccountChange()
+
+        #if os(macOS)
+            self.chatHistoryChangeToken = NotificationCenter.default
+                .addObserver(
+                    of: Never.self,
+                    for: .chatHistoryDidChange
+                ) { [weak self] message in
+                    guard let self else { return }
+//                    self.handleChatHistoryDidChange(message.conversationId)
+                }
+        #endif
+    }
+
+    private func handleChatHistoryDidChange(_ conversationId: String) {
+
     }
 
     private func checkCommon() -> Bool {

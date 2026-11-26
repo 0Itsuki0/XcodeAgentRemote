@@ -16,7 +16,6 @@ struct SelectedConversationDidChange: NotificationCenter.MainActorMessage {
         var lastActivityDate: Date
     }
 
-    /// (`ConversationId`, `projectId`)
     let conversation: Conversation?
 }
 

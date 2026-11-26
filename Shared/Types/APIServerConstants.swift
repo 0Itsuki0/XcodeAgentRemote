@@ -24,10 +24,10 @@ nonisolated enum APIServerConstants {
     /// `.answer` → the same turn's events, continued, or 404.
     static let messagePath = "conversations/:\(conversationIDParameter)/messages"
     /// `GET /projects` → `[XcodeProject]`: every project with Xcode chats, with its conversations, no histories
-    /// (`XcodeChat.listProjects`).
+    /// (`ChatStore.listProjects`).
     static let projectsPath = "projects"
     /// `GET /conversations/<Xcode chat UUID>` → `XcodeConversationDetail`: one conversation in full, with its history
-    /// and its project (`XcodeChat.conversation(id:)`). 404 if there is no such chat (or its session is missing), 501
+    /// and its project (`ChatStore.conversation(id:)`). 404 if there is no such chat (or its session is missing), 501
     /// if history is not implemented for its agent.
     static let conversationPath = "conversations/:\(conversationIDParameter)"
     /// `POST /conversations/<Xcode chat UUID>/watch` with a `WatchRequest` body → `SuccessResponse` once the Mac started

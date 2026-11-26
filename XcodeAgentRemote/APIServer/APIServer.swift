@@ -16,8 +16,8 @@ nonisolated private let category = Logger.category(#fileID)
 
 /// HTTP server (Hummingbird), listening on localhost only:
 /// - `GET /health` → `{"status": "ok"}`
-/// - `GET /projects` → `[XcodeProject]` (`XcodeChat.listProjects`)
-/// - `GET /conversations/<Xcode chat UUID>` → `XcodeConversationDetail` (`XcodeChat.conversation`): the conversation, its
+/// - `GET /projects` → `[XcodeProject]` (`ChatStore.listProjects`)
+/// - `GET /conversations/<Xcode chat UUID>` → `XcodeConversationDetail` (`ChatStore.conversation`): the conversation, its
 ///   history and its project; 404 no such chat, 501 not implemented
 /// - `POST /conversations/<Xcode chat UUID>/watch` with `WatchRequest` (`{"watch": true}` / `{"watch": false}`) →
 ///   `{"status": "ok"}` once the Mac started (or stopped) watching the conversation's session (`watchConversation`); 404 no

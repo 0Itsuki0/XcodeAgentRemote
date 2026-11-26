@@ -11,12 +11,46 @@ import Synchronization
 nonisolated private let logger = Logger.shared
 nonisolated private let category = Logger.category(#fileID)
 
+nonisolated struct ChatHistoryDidChange: NotificationCenter.AsyncMessage {
+    typealias Subject = Never
+    let conversationId: String
+}
+
+nonisolated extension NotificationCenter.MessageIdentifier
+where
+    Self == NotificationCenter.BaseMessageIdentifier<
+        ChatHistoryDidChange
+    >
+{
+    static var chatHistoryDidChange: Self { .init() }
+}
+
+nonisolated
+    extension Array where Element == ChatWatcher.WatchingConversation
+{
+    subscript(_ id: String) -> ChatWatcher.WatchingConversation? {
+        get {
+            return self.first(where: { $0.id.lowercased() == id.lowercased() })
+        }
+        set {
+            guard
+                let index = self.firstIndex(where: {
+                    $0.id.lowercased() == id.lowercased()
+                }), let newValue
+            else {
+                return
+            }
+            self[index] = newValue
+        }
+    }
+}
+
 /// `ChatWatcher` managing a list of `FileWatcher`, one per chat.
 ///
 /// Notes:
 /// - Not preserving the watching URL between app launches to avoid watching unnecessary amount of chats simultaneously
 @Observable nonisolated final class ChatWatcher: Sendable {
-    private struct WatchingConversation: Sendable, Identifiable {
+    fileprivate struct WatchingConversation: Sendable, Identifiable {
         var id: String { conversationId }
         var conversationId: String
         var fileURL: URL
@@ -37,36 +71,51 @@ nonisolated private let category = Logger.category(#fileID)
         return watchingConversations.map(\.fileURL)
     }
 
-    func watchConversation(_ id: String) async throws {
-        guard !self.watchingConversationIds.contains(id) else {
+    /// Throttler to make sure the push notification is only sent every 10 minutes
+    ///
+    /// Note:
+    /// 1. not putting on the send side (iCloudManager) because this is suppose to be per-conversation
+    private let throttler = Throttler(interval: 10 * 60)
+
+    /// Start watching a conversation.
+    ///
+    /// Notes:
+    /// 1. watching the provider's session file instead of Xcode's `conversation.plist`
+    ///     - matches what is returned with `ChatStore.history`
+    ///     - contains full history instead of just what Xcode displays (what `conversation.plist` is)
+    func watchConversation(_ conversationId: String) async throws {
+        guard !self.watchingConversationIds.contains(conversationId) else {
             return
         }
-        let store = try ChatStore.chatStore(conversationID: id)
+        let store = try ChatStore.chatStore(conversationID: conversationId)
         let sessionId = try ChatStore.providerSessionID(
             store: store,
-            conversationID: id
+            conversationID: conversationId
         )
-        let provider = try ChatStore.provider(store: store, conversationID: id)
+        let provider = try ChatStore.provider(
+            store: store,
+            conversationID: conversationId
+        )
         let fileURL = try provider.transcriptFile(sessionID: sessionId)
         guard !self.watchingFileURLs.contains(fileURL) else {
             return
         }
-        try await self.watchFile(at: fileURL, for: id)
+        try await self.watchFile(at: fileURL, for: conversationId)
     }
 
-    func stopWatchingConversation(_ id: String) async {
+    func stopWatchingConversation(_ conversationId: String) async {
         let conversation: WatchingConversation? = self._watchingConversations
-            .withLock {
-                guard
-                    let index =
-                        $0.firstIndex(where: { $0.conversationId == id })
-                else { return nil }
-                return $0[index]
-            }
+            .withLock { $0[conversationId] }
         conversation?.task.cancel()
         await conversation?.watcher.stop()
         self._watchingConversations.withLock {
-            $0.removeAll { $0.conversationId == id }
+            $0.removeAll { $0.conversationId == conversationId }
+        }
+    }
+
+    private func stopWatcherTask(_ conversationId: String) {
+        self._watchingConversations.withLock {
+            $0[conversationId]?.task.cancel()
         }
     }
 
@@ -89,22 +138,20 @@ nonisolated private let category = Logger.category(#fileID)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     /// stop the task, but not removing the value from the array (in case there is an error)
-                    self.stopWatcherTask(for: url)
+                    self.stopWatcherTask(conversationId)
                 }
             }
         }
         try await watcher.start()
-        let task: Task<Void, Never> = Task {
+        let task: Task<Void, Never> = Task { [weak self] in
+            guard let self else { return }
             do {
-                for try await change in event {
-                    logger.info(
-                        category: category,
-                        message: "\(url.lastPathComponent) - \(change)"
-                    )
+                for try await _ in event {
+                    self.handleChange(conversationId: conversationId)
                 }
             } catch {
                 guard !error.isCancellationError else { return }
-                self.setError(for: url, error: error)
+                self.setError(conversationId, error: error)
             }
         }
         self._watchingConversations.withLock {
@@ -119,21 +166,22 @@ nonisolated private let category = Logger.category(#fileID)
         }
     }
 
-    private func setError(for url: URL, error: Error) {
-        self._watchingConversations.withLock {
-            guard let index = $0.firstIndex(where: { $0.fileURL == url }) else {
-                return
-            }
-            $0[index].error = error
+    private func handleChange(conversationId: String) {
+        logger.info(
+            category: category,
+            message: "Watched conversation changed for id: \(conversationId)"
+        )
+
+        throttler.run {
+            NotificationCenter.default.post(
+                ChatHistoryDidChange(conversationId: conversationId)
+            )
         }
     }
 
-    private func stopWatcherTask(for url: URL) {
+    private func setError(_ conversationId: String, error: Error) {
         self._watchingConversations.withLock {
-            guard let index = $0.firstIndex(where: { $0.fileURL == url }) else {
-                return
-            }
-            $0[index].task.cancel()
+            $0[conversationId]?.error = error
         }
     }
 }

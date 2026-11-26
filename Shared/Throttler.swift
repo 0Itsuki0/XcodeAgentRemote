@@ -6,9 +6,10 @@
 //
 
 import Foundation
+import Synchronization
 
-// MARK: - Throttler: fires at most once per interval
-//
+// MARK: - Throttler: fires at most once per interval (seconds)
+
 /// Usage — analytics event that shouldn't spam
 /// ```
 /// let scrollThrottler = Throttler(interval: 1.0)
@@ -18,8 +19,8 @@ import Foundation
 ///     }
 /// }
 /// ```
-final class Throttler {
-    private var lastFire: Date = .distantPast
+nonisolated final class Throttler: Sendable {
+    private let lastFire: Mutex<Date> = Mutex(.distantPast)
     private let interval: TimeInterval
 
     init(interval: TimeInterval = 0.5) {
@@ -27,9 +28,10 @@ final class Throttler {
     }
 
     func run(_ action: () -> Void) {
+        let lastFire = lastFire.withLock { $0 }
         let now = Date()
         guard now.timeIntervalSince(lastFire) >= interval else { return }
-        lastFire = now
+        self.lastFire.withLock { $0 = now }
         action()
     }
 }

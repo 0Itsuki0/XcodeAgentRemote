@@ -22,8 +22,15 @@
 
 ### MacOS
 
+| Permission | Why it is needed |
+| --- | --- |
+| Automation: Apple Events to Xcode (`AUTOMATION_APPLE_EVENTS`, `NSAppleEventsUsageDescription`) | to close the project's window in Xcode with AppleScript (`XcodeAutomation.closeProject`). Asked the first time, while Xcode is running (`XcodeAutomation.automationPermission`). A denied permission can only be changed in System Settings → Privacy & Security → Automation |
 
 ### iOS
+
+| Permission | Why it is needed |
+| --- | --- |
+| Notifications: alert, sound, badge (`requestAuthorization`) | to show a watched conversation's change as a notification and badge (asked in `NotificationSettingView`) |
 
 
 
@@ -33,8 +40,9 @@
     - no unified server to avoid unnecessary hosting on itsuki's side which includes cloud hosting, authorization, database and etc.
     - each user is responsible for starting their own tunnel, for example, with ngrok. ([ngrok supports Static dev domains for all users](https://ngrok.com/blog/free-static-domains-ngrok-users))
     local server started from the mac app instead of a unified server 
-1. Run Xcode Agent Programmatically to process the message and get response
-2. Send Push notification with CloudKit on watched conversations to notify iOS changes on (almost) real time.
+2. Run Xcode Agent Programmatically to process the message and get response
+    - close the Xcode project (AppleScript) before running the agent: Xcode keeps the project's chats in memory and would write over the turns the app records ([Why not keep Xcode open](#why-not-keep-xcode-open))
+3. Send Push notification with CloudKit on watched conversations to notify iOS changes on (almost) real time.
     - using CloudKit to avoid hosting a unified server for all users or bundling itsuki's own developer certificate within the app
 
 
