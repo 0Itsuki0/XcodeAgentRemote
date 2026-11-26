@@ -8,20 +8,34 @@
 import SwiftUI
 
 struct ProjectListView: View {
-    // TODO: - add search by project name, conversation name
 
     init(apiClient: APIServerClient) {
         self.projectViewModel = ProjectViewModel(apiClient: apiClient)
     }
 
     @State private var projectViewModel: ProjectViewModel
+
+    @State private var searchQuery: String = ""
+
     @Environment(\.tappedConversationId) private var tappedConversationId
 
     private let standardSpacing = UIConstants.standardSpacing
 
-    private var projects: [XcodeProject] {
+    private var allProjects: [XcodeProject] {
         projectViewModel.projects.filter {
             $0.projectFile != nil
+        }
+    }
+
+    private var filteredProject: [XcodeProject] {
+        let base = self.allProjects
+        let query = searchQuery.trimmed
+        guard !query.isEmpty else { return base }
+        return base.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.conversations.map(\.name).contains(where: {
+                    $0.localizedCaseInsensitiveContains(query)
+                })
         }
     }
 
@@ -34,13 +48,13 @@ struct ProjectListView: View {
             }
         }
         .task {
-            await projectViewModel.loadProjects(checkInitial: true)
+            await projectViewModel.loadProjects()
         }
     }
 
     @ContentBuilder
     private var centerOverlay: some View {
-        if projects.isEmpty {
+        if allProjects.isEmpty {
             if projectViewModel.isFetching {
                 ProgressView()
                     .controlSize(.extraLarge)
@@ -51,6 +65,15 @@ struct ProjectListView: View {
                 )
                 .frame(maxHeight: .infinity, alignment: .center)
             }
+        } else if filteredProject.isEmpty {
+            ContentUnavailableView(
+                "No projects",
+                systemImage: "magnifyingglass",
+                description: Text(
+                    "No results found for \"\(searchQuery.trimmed)\""
+                )
+            )
+            .frame(maxHeight: .infinity, alignment: .center)
         }
     }
 
@@ -60,7 +83,7 @@ struct ProjectListView: View {
             error: error,
             retry: {
                 Task {
-                    await projectViewModel.loadProjects(checkInitial: false)
+                    await projectViewModel.loadProjects()
                 }
             },
             retryDisabled: projectViewModel.isFetching
@@ -70,30 +93,26 @@ struct ProjectListView: View {
     @ContentBuilder
     private var projectList: some View {
         List {
-            ForEach(projects) { project in
-                let shouldHighlight = project.conversations.contains {
-                    $0.id == tappedConversationId
-                }
+            ForEach(filteredProject) { project in
+                let unread =
+                    project.conversations.contains {
+                        !$0.isArchived
+                            && ($0.id == tappedConversationId || $0.isUnread)
+                    }
                 NavigationLink {
                     ConversationListView(
                         conversations: project.conversations,
                         projectName: project.name,
                         projectId: project.id,
                         apiClient: projectViewModel.apiClient,
-                        refresh: {
-                            await projectViewModel.loadProjects(
-                                checkInitial: false
-                            )
-                        },
+                        refresh: projectViewModel.loadProjects,
                         error: projectViewModel.error,
                         fetching: projectViewModel.isFetching
                     )
                     .environment(\.tappedConversationId, tappedConversationId)
                 } label: {
                     HStack(spacing: standardSpacing / 2) {
-                        if project.conversations.contains(
-                            where: { $0.isUnread && !$0.isArchived }
-                        ) || shouldHighlight {
+                        if unread {
                             UnreadMark()
                         }
                         Text(project.name)
@@ -107,16 +126,44 @@ struct ProjectListView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 }
-                .listRowBackground(
-                    shouldHighlight ? Color.accentColor : nil
-                )
             }
         }
         .contentMargins(.top, UIConstants.standardTopMargin)
         .refreshable {
-            await projectViewModel.loadProjects(checkInitial: false)
+            await projectViewModel.loadProjects()
         }
         .overlay { centerOverlay }
+        .searchable(
+            text: $searchQuery,
+            prompt: Text("Project / conversation name...")
+        )
+        .onChange(of: tappedConversationId, initial: true) {
+            handleTappedConversation(shouldTryRefetch: true)
+        }
+        .onChange(of: allProjects, initial: true) {
+            handleTappedConversation(shouldTryRefetch: false)
+        }
+    }
+
+    private func handleTappedConversation(shouldTryRefetch: Bool) {
+        guard let tappedConversationId else {
+            self.searchQuery = ""
+            return
+        }
+        if let project = allProjects.first(where: {
+            $0.conversations.contains(where: {
+                $0.id == tappedConversationId && !$0.isArchived
+            })
+        }) {
+            self.searchQuery = project.name
+            return
+        }
+
+        if shouldTryRefetch {
+            Task {
+                await projectViewModel.loadProjects()
+            }
+        }
     }
 }
 

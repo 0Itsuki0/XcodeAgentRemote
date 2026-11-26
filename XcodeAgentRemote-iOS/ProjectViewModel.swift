@@ -60,8 +60,6 @@ private let category = Logger.category(#fileID)
 
     private(set) var isFetching: Bool = false
 
-    private(set) var initialized = false
-
     @ObservationIgnored
     private var observationToken: NotificationCenter.ObservationToken?
 
@@ -98,13 +96,11 @@ private let category = Logger.category(#fileID)
         })
     }
 
-    func loadProjects(checkInitial: Bool = false) async {
+    func loadProjects() async {
         guard !isFetching else { return }
-        if checkInitial, initialized { return }
         self.isFetching = true
         self.error = nil
         defer {
-            initialized = true
             isFetching = false
         }
         do {

@@ -69,7 +69,7 @@ private let category = Logger.category(#fileID)
     private let apiClient: APIServerClient
 
     // TODO: - consider changing the value to a setting option
-    private let permissionTimeout: TimeInterval = 180
+    private let permissionTimeout: TimeInterval = 5 * 60
 
     /// id to force the entire history to refresh
     private(set) var historyViewID = UUID()
@@ -147,6 +147,7 @@ private let category = Logger.category(#fileID)
             self.markConversationAsRead()
         } catch {
             self.fetchError = error
+            self.conversationDetail = nil
         }
     }
 
