@@ -1,6 +1,6 @@
 # Xcode Agent Remote
 
-[ngrok: Static dev domains for all ngrok users](https://ngrok.com/blog/free-static-domains-ngrok-users)
+> By proceeding, you confirm your understanding of the [license](/LICENSE.md).
 
 ## Table of Contents
 
@@ -39,7 +39,8 @@
 1. Local server to receive request from IOS (ping, list projects, get conversation, send message and stream response)
     - no unified server to avoid unnecessary hosting on itsuki's side which includes cloud hosting, authorization, database and etc.
     - each user is responsible for starting their own tunnel, for example, with ngrok. ([ngrok supports Static dev domains for all users](https://ngrok.com/blog/free-static-domains-ngrok-users))
-    local server started from the mac app instead of a unified server 
+    local server started from the mac app instead of a unified server
+    - not using iCloud/CloudKit sync because this needs real time instead of just on a best-effort base
 2. Run Xcode Agent Programmatically to process the message and get response
     - close the Xcode project (AppleScript) before running the agent: Xcode keeps the project's chats in memory and would write over the turns the app records ([Why not keep Xcode open](#why-not-keep-xcode-open))
 3. Send Push notification with CloudKit on watched conversations to notify iOS changes on (almost) real time.
