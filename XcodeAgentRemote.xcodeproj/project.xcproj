@@ -20,6 +20,8 @@
     },
   ],
   "files": [
+    { "path": "LICENSE.md", "target-membership": [ "XcodeAgentRemote/resources" ] },
+    { "path": "privacy.html", "target-membership": [ "XcodeAgentRemote/resources" ] },
     { "kind": "folder", "path": "Shared", "target-membership": [ "XcodeAgentRemote", "XcodeAgentRemote-iOS" ] },
     { "path": "README.md", "target-membership": [ "XcodeAgentRemote/resources" ] },
     {
@@ -59,7 +61,9 @@
         { "path": "<DEVELOPER>/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.3.sdk/usr/lib/swift/libswiftCloudKit.tbd" },
         { "path": "<DEVELOPER>/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS27.3.sdk/System/Library/Frameworks/CloudKit.framework", "target-membership": [ "XcodeAgentRemote/frameworks" ] },
       ],
-    }, {
+    },
+    { "kind": "folder", "path": "Tools" },
+    {
       "kind": "group",
       "name": "Products",
       "children": [
