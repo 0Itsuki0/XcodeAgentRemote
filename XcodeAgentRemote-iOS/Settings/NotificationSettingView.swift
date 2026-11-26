@@ -48,7 +48,8 @@ struct NotificationSettingView: View {
 
                     To receive notifications on a conversation update:
                     1. Watch a conversation, either from Mac or within the iOS app.
-                    2. Sign in to same iCloud account on both Mac and iOS.
+                    2. Sign in to the same iCloud account on both Mac and iOS.
+                    3. Enable push notification on iOS.
                     """
                 )
             }
@@ -110,6 +111,7 @@ struct NotificationSettingView: View {
 
     private func refreshAuthStatus() {
         guard scenePhase == .active else { return }
+        guard !self.fetching else { return }
         self.fetching = true
         Task {
             defer { self.fetching = false }

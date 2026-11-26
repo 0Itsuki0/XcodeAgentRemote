@@ -72,6 +72,10 @@ nonisolated
         var error: Error?
         var task: Task<Void, Never>
 
+        var isWatching: Bool {
+            !task.isCancelled && error == nil
+        }
+
         /// Throttler to make sure the push notification is only sent every 10 minutes
         let throttler = Throttler(interval: Self.throttlerInterval)
         /// Debouncer to handle rapid change events
@@ -81,13 +85,21 @@ nonisolated
     private let _watchingConversations: Mutex<[WatchingConversation]> =
         Mutex([])
     private var watchingConversations: [WatchingConversation] {
-        return _watchingConversations.withLock { $0 }
+        return _watchingConversations.withLock { $0 }.filter { $0.isWatching }
     }
     var watchingConversationIds: [String] {
         return watchingConversations.map(\.conversationId)
     }
     var watchingFileURLs: [URL] {
         return watchingConversations.map(\.fileURL)
+    }
+
+    private func isWatching(_ conversationId: String) -> Bool {
+        guard let conversation = self.watchingConversations[conversationId]
+        else {
+            return false
+        }
+        return conversation.isWatching
     }
 
     /// Start watching a conversation.
@@ -97,7 +109,7 @@ nonisolated
     ///     - matches what is returned with `ChatStore.history`
     ///     - contains full history instead of just what Xcode displays (what `conversation.plist` is)
     func watchConversation(_ conversationId: String) async throws {
-        guard !self.watchingConversationIds.contains(conversationId) else {
+        guard !self.isWatching(conversationId) else {
             return
         }
         let store = try ChatStore.chatStore(conversationID: conversationId)

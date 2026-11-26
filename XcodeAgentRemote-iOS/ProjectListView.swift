@@ -60,15 +60,22 @@ struct ProjectListView: View {
                     .controlSize(.extraLarge)
             } else if projectViewModel.error == nil {
                 ContentUnavailableView(
-                    "No projects",
-                    systemImage: "rectangle.stack"
+                    label: {
+                        Label(
+                            "No projects",
+                            systemImage: SymbolNames.projects
+                        )
+                    },
+                    actions: {
+                        Button("refresh", action: reloadProjectSync)
+                    }
                 )
                 .frame(maxHeight: .infinity, alignment: .center)
             }
         } else if filteredProject.isEmpty {
             ContentUnavailableView(
                 "No projects",
-                systemImage: "magnifyingglass",
+                systemImage: SymbolNames.search,
                 description: Text(
                     "No results found for \"\(searchQuery.trimmed)\""
                 )
@@ -81,13 +88,15 @@ struct ProjectListView: View {
     private func errorView(_ error: NetworkError) -> some View {
         NetworkErrorView(
             error: error,
-            retry: {
-                Task {
-                    await projectViewModel.loadProjects()
-                }
-            },
+            retry: reloadProjectSync,
             retryDisabled: projectViewModel.isFetching
         )
+    }
+
+    private func reloadProjectSync() {
+        Task {
+            await projectViewModel.loadProjects()
+        }
     }
 
     @ContentBuilder
@@ -159,11 +168,7 @@ struct ProjectListView: View {
             return
         }
 
-        if shouldTryRefetch {
-            Task {
-                await projectViewModel.loadProjects()
-            }
-        }
+        if shouldTryRefetch { reloadProjectSync() }
     }
 }
 

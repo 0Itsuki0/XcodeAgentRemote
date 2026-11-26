@@ -121,10 +121,12 @@ struct ConversationListView: View {
             return
         }
 
-        if shouldTryRefetch {
-            Task {
-                await refresh()
-            }
+        if shouldTryRefetch { refreshSync() }
+    }
+
+    private func refreshSync() {
+        Task {
+            await refresh()
         }
     }
 
@@ -136,15 +138,28 @@ struct ConversationListView: View {
                     .controlSize(.extraLarge)
             } else if error == nil {
                 ContentUnavailableView(
+                    label: {
+                        Label(
+                            "No conversations",
+                            systemImage: SymbolNames.conversations
+                        )
+                    },
+                    actions: {
+                        Button("refresh", action: refreshSync)
+                    }
+                )
+                .frame(maxHeight: .infinity, alignment: .center)
+
+                ContentUnavailableView(
                     "No conversations",
-                    systemImage: "list.bullet"
+                    systemImage: SymbolNames.projects
                 )
                 .frame(maxHeight: .infinity, alignment: .center)
             }
         } else if filteredConversation.isEmpty {
             ContentUnavailableView(
                 "No conversations",
-                systemImage: "magnifyingglass",
+                systemImage: SymbolNames.search,
                 description: Text(
                     "No results found for \"\(searchQuery.trimmed)\""
                 )
@@ -157,11 +172,7 @@ struct ConversationListView: View {
     private func errorView(_ error: NetworkError) -> some View {
         NetworkErrorView(
             error: error,
-            retry: {
-                Task {
-                    await refresh()
-                }
-            },
+            retry: refreshSync,
             retryDisabled: fetching
         )
     }

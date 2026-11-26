@@ -50,14 +50,6 @@ actor FileWatcher {
         self.continuation = continuation
     }
 
-    //    func start() {
-    //        guard !stopped else { return }
-    //        do {
-    //            try open()
-    //        } catch {
-    //            continuation.finish(throwing: error)
-    //        }
-    //    }
     func start() throws(FileWatcherError) {
         guard !stopped else { return }
         try open()

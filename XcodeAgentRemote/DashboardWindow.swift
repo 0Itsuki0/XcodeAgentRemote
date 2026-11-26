@@ -67,25 +67,6 @@ struct DashboardWindow: View {
     }
 }
 
-struct ChatWatcherConfigurationView: View {
-    @Environment(ChatWatcher.self) private var chatWatcher
-
-    // TODO: - add iCloud account state, add project / conversation list
-
-    var body: some View {
-        Button("watch") {
-            Task {
-                do {
-                    try await chatWatcher.watchConversation(
-                        DebugConstants.conversationId
-                    )
-                } catch {
-                    print("Err", error)
-                }
-            }
-        }
-    }
-}
 
 struct SettingForm<Content: View>: View {
     @ContentBuilder let content: Content
@@ -94,7 +75,7 @@ struct SettingForm<Content: View>: View {
         Form {
             self.content
         }
-        .contentMargins(.top, 0)
+        .contentMargins(.top, -8)
         .formStyle(.grouped)
         .scrollBounceBehavior(.basedOnSize)
         .frame(
@@ -380,18 +361,11 @@ struct AppleEventView: View {
     }
 
     private func handlePermissionToggle() {
-        print(
-            #function,
-            processing,
-            self.permissionGranted,
-            self.automationStatus
-        )
         guard !self.processing else { return }
         if self.equal(
             granted: self.permissionGranted,
             automationStatus: automationStatus
         ) {
-            print("same")
             return
         }
 
