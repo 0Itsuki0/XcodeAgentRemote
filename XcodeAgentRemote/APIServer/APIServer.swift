@@ -357,8 +357,14 @@ actor APIServer {
                 let permissionModeOverride,
                 let permissionTimeout
             ):
+                /// Confirm the conversation Id is indeed authentic: an existing chat, in the given project's store.
                 do throws(XcodeChatError) {
-                    _ = try ChatStore.chatStore(conversationID: conversationID)
+                    let store = try ChatStore.chatStore(conversationID: conversationID)
+                    let projectStore = ChatStore.storeDirectory(
+                        forProject: project.absoluteURL.standardizedFileURL
+                    )
+                    guard store.standardizedFileURL.path == projectStore.standardizedFileURL.path
+                    else { throw XcodeChatError.chatNotFound(id: conversationID) }
                 } catch {
                     throw httpError(error)
                 }

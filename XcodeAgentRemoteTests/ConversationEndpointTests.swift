@@ -114,6 +114,16 @@ struct ConversationEndpointTests {
         }
     }
 
+    /// An existing chat, sent with a project it is not in.
+    @Test func messageWithOtherProjectIs404() async throws {
+        try await Self.withServer { base in
+            let request = try Self.post(
+                Self.messagesURL(base, conversationID: SendMessageTests.conversationID),
+                MessageRequest.prompt(prompt: "hi", project: URL(filePath: "/nonexistent/App.xcodeproj")))
+            #expect(try await Self.status(request) == 404)
+        }
+    }
+
     /// A new chat with a lowercase id the client chose: its first turn runs, it is found by that id (named after the
     /// prompt), and its next message goes to `/conversations/<id>/messages`.
     @Test func startThenContinue() async throws {
