@@ -246,6 +246,17 @@ nonisolated enum XcodeChat {
             provider: provider,
             sessionID: sessionID
         )
+        /// The resume marked the answered tool use interrupted (`[Tool call interrupted …]`,
+        /// then `No response requested.`):
+        /// remove those, and make the answer (the prompt) its result, so the history reads like a live
+        /// turn. (Not if it was repeated: the old tool use is gone, the repeat has its own result.)
+        if let repeatedAnswer, !records.repeatedEarlierToolUse {
+            _ = try provider.replaceResumeInterruption(
+                with: repeatedAnswer.answer,
+                prompt: prompt,
+                sessionID: sessionID
+            )
+        }
 
         if let agentError { throw agentError }
     }

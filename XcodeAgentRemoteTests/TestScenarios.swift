@@ -585,9 +585,13 @@ nonisolated enum TestScenarios {
                         ),
                         "the denied command ran"
                     )
-                    try checkLeftInterrupted(toolUse, chatID: chatID)
+                    try checkAnsweredInPlace(
+                        toolUse,
+                        answer: .permission(toolUseID: toolUse.id, allow: false),
+                        chatID: chatID
+                    )
                     return
-                        "nothing ran; the old tool use stays, interrupted; reply: \(reply(events))"
+                        "nothing ran; the old tool use stays, the deny its result; reply: \(reply(events))"
                 }
             )
 
@@ -639,26 +643,48 @@ nonisolated enum TestScenarios {
             return results
         }
 
-        /// Checks an answered request the agent didn't repeat (a deny): the old tool use stays, with Claude's interrupted
-        /// result; not marked waiting, and the history not waiting for the user.
-        private static func checkLeftInterrupted(
+        /// Checks an answered request the agent didn't repeat (a deny): the old tool use stays, with the user's answer as
+        /// its result (the resume prompt made its result), like a live turn: its request, then the answer, with no
+        /// interrupted result and no `No response requested.` in between; not marked waiting, and the history not
+        /// waiting for the user.
+        private static func checkAnsweredInPlace(
             _ toolUse: ChatEvent.ToolUse,
+            answer: ChatEvent.UserResponse,
             chatID: String
         ) throws {
             let history = try ChatStore.history(conversationID: chatID)
-            let result = history.lazy.compactMap {
-                event -> ChatEvent.ToolResult? in
-                if case .toolResult(let result) = event,
-                    result.toolUseID == toolUse.id
-                {
-                    result
-                } else {
-                    nil
-                }
-            }.first
+            guard
+                let requestIndex = history.firstIndex(where: {
+                    if case .userRequest(let request) = $0 {
+                        request.toolUseID == toolUse.id
+                    } else {
+                        false
+                    }
+                })
+            else {
+                throw CheckFailed(
+                    description: "the old tool use's request is not in the history"
+                )
+            }
+            let next = history.dropFirst(requestIndex + 1).first
             try check(
-                result?.output.contains("Tool call interrupted") == true,
-                "the old tool use's result: \(result?.output ?? "none")"
+                next == .userResponse(answer),
+                "after the request: \(next.map { "\($0)" } ?? "nothing"), not the answer"
+            )
+            try check(
+                !history.contains {
+                    if case .toolResult(let result) = $0 {
+                        result.toolUseID == toolUse.id
+                    } else {
+                        false
+                    }
+                },
+                "the old tool use still has a tool result (interrupted?)"
+            )
+            let afterAnswer = history.dropFirst(requestIndex + 2).first
+            try check(
+                afterAnswer != .assistantMessage("No response requested."),
+                "\"No response requested.\" after the answer"
             )
             try check(
                 !PendingToolUses.contains(toolUse.id, agent: .claude),

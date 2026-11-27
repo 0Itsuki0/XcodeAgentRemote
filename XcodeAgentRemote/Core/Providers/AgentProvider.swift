@@ -44,6 +44,14 @@ nonisolated protocol AgentProvider: SendableMetatype {
     /// produced itself (it finished before the stop) stays. Returns whether there was one to remove.
     static func removeStoppedResult(of toolUseID: String, sessionID: String)
         throws -> Bool
+    /// For an answer given by resuming the session (its tool use had no result): removes what the agent wrote on
+    /// resuming (its interrupted result, and the agent's reply to it), and makes the resume prompt the tool use's result,
+    /// the user's answer. Returns whether there was an interrupted result.
+    static func replaceResumeInterruption(
+        with answer: ChatEvent.UserResponse,
+        prompt: String,
+        sessionID: String
+    ) throws -> Bool
     /// Whether the tool use always waits for the user (a question, a plan, …), whatever the settings: it is shown as its
     /// request (`ChatEvent.userRequest`), not as a tool use.
     static func alwaysWaitsForUser(_ toolUse: ChatEvent.ToolUse) -> Bool

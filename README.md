@@ -362,7 +362,8 @@ We need to tell it apart from other tool user so that we can have the user to an
           2. the synthetic `No response requested.` assistant message
           3. the user's answer (the resume prompt), e.g. `Allowed: you may run the Bash call you asked permission for.`
       2. the agent repeats the tool call (its reply to the answer)
-      3. the app checks whether it is the same call (logically) as the old one. if it is, and the answer is not a deny, the app answers it automatically, and once the turn ends removes the old tool use and its interrupted result: only the repeat remains. they stay (interrupted) if the answer was a deny (a repeat is not answered for it) or the agent didn't repeat the call
+      3. the app checks whether it is the same call (logically) as the old one. if it is, and the answer is not a deny, the app answers it automatically, and once the turn ends removes the old tool use and its interrupted result: only the repeat remains
+      4. if the agent didn't repeat the call (a deny, or a question / plan whose answer the prompt already gives): once the turn ends, the app removes the interrupted result and `No response requested.`, and makes the resume prompt the old tool use's result (`replaceResumeInterruption`): the user's answer, as a live turn records it (`permissionDecision` `accept` / `user_temporary` or `reject` / `user_reject`, a question's answers in `toolUseResult.answers`; a deny / decline / rejection's result is the user's message or the default text). only the prompt right after those two lines (its `parentUuid`), so the result directly follows the tool use. the history then reads like a live turn: the request, the answer, the reply
 
 ##### If initiated by Xcode
 
@@ -405,7 +406,7 @@ We need to tell it apart from other tool user so that we can have the user to an
         - files (Control File & Folder Access on): a Read / Write / Edit file outside the project folder, checked with `pathRules` (longest path wins): no rule → asks, `read` → writing asks, `write` → no ask, `deny` / `readDenyWrite` → refused without asking
         - anything it can't decide (missing settings, a command it can't parse) counts as asking
 - the user answers through the app: the project is closed, then the `.jsonl` is read again
-    - the tool use still has no result (it was waiting): the chat is resumed with the answer, the same as an agent killed while waiting. the agent repeats the call, it is answered without asking, and the old tool use is removed
+    - the tool use still has no result (it was waiting): the chat is resumed with the answer, the same as an agent killed while waiting. if the agent repeats the call, it is answered without asking, and the old tool use is removed. if it doesn't, the resume's interrupted result and `No response requested.` are removed and the answer becomes the old tool use's result
     - it now has the result of a stop (closing the project stopped it): that result is removed, and it continues like the no-result case. only these results are removed (`removeStoppedResult`); a result the tool produced itself (it finished before the close) stays, so it doesn't run again
         - by the app (AppleScript), while the tool ran: Xcode doesn't notice, the tool is killed: a plain error result `Exit code 137` (`permissionDecision.source` `hook`)
         - by the app (AppleScript), while Xcode's prompt was still open: `The user doesn't want to take this action right now …` (`"toolDenialKind": "cancelled"`)
@@ -640,7 +641,7 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 4. **History** (`history(sessionID:)`): the session's lines → `ChatEvent`s, the same events a live turn streams, plus the prompt and the user's answers (`userMessage`, `assistantMessage`, `intermediate`, `toolUse`, `toolResult`, `userRequest`, `userResponse`)
 5. **Run a turn** (`runTurn(_:)`): start the agent like Xcode, send the prompt, stream its output as `ChatEvent`s, and answer its requests to the user (`PendingUserRequestHandler.waitForAnswer`; no answer in `permissionTimeout` is a deny). record file contents around file-changing tools and the denied tool uses in `request.records` (the cards need them)
 6. **Pending requests** (`pendingToolUse(sessionID:)`): the session's last tool use, when it waits for the user, both for the app's own turns and Xcode's ([How to determine whether there is a pending user request](#how-to-determine-whether-there-is-a-pending-user-request))
-7. **Resume and repeat**: `isSameCall(_:_:)`, `removeToolUse(_:sessionID:)`, `removeStoppedResult(of:sessionID:)`, for a request answered after its agent stopped
+7. **Resume and repeat**: `isSameCall(_:_:)`, `removeToolUse(_:sessionID:)`, `removeStoppedResult(of:sessionID:)`, `replaceResumeInterruption(with:prompt:sessionID:)`, for a request answered after its agent stopped
 8. **Cards** (`card(for:result:record:)`): what Xcode shows for each tool. copy Xcode's own cards field for field from turns Xcode wrote with that agent
 9. **Register it**: add it to `AgentProviders.all`, and its Xcode model cache id to `XcodeAgentConfiguration.xcodeAgentID(of:)` (`IDEChatGatewayModels.<id>` in `com.apple.dt.Xcode`) so `GET /providers` lists its models
 10. **Test against the real agent**: `SessionHistoryTests` with real session files, `SendMessageTests`, `ScenarioTests` (all of them, again after every change: a build passing proves nothing about the chat store paths or the agent's output)
@@ -685,7 +686,8 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 - the agent makes the call again under a new id it assigns itself. the app can't choose it: keep the new id everywhere (the response and the result must match it)
 - the repeat may not be asked about at all: Claude's agent allowed it by its own config (`source: config`), so no `can_use_tool` came. match the repeat when the agent sends the call (`isSameCall`), not only when it asks
 - the caller doesn't get the repeat's tool use or a second request: the user already answered it. it gets only the repeat's `.toolResult` (`ClientEvents` matches the repeat with the provider's `isSameCall`)
-- once the turn ended, remove the earlier tool use and its interrupted result (`removeToolUse`), whether or not the repeat was asked. a deny is not repeated: the earlier one stays, interrupted
+- once the turn ended, remove the earlier tool use and its interrupted result (`removeToolUse`), whether or not the repeat was asked
+- not repeated (a deny, or a question / plan whose answer was the prompt): remove the interrupted result and the synthetic `No response requested.`, and make the resume prompt the earlier tool use's result, recorded the way a live answer is (`replaceResumeInterruption`). the history then has the request and the user's answer, as in a live turn
 - `isSameCall`: which input fields identify a call per tool. the agent rewords its description, a plan, a question's options
 
 **Reading Xcode's chat store**
