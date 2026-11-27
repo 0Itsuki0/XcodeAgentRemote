@@ -46,6 +46,7 @@ where
                     conversationName: "Debug Conversation",
                     projectName: "Debug Project",
                     projectId: DebugConstants.chatStore,
+                    projectFile: DebugConstants.projectFile,
                     lastActivityDate: Date(),
                     isWatching: true
                 )
@@ -62,17 +63,17 @@ extension ChatView {
         projectName: String,
         /// store: Xcode chat store folder (`<ProjectName>-<hash>`, name or path).
         projectId: String,
-        lastActivityDate: Date?,
-        isWatching: Bool
+        projectFile: URL,
     ) {
         self.chatViewModel = ChatViewModel(
             apiClient: apiClient,
             conversationId: conversation.id,
-            conversationName: conversation.name,
+            conversationName: conversation.displayName,
             projectName: projectName,
             projectId: projectId,
-            lastActivityDate: lastActivityDate,
-            isWatching: isWatching
+            projectFile: projectFile,
+            lastActivityDate: conversation.lastActivityDate,
+            isWatching: conversation.isWatching
         )
     }
 }

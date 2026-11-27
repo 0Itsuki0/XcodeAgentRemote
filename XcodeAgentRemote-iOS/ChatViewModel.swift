@@ -19,6 +19,8 @@ private let category = Logger.category(#fileID)
     let conversationId: String
     /// should be the same as the store, but here for consistency
     let projectId: String
+    /// The project (`.xcodeproj` / `.xcworkspace`) the chat belongs to, sent with each message.
+    let projectFile: URL
 
     private(set) var conversationName: String
     private(set) var projectName: String
@@ -80,6 +82,7 @@ private let category = Logger.category(#fileID)
         conversationName: String,
         projectName: String,
         projectId: String,
+        projectFile: URL,
         lastActivityDate: Date?,
         isWatching: Bool
     ) {
@@ -88,6 +91,7 @@ private let category = Logger.category(#fileID)
         self.conversationName = conversationName
         self.projectName = projectName
         self.projectId = projectId
+        self.projectFile = projectFile
         self.lastActivityDate = lastActivityDate
         self.isWatching = isWatching
     }
@@ -111,6 +115,7 @@ private let category = Logger.category(#fileID)
             self.conversationName = "DebugConversation"
             self.projectName = "DebugProject"
             self.projectId = "Debug-Hash"
+            self.projectFile = DebugConstants.projectFile
             self.lastActivityDate = Date()
             self.isWatching = false
         }
@@ -218,6 +223,7 @@ private let category = Logger.category(#fileID)
         let stream = apiClient.sendMessage(
             prompt,
             conversationID: conversationId,
+            projectFile: projectFile,
             permissionModeOverride: permissionModeOverride,
             permissionTimeout: self.permissionTimeout
         )

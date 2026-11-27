@@ -196,7 +196,14 @@ nonisolated extension ChatStore {
             store: store,
             conversationID: id
         )
-        return try provider.history(sessionID: sessionID)
+        do {
+            return try provider.history(sessionID: sessionID)
+        } catch XcodeChatError.transcriptMissing(_)
+            where Chat.load(store: store, id: id)?.hasNoTurns == true
+        {
+            // A chat created in Xcode with nothing sent yet: its session has no file yet.
+            return []
+        }
     }
 }
 
@@ -280,7 +287,7 @@ nonisolated extension ChatStore {
                 .agent._0.sessionID
         }
 
-        private var hasNoTurns: Bool {
+        var hasNoTurns: Bool {
             (plist["transcriptMessages"] as? [Any])?.isEmpty ?? true
         }
 

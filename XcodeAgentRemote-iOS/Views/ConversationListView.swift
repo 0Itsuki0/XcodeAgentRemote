@@ -13,6 +13,7 @@ struct ConversationListView: View {
     let conversations: [XcodeConversation]
     let projectName: String
     let projectId: String
+    let projectFile: URL
     let apiClient: APIServerClient
 
     let refresh: () async -> Void
@@ -57,8 +58,7 @@ struct ConversationListView: View {
                         conversation: conversation,
                         projectName: projectName,
                         projectId: projectId,
-                        lastActivityDate: conversation.lastActivityDate,
-                        isWatching: conversation.isWatching
+                        projectFile: projectFile
                     )
                 } label: {
                     VStack(alignment: .leading, spacing: standardSpacing / 2) {
@@ -70,7 +70,7 @@ struct ConversationListView: View {
                                 UnreadMark()
                             }
 
-                            Text(conversation.name)
+                            Text(conversation.displayName)
                         }
 
                         if let lastActivity = conversation.lastActivityDate {

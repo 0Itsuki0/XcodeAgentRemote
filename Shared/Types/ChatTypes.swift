@@ -46,6 +46,9 @@ nonisolated struct XcodeConversation: Codable, Identifiable, Sendable,
     /// Xcode's chat UUID (the chat's folder name in the store).
     var id: String
     var name: String
+    var displayName: String {
+        name.trimmed.isEmpty ? "New Conversation" : name.trimmed
+    }
     /// The agent (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`);
     /// nil if it is not one of the agents Xcode can run (`AgentProviderName`).
     var provider: AgentProviderName?
@@ -82,6 +85,9 @@ nonisolated struct XcodeConversationDetail: Codable, Identifiable, Sendable,
     /// Xcode's chat UUID (the chat's folder name in the store).
     var id: String
     var name: String
+    var displayName: String {
+        name.trimmed.isEmpty ? "New Conversation" : name.trimmed
+    }
     /// The agent (`chatModelDefinitionIdentifier.providerIdentifier.builtIn._0`); nil if it is not one of the agents
     /// Xcode can run (`Agent`).
     var provider: AgentProviderName?

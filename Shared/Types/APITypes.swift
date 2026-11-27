@@ -61,9 +61,11 @@ nonisolated struct CreateConversationRequest: Codable, Sendable {
 
 /// Request to `POST /conversations/<id>/messages`
 nonisolated enum MessageRequest: Codable, Sendable {
+    /// `project`: the project (`.xcodeproj` / `.xcworkspace`) the chat belongs to, as a file URL.
     /// Seconds a request to the user (permission, questions, plan) waits for its answer before it is denied; nil: 600.
     case prompt(
         prompt: String,
+        project: URL,
         permissionModeOverride: PermissionMode? = nil,
         permissionTimeout: TimeInterval? = nil
     )

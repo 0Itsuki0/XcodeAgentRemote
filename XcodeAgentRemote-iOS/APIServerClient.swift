@@ -262,12 +262,14 @@ nonisolated struct APIServerClient: Sendable {
     func sendMessage(
         _ prompt: String,
         conversationID: String,
+        projectFile: URL,
         permissionModeOverride: PermissionMode? = nil,
         permissionTimeout: TimeInterval? = nil
     ) -> AsyncThrowingStream<ChatEvent, Error> {
         events(
             for: .prompt(
                 prompt: prompt,
+                project: projectFile,
                 permissionModeOverride: permissionModeOverride,
                 permissionTimeout: permissionTimeout
             ),

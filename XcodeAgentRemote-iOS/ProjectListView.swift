@@ -95,37 +95,45 @@ struct ProjectListView: View {
     private var projectList: some View {
         List {
             ForEach(filteredProject) { project in
-                let unread =
-                    project.conversations.contains {
-                        !$0.isArchived
-                            && ($0.id == tappedConversationId || $0.isUnread)
-                    }
-                NavigationLink {
-                    ConversationListView(
-                        conversations: project.conversations,
-                        projectName: project.name,
-                        projectId: project.id,
-                        apiClient: projectViewModel.apiClient,
-                        refresh: projectViewModel.loadProjects,
-                        error: projectViewModel.error,
-                        fetching: projectViewModel.isFetching
-                    )
-                    .environment(\.tappedConversationId, tappedConversationId)
-                } label: {
-                    HStack(spacing: standardSpacing / 2) {
-                        if unread {
-                            UnreadMark()
+                /// `allProjects` only has projects with a project file.
+                if let projectFile = project.projectFile {
+                    let unread =
+                        project.conversations.contains {
+                            !$0.isArchived
+                                && ($0.id == tappedConversationId
+                                    || $0.isUnread)
                         }
-                        Text(project.name)
-                        let count = project.conversations.count
-                        if count > 0 {
-                            Text(
-                                "(\(count.formatted(IntegerFormatStyle.nonGrouping)))"
-                            )
+                    NavigationLink {
+                        ConversationListView(
+                            conversations: project.conversations,
+                            projectName: project.name,
+                            projectId: project.id,
+                            projectFile: projectFile,
+                            apiClient: projectViewModel.apiClient,
+                            refresh: projectViewModel.loadProjects,
+                            error: projectViewModel.error,
+                            fetching: projectViewModel.isFetching
+                        )
+                        .environment(
+                            \.tappedConversationId,
+                            tappedConversationId
+                        )
+                    } label: {
+                        HStack(spacing: standardSpacing / 2) {
+                            if unread {
+                                UnreadMark()
+                            }
+                            Text(project.name)
+                            let count = project.conversations.count
+                            if count > 0 {
+                                Text(
+                                    "(\(count.formatted(IntegerFormatStyle.nonGrouping)))"
+                                )
+                            }
                         }
+                        .font(.subheadline)
+                        .fontWeight(.medium)
                     }
-                    .font(.subheadline)
-                    .fontWeight(.medium)
                 }
             }
         }

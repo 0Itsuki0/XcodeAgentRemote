@@ -36,7 +36,8 @@ nonisolated private let category = Logger.category(#fileID)
 ///   - `.prompt` → SSE stream of the turn's events (`sendMessage`), until the turn waits for the user's answer
 ///     (the stream ends with that `user_request`) or the turn ends. The prompt is not echoed. 404 no such chat:
 ///     ```
-///     {"prompt": {"prompt": "…", "permissionModeOverride": "manual", "permissionTimeout": 600}}
+///     {"prompt": {"prompt": "…", "project": "file:///…/App.xcodeproj", "permissionModeOverride": "manual",
+///      "permissionTimeout": 600}}
 ///     ```
 ///     Each `ChatEvent` is sent as `event: <its type>` + `data: <its JSON>`. If the turn fails, an `event: error`
 ///     with `{"message": …}` is sent.
@@ -352,19 +353,19 @@ actor APIServer {
                 return streamResponse(XcodeChat.answerUserRequest(answer))
             case .prompt(
                 let prompt,
+                let project,
                 let permissionModeOverride,
                 let permissionTimeout
             ):
-                let store: URL
                 do throws(XcodeChatError) {
-                    store = try ChatStore.chatStore(conversationID: conversationID)
+                    _ = try ChatStore.chatStore(conversationID: conversationID)
                 } catch {
                     throw httpError(error)
                 }
                 return streamResponse(
                     XcodeChat.sendMessage(
                         prompt,
-                        to: .conversationInStore(id: conversationID, store: store.path),
+                        to: .conversation(id: conversationID, project: project),
                         permissionModeOverride: permissionModeOverride,
                         permissionTimeout: permissionTimeout
                     )

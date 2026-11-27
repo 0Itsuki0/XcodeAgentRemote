@@ -15,6 +15,10 @@
         static let conversationId: String =
             "1170A351-FBFE-4317-8FA7-4F65AC6F3B64"
         static let chatStore: String = "Demo10-edhhiszqgddxcwajapbakukmrdhy"
+        /// The project file of `chatStore`.
+        static let projectFile = URL(
+            filePath: "/Users/itsuki/Desktop/Swift/***General/Demo10/Demo10.xcodeproj"
+        )
 
         static let chatEventJsonURL: URL? = Bundle.main.url(
             forResource: "sampleHistory",

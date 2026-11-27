@@ -207,7 +207,7 @@ private struct ConversationView: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 8) {
-                Text(conversation.name)
+                Text(conversation.displayName)
                 if let lastActivity = conversation.lastActivityDate {
                     Text(
                         lastActivity.formatted(

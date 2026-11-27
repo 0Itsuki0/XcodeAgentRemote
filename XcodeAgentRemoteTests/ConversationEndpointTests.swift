@@ -109,7 +109,7 @@ struct ConversationEndpointTests {
         try await Self.withServer { base in
             let request = try Self.post(
                 Self.messagesURL(base, conversationID: "00000000-0000-0000-0000-000000000000"),
-                MessageRequest.prompt(prompt: "hi"))
+                MessageRequest.prompt(prompt: "hi", project: ScenarioTests.project))
             #expect(try await Self.status(request) == 404)
         }
     }
@@ -133,9 +133,25 @@ struct ConversationEndpointTests {
             let next = try await Self.events(
                 try Self.post(
                     Self.messagesURL(base, conversationID: id),
-                    MessageRequest.prompt(prompt: second, permissionModeOverride: .auto)))
+                    MessageRequest.prompt(prompt: second, project: ScenarioTests.project, permissionModeOverride: .auto)))
             #expect(Self.reply(next).lowercased().contains("ping"))
             #expect(try ChatStore.conversation(id: id).history.contains(.userMessage(second)))
+        }
+    }
+
+    /// A new chat from Xcode's UI with nothing sent yet (no session file): its first message through
+    /// `/conversations/<id>/messages` starts its session.
+    @Test func firstMessageToNewChat() async throws {
+        let chat = try NewChatHistoryTests.makeChat()
+        defer { NewChatHistoryTests.remove(chat) }
+        try await Self.withServer { base in
+            let prompt = "Reply with only the word pong."
+            let events = try await Self.events(
+                try Self.post(
+                    Self.messagesURL(base, conversationID: chat.id),
+                    MessageRequest.prompt(prompt: prompt, project: ScenarioTests.project, permissionModeOverride: .auto)))
+            #expect(Self.reply(events).lowercased().contains("pong"))
+            #expect(try ChatStore.conversation(id: chat.id).history.contains(.userMessage(prompt)))
         }
     }
 }

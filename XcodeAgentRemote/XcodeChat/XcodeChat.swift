@@ -200,12 +200,16 @@ nonisolated enum XcodeChat {
             store: store,
             workingDirectory: workingDirectory
         )
+        // A chat created in Xcode with nothing sent yet has a session id but no session file: start that session.
+        let isUnstartedSession =
+            conversation.hasNoTurns
+            && (try? provider.transcriptFile(sessionID: sessionID)) == nil
         let startDate = Date()
         let records = ToolUseRecords()
         let request = TurnRequest(
             workingDirectory: workingDirectory,
             sessionID: sessionID,
-            resume: conversationID != nil,
+            resume: conversationID != nil && !isUnstartedSession,
             prompt: prompt,
             permissionMode: permissionMode(for: permissionModeOverride),
             permissionTimeout: permissionTimeout,
