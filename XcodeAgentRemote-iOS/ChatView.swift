@@ -236,12 +236,15 @@ struct ChatView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                /// try to watch a conversation without a history will fail
+                /// However, not disabling it here so that we can show the error message on why we cannot watch.
                 Button(chatViewModel.isWatching ? "Unwatch" : "Watch") {
                     chatViewModel.watchConversation(
                         shouldWatch: !chatViewModel.isWatching
                     )
-                }.buttonStyle(.borderless)
-                    .foregroundStyle(.link)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.link)
             }
             .sharedBackgroundVisibility(.hidden)
         }
@@ -468,7 +471,6 @@ struct ChatView: View {
         }
     }
 }
-
 
 extension ChatEvent.UserRequest {
     var name: String {

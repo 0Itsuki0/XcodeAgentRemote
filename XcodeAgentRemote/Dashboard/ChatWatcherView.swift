@@ -179,7 +179,10 @@ private struct ConversationListView: View {
                         }
                     } header: {
                         ExplanationText(
-                            "Check a conversation to start watching."
+                            """
+                            Check a conversation (with existing messages) to start watching.
+                            Try to watch a conversation without any messages will fail.
+                            """
                         )
                     }
                 }
@@ -195,7 +198,6 @@ private struct ConversationListView: View {
     }
 }
 
-// TODO: - not working correctly for empty chat (aka: chat created in xcode but doesn't contain a single message -> no session history in the provider side)
 private struct ConversationView: View {
     @Environment(ChatWatcher.self) private var chatWatcher
     let conversation: XcodeConversation
@@ -219,7 +221,7 @@ private struct ConversationView: View {
                     .foregroundStyle(.secondary)
                 }
 
-                InlineErrorView(error: $error, autoDisappear: .seconds(3))
+                InlineErrorView(error: $error, autoDisappear: nil)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -258,8 +260,9 @@ private struct ConversationView: View {
                         conversation.id
                     )
                 } catch {
+                    /// not setting watching back to false to avoid onWatchingToggle get triggered again and erase the error message
+                    /// Have the use unchecked it manually instead.
                     self.error = error
-                    self.watching = false
                 }
             } else {
                 await self.chatWatcher.stopWatchingConversation(
