@@ -11,7 +11,7 @@ struct NotificationSettingView: View {
     @State private var authorizationStatus: UNAuthorizationStatus =
         .notDetermined
     @State private var notificationEnabled: Bool = false
-    @State private var fetching: Bool = true
+    @State private var fetching: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
