@@ -353,7 +353,6 @@ nonisolated extension ICloudManager {
             conversation: XcodeConversationDetail,
             chatEvent: ChatEvent
         ) {
-            print(#function)
             let subtitle = "[\(conversation.project.name)] \(conversation.name)"
 
             switch chatEvent {
@@ -402,6 +401,13 @@ nonisolated extension ICloudManager {
         ) {
             /// Saving a record works only if the user has signed into their iCloud account on their device.
             guard checkCommon() else { return }
+            
+            logger.info(category: category, message: """
+                Sending push notification to iOS:
+                - title: \(title)
+                - subtitle: \(subtitle)
+                - conversationId: \(conversationId)
+                """)
 
             let record = CKRecord(recordType: RecordType.pushToIOS.rawValue)
             record.setValuesForKeys([
