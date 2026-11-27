@@ -41,6 +41,7 @@ nonisolated private let category = Logger.category(#fileID)
                 tappedConversationId == selectedConversationId
             {
                 self.tappedConversationId = nil
+                UNUserNotificationCenter.current().setBadgeCount(0)
             }
         }
     }
