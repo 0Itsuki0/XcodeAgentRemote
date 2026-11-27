@@ -97,3 +97,12 @@ extension PermissionMode {
         self.rawValue.capitalized
     }
 }
+
+extension Array where Element == XcodeConversation {
+    var sortedByLastActivity: Self {
+        return self.sorted(by: {
+            ($0.lastActivityDate?.timeIntervalSince1970 ?? 0)
+                > ($1.lastActivityDate?.timeIntervalSince1970 ?? 0)
+        })
+    }
+}

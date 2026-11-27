@@ -66,3 +66,19 @@ struct SettingsView: View {
         }
     }
 }
+
+struct SettingHeader: View {
+    init(_ text: LocalizedStringKey) {
+        self.text = text
+    }
+
+    private let text: LocalizedStringKey
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline)
+            .padding(.bottom, UIConstants.standardTopMargin)
+            .listRowInsets(.horizontal, 0)
+
+    }
+}

@@ -119,10 +119,3 @@ struct IntroductionView: View {
     }
 }
 
-struct UnreadMark: View {
-    var body: some View {
-        Circle()
-            .fill(Color.accentColor)
-            .frame(width: 8)
-    }
-}
