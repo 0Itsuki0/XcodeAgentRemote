@@ -35,8 +35,9 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    // TODO: - add privacy
-                    // Button("Privacy", action: {})
+                    if let privacy = URL.privacy {
+                        Link("GitHub", destination: privacy)
+                    }
                     if let gitHub = URL.gitHub {
                         Link("GitHub", destination: gitHub)
                     }
@@ -50,6 +51,15 @@ struct SettingsView: View {
                     Button("Close", systemImage: "xmark") {
                         self.dismiss()
                     }
+                }
+            }
+            .safeAreaInset(edge: .bottom, alignment: .trailing) {
+                if let version = AppConstants.appVersion {
+                    Text("v\(version)")
+                        .font(.footnote)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                        .padding(.all, UIConstants.standardSpacing)
                 }
             }
             .labelStyle(.iconOnly)

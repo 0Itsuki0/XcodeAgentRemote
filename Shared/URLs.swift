@@ -13,4 +13,6 @@ nonisolated extension String {
 
 nonisolated extension URL {
     static let gitHub: URL? = URL(string: .gitHub)
+    // TODO: - add privacy url
+    static let privacy: URL? = URL(string: "")
 }

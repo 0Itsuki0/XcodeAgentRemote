@@ -28,7 +28,20 @@ struct ServerSettingView: View {
                     format: portFormatStyle
                 )
 
-                // TODO: - add auth configuration
+                Toggle("Authorization", isOn: $serverManager.useAuth)
+
+                if serverManager.useAuth {
+                    TextField(
+                        "Name",
+                        text: $serverManager.authHeader.name,
+                        prompt: Text("ex: Authorization")
+                    )
+                    TextField(
+                        "Value",
+                        text: $serverManager.authHeader.value,
+                        prompt: Text("ex: Bearer tok_live_9f8e")
+                    )
+                }
 
                 Toggle(
                     "Start on app launch",
@@ -64,11 +77,12 @@ struct ServerSettingView: View {
                     .font(.subheadline)
 
                     ExplanationText(explanationText)
+                        .padding(.vertical, 2)
 
                     InlineErrorView(
                         error: $serverManager.serverError,
                         autoDisappear: .seconds(3)
-                    ).padding(.top, 1)
+                    )
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -153,14 +167,14 @@ private struct NgrokSettingSection: View {
                 .font(.subheadline)
 
                 ExplanationText(explanationText)
+                    .padding(.vertical, 2)
 
                 InlineErrorView(
                     error: $serverManager.ngrokError,
                     autoDisappear: .seconds(3)
-                ).padding(.top, 1)
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
         } footer: {
             Text("Restart the tunnel to apply any changes.")
                 .font(.caption)

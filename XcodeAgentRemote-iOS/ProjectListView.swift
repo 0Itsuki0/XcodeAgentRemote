@@ -28,15 +28,7 @@ struct ProjectListView: View {
     }
 
     private var filteredProject: [XcodeProject] {
-        let base = self.allProjects
-        let query = searchQuery.trimmed
-        guard !query.isEmpty else { return base }
-        return base.filter {
-            $0.name.localizedCaseInsensitiveContains(query)
-                || $0.conversations.map(\.name).contains(where: {
-                    $0.localizedCaseInsensitiveContains(query)
-                })
-        }
+        return self.allProjects.applySearchQuery(searchQuery)
     }
 
     var body: some View {

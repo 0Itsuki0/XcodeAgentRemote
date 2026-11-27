@@ -11,82 +11,101 @@ struct ChatWatcherView: View {
     @Environment(ChatWatcher.self) private var chatWatcher
 
     @State private var projects: [XcodeProject] = Self.listProject()
+    @State private var searchQuery: String = ""
 
-    static func listProject() -> [XcodeProject] {
-        return ChatStore.listProjects()
-            .filter { $0.projectFile != nil }
+    private var filteredProject: [XcodeProject] {
+        return self.projects.applySearchQuery(searchQuery)
     }
 
     var body: some View {
         NavigationStack {
-            if projects.isEmpty {
-                ContentUnavailableView(
-                    label: {
-                        Label(
-                            "No projects",
-                            systemImage: SymbolNames.projects
+            Group {
+                if projects.isEmpty {
+                    ContentUnavailableView(
+                        label: {
+                            Label(
+                                "No projects",
+                                systemImage: SymbolNames.projects
+                            )
+                        },
+                        description: {
+                            self.makeExplanationText(showNoProjectMessage: true)
+                        },
+                        actions: {
+                            Button("Refresh", action: self.refresh)
+                        }
+                    )
+                } else if filteredProject.isEmpty {
+                    ContentUnavailableView(
+                        "No projects",
+                        systemImage: SymbolNames.search,
+                        description: Text(
+                            "No results found for \"\(searchQuery.trimmed)\""
                         )
-                    },
-                    description: {
-                        self.makeExplanationText(showNoProjectMessage: true)
-                    },
-                    actions: {
-                        Button("Refresh", action: self.refresh)
-                    }
-                )
-            } else {
-                SettingForm {
-                    Section {
-                        ForEach(projects) { project in
-                            NavigationLink {
-                                ConversationListView(
-                                    projectName: project.name,
-                                    conversations: project.conversations,
-                                    refresh: self.refresh
-                                )
-                            } label: {
-                                VStack(alignment: .leading) {
-                                    Text(project.name)
+                    )
+                } else {
+                    SettingForm {
+                        Section {
+                            ForEach(filteredProject) { project in
+                                NavigationLink {
+                                    ConversationListView(
+                                        projectName: project.name,
+                                        conversations: project.conversations
+                                            .filter { !$0.isArchived },
+                                        refresh: self.refresh
+                                    )
+                                } label: {
+                                    VStack(alignment: .leading) {
+                                        Text(project.name)
 
-                                    if let projectFile = project.projectFile {
-                                        HStack {
-                                            Text(projectFile.lastPathComponent)
+                                        if let projectFile = project.projectFile
+                                        {
+                                            HStack {
+                                                Text(
+                                                    projectFile
+                                                        .lastPathComponent
+                                                )
                                                 .foregroundStyle(.secondary)
                                                 .font(.subheadline)
-                                            Button(
-                                                "Open",
-                                                systemImage: "arrow.right"
-                                            ) {
-                                                NSWorkspace.shared
-                                                    .activateFileViewerSelecting(
-                                                        [
-                                                            projectFile
-                                                        ])
+                                                Button(
+                                                    "Open",
+                                                    systemImage: "arrow.right"
+                                                ) {
+                                                    NSWorkspace.shared
+                                                        .activateFileViewerSelecting(
+                                                            [
+                                                                projectFile
+                                                            ])
+                                                }
+                                                .font(.footnote)
+                                                .fontWeight(.medium)
+                                                .labelStyle(.iconOnly)
+                                                .buttonStyle(.link)
                                             }
-                                            .font(.footnote)
-                                            .fontWeight(.medium)
-                                            .labelStyle(.iconOnly)
-                                            .buttonStyle(.link)
-                                        }
 
+                                        }
                                     }
                                 }
                             }
+                        } header: {
+                            self.makeExplanationText(
+                                showNoProjectMessage: false
+                            )
                         }
-                    } header: {
-                        self.makeExplanationText(showNoProjectMessage: false)
                     }
+                    .refreshable(action: self.refresh)
                 }
-                .refreshable(action: self.refresh)
-                .navigationTitle("Xcode Projects")
-                .navigationSubtitle("Projects with existing conversations")
-                .environment(self.chatWatcher)
-            }
-        }
-    }
 
-    private func refresh() {
-        self.projects = Self.listProject()
+            }
+            .navigationTitle("Xcode Projects")
+            .navigationSubtitle("Projects with existing conversations")
+            .environment(self.chatWatcher)
+            .searchable(
+                text: $searchQuery,
+                prompt: Text("Project / conversation name...")
+            )
+
+        }
     }
 
     @ContentBuilder
@@ -102,6 +121,16 @@ struct ChatWatcherView: View {
             2. Enable push notification on iOS.
             """
         ExplanationText(LocalizedStringKey(message.trimmed))
+            .padding(.bottom, 2)
+    }
+
+    private static func listProject() -> [XcodeProject] {
+        return ChatStore.listProjects()
+            .filter { $0.projectFile != nil }
+    }
+
+    private func refresh() {
+        self.projects = Self.listProject()
     }
 }
 
@@ -112,24 +141,61 @@ private struct ConversationListView: View {
     let conversations: [XcodeConversation]
     let refresh: () -> Void
 
+    @State private var searchQuery: String = ""
+
+    private var filteredConversation: [XcodeConversation] {
+        return self.conversations.applySearchQuery(searchQuery)
+    }
+
     var body: some View {
-        SettingForm {
-            Section {
-                ForEach(conversations.filter { !$0.isArchived }) {
-                    conversation in
-                    ConversationView(conversation: conversation)
+        Group {
+            if conversations.isEmpty {
+                ContentUnavailableView(
+                    label: {
+                        Label(
+                            "No conversations",
+                            systemImage: SymbolNames.conversations
+                        )
+                    },
+                    actions: {
+                        Button("refresh", action: refresh)
+                    }
+                )
+
+            } else if filteredConversation.isEmpty {
+                ContentUnavailableView(
+                    "No conversations",
+                    systemImage: SymbolNames.search,
+                    description: Text(
+                        "No results found for \"\(searchQuery.trimmed)\""
+                    )
+                )
+            } else {
+                SettingForm {
+                    Section {
+                        ForEach(filteredConversation) {
+                            conversation in
+                            ConversationView(conversation: conversation)
+                        }
+                    } header: {
+                        ExplanationText(
+                            "Check a conversation to start watching."
+                        )
+                    }
                 }
-            } header: {
-                ExplanationText("Check a conversation to start watching.")
+                .refreshable { refresh() }
             }
         }
-        .refreshable { refresh() }
         .navigationTitle("Conversations")
         .navigationSubtitle(projectName)
-
+        .searchable(
+            text: $searchQuery,
+            prompt: Text("Conversation name...")
+        )
     }
 }
 
+// TODO: - not working correctly for empty chat (aka: chat created in xcode but doesn't contain a single message -> no session history in the provider side)
 private struct ConversationView: View {
     @Environment(ChatWatcher.self) private var chatWatcher
     let conversation: XcodeConversation

@@ -46,7 +46,7 @@ struct XcodeAgentRemoteApp: App {
                 .environment(apiServerManager)
                 .environment(chatWatcher)
         }
-        .defaultSize(width: 720, height: 560)
+        .defaultSize(width: 800, height: 600)
         .restorationBehavior(.automatic)
     }
 }

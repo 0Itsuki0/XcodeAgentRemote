@@ -10,7 +10,7 @@ import SwiftUI
 enum DashboardOption: String, Hashable, CaseIterable {
     case server
     case watcher
-    case appleEvent
+    case permissions
 
     var label: String {
         switch self {
@@ -18,8 +18,8 @@ enum DashboardOption: String, Hashable, CaseIterable {
             "API Server"
         case .watcher:
             "Chat Watcher"
-        case .appleEvent:
-            "Apple Event"
+        case .permissions:
+            "Permissions"
         }
     }
 
@@ -29,8 +29,8 @@ enum DashboardOption: String, Hashable, CaseIterable {
             "API Server Setting"
         case .watcher:
             "Chat Watcher"
-        case .appleEvent:
-            "Apple Event Permission"
+        case .permissions:
+            "Permissions"
         }
     }
 }
@@ -38,7 +38,7 @@ enum DashboardOption: String, Hashable, CaseIterable {
 struct DashboardWindow: View {
     static let identifier = "DashboardWindow"
 
-    @State private var selection: DashboardOption = .watcher
+    @State private var selection: DashboardOption = .server
 
     var body: some View {
         NavigationSplitView {
@@ -49,14 +49,23 @@ struct DashboardWindow: View {
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(240)
+            .safeAreaInset(edge: .bottom, alignment: .trailing) {
+                if let version = AppConstants.appVersion {
+                    Text("v\(version)")
+                        .font(.footnote)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                        .padding(.all)
+                }
+            }
         } detail: {
             switch selection {
             case .server:
                 ServerSettingView()
             case .watcher:
                 ChatWatcherView()
-            case .appleEvent:
-                AppleEventView()
+            case .permissions:
+                PermissionView()
             }
 
         }

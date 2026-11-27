@@ -26,10 +26,7 @@ struct ConversationListView: View {
     }
 
     private var filteredConversation: [XcodeConversation] {
-        let base = self.allConversation
-        let query = searchQuery.trimmed
-        guard !query.isEmpty else { return base }
-        return base.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        return self.allConversation.applySearchQuery(searchQuery)
     }
 
     @Environment(\.tappedConversationId) private var tappedConversationId
@@ -147,12 +144,6 @@ struct ConversationListView: View {
                     actions: {
                         Button("refresh", action: refreshSync)
                     }
-                )
-                .frame(maxHeight: .infinity, alignment: .center)
-
-                ContentUnavailableView(
-                    "No conversations",
-                    systemImage: SymbolNames.projects
                 )
                 .frame(maxHeight: .infinity, alignment: .center)
             }

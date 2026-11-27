@@ -53,12 +53,12 @@ struct ServerSettingView: View {
                     self.textEntryRow(
                         title: "Name",
                         text: $authHeaderName,
-                        prompt: "Authorization"
+                        prompt: "ex: Authorization"
                     )
                     self.textEntryRow(
                         title: "Value",
                         text: $authHeaderValue,
-                        prompt: "Bearer tok_live_9f8e"
+                        prompt: "ex: Bearer tok_live_9f8e"
                     )
                 }
             } header: {

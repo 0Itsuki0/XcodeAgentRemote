@@ -24,6 +24,20 @@ nonisolated struct XcodeProject: Codable, Identifiable, Sendable, Hashable,
     var id: String { store.lastPathComponent }
 }
 
+extension Array where Element == XcodeProject {
+    func applySearchQuery(_ query: String) -> Self {
+        let base = self
+        let query = query.trimmed
+        guard !query.isEmpty else { return base }
+        return base.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.conversations.map(\.name).contains(where: {
+                    $0.localizedCaseInsensitiveContains(query)
+                })
+        }
+    }
+}
+
 /// One Xcode conversation, as a project lists it (no history: `XcodeConversationDetail` has it).
 /// It runs in one agent session (`providerSessionID`).
 nonisolated struct XcodeConversation: Codable, Identifiable, Sendable,
@@ -49,6 +63,15 @@ nonisolated struct XcodeConversation: Codable, Identifiable, Sendable,
     var lastActivityDate: Date?
     /// The Mac watches its session's transcript (`POST /conversations/<id>/watch`).
     var isWatching: Bool = false
+}
+
+extension Array where Element == XcodeConversation {
+    func applySearchQuery(_ query: String) -> Self {
+        let base = self
+        let query = query.trimmed
+        guard !query.isEmpty else { return base }
+        return base.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
 }
 
 /// Type for `GET /conversations/<id>`

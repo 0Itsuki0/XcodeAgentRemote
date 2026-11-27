@@ -7,7 +7,16 @@
 
 import SwiftUI
 
-struct AppleEventView: View {
+struct PermissionView: View {
+    var body: some View {
+        SettingForm {
+            AppleEventSection()
+        }
+        .navigationTitle(DashboardOption.permissions.navigationTitle)
+    }
+}
+
+private struct AppleEventSection: View {
     @State private var permissionGranted: Bool = false
     @State private var automationStatus: XcodeAutomation.PermissionStatus =
         .notDetermined
@@ -20,13 +29,17 @@ struct AppleEventView: View {
     @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
-        SettingForm {
-            Section {
-                Toggle(
-                    "Automation Permission",
-                    isOn: $permissionGranted
-                )
-            } header: {
+        Section {
+            Toggle(
+                "Automation Permission",
+                isOn: $permissionGranted
+            )
+        } header: {
+            VStack(alignment: .leading) {
+                Text("App Event")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+
                 ExplanationText(
                     """
                     Apple event / Automation used for closing Xcode project before 
@@ -39,9 +52,10 @@ struct AppleEventView: View {
                     For more details, please refer to [Why not keep Xcode open](\(String.gitHub)#why-not-keep-xcode-open)
                     """
                 )
+                .padding(.vertical, 2)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigationTitle(DashboardOption.appleEvent.navigationTitle)
         .onChange(of: self.permissionGranted) {
             self.handlePermissionToggle()
         }
