@@ -4,7 +4,8 @@
 
 ## Table of Contents
 
-- [Base Approach](#base-approach)
+- [Apps](#apps)
+- [Basic Idea / Approach](#basic-idea--approach)
 - [Run Xcode Agent Programmatically](#run-xcode-agent-programmatically)
     - [Basic Idea](#basic-idea)
     - [`xcrun` Command](#xcrun-command)
@@ -18,23 +19,77 @@
 - [Additional Notes / Discussions](#additional-notes--discussions)
     - [Running From Terminal?](#running-from-terminal)
 
-## Permissions Required
+## Apps
 
-### MacOS
+### Download
+
+- MacOS: [GitHub Release](https://github.com/0Itsuki0/XcodeAgentRemote/releases)
+- iOS: Under review
+
+Matching version: MacOS 1.0.0 + iOS 1.0.0
+
+### Permissions Required
+
+**MacOS**
 
 | Permission | Why it is needed |
 | --- | --- |
 | Automation: Apple Events to Xcode (`AUTOMATION_APPLE_EVENTS`, `NSAppleEventsUsageDescription`) | to close the project's window in Xcode with AppleScript (`XcodeAutomation.closeProject`). Asked the first time, while Xcode is running (`XcodeAutomation.automationPermission`). A denied permission can only be changed in System Settings → Privacy & Security → Automation |
 
-### iOS
+**iOS**
 
 | Permission | Why it is needed |
 | --- | --- |
 | Notifications: alert, sound, badge (`requestAuthorization`) | to show a watched conversation's change as a notification and badge (asked in `NotificationSettingView`) |
 
 
+### Requirements
+- A Mac with Xcode 27.2 or later, with Xcode's coding agent set up and signed in
+- A way to expose local endpoint to https to be connected from iOS
+    - personally prefer ngrok. [ngrok supports Static dev domains for all users](https://ngrok.com/blog/free-static-domains-ngrok-users)
+- Sign in to the same Apple ID / iCloud account on the Mac and the iPhone (only needed for notifications)
 
-## Base Approach
+### Set up
+
+**MacOS**
+1. Open the Mac app. Under "App Server", configure the port, optionally authorization, and start the server.
+2. Start a tunnel of your choice to expose local endpoint to https.
+    - if using ngrok, you can also start it directly from the app given that you have `ngrok` cli installed and signed in, as well as obtained a URL for forwarding.
+3. Under "Permission" tab, grant permission for Apple Event (Automation). It only uses this to close the
+project's window before it sends a message. For more details, refer to the [Why not keep Xcode open section](#why-not-keep-xcode-open).
+4. Optionally under "Chat Watcher" tab, watch specific conversations to receive real time push notifications on iOS when conversation updates (new messages, permission requests, and etc.).
+
+**iOS**
+1. Open "Settings" > "Server".
+2. Enter the same https URL exposed by the tunnel. If you have set an Authorization header, enter the same header name and value as well.
+3. Optionally test the connection with "Test connection", and then "Save configuration".
+4. Under "Push Notification", grant permission to push notification if you want to receive real time notifications on watched conversations.
+
+
+### Things to try on iOS
+- Open a conversation to see its history
+- Send a message and watch the reply stream in
+- Ask the agent to do something that needs permission (for example, "create a file named test.txt")
+and approve or deny it from the phone
+- Ask the agent to enter the plan mode and approval / decline the plan
+- Ask the agent to ask questions and answer the question from the phone
+- Watch a conversation, allow notifications, and get a notification when there is a new message from assistant
+- Open the conversation in Xcode to confirm all the interactions above are available from the Xcode UI as well
+
+### Agent Support
+
+| Agent | Support State |
+| --- | --- |
+| claude (claude code) | ✅ |
+| codex | Working! |
+| antigravity | Probably never |
+| copilot | Probably never |
+
+### Demo Video
+
+
+
+## Basic Idea / Approach
 
 1. Local server to receive request from IOS (ping, list projects, get conversation, send message and stream response)
     - no unified server to avoid unnecessary hosting on itsuki's side which includes cloud hosting, authorization, database and etc.
