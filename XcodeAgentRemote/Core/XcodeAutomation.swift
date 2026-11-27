@@ -36,12 +36,6 @@ nonisolated enum XcodeAutomation {
     /// setting URL to open up System Settings → Privacy & Security → Automation directly
     static let settingURL =
         "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
-
-    static private var isXcodeRunning: Bool {
-        !NSRunningApplication.runningApplications(
-            withBundleIdentifier: bundleIdentifier
-        ).isEmpty
-    }
 }
 
 extension XcodeAutomation {
@@ -54,20 +48,34 @@ extension XcodeAutomation {
     /// This class is not thread-safe. Initializing, compiling, or executing an NSAppleScript from a background thread causes random crashes, hangs, or Apple Event manager failures.
     @MainActor @discardableResult
     static func closeProject(at project: URL) throws -> Bool {
-        guard isXcodeRunning else { return false }
+        // Xcode and Xcode-beta share a bundle id, and `tell application id`
+        // only reaches the default one, so target each running Xcode by its path.
+        let xcodePaths = NSRunningApplication.runningApplications(
+            withBundleIdentifier: bundleIdentifier
+        ).compactMap { $0.bundleURL?.path }
+        guard !xcodePaths.isEmpty else { return false }
 
         // Xcode reports a document's path without a trailing slash.
         var path = project.standardizedFileURL.path
         while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
-        let escaped =
-            path
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
 
+        var closed = false
+        for xcodePath in xcodePaths {
+            if try closeProject(path: path, inXcodeAt: xcodePath) {
+                closed = true
+            }
+        }
+        return closed
+    }
+
+    @MainActor
+    static private func closeProject(path: String, inXcodeAt xcodePath: String)
+        throws -> Bool
+    {
         let source = """
-            tell application id "\(bundleIdentifier)"
-                set openCount to count of (every workspace document whose path is "\(escaped)")
-                if openCount > 0 then close (every workspace document whose path is "\(escaped)") saving yes
+            tell application "\(escape(xcodePath))"
+                set openCount to count of (every workspace document whose path is "\(escape(path))")
+                if openCount > 0 then close (every workspace document whose path is "\(escape(path))") saving yes
                 return openCount
             end tell
             """
@@ -90,6 +98,12 @@ extension XcodeAutomation {
             )
         }
         return result.int32Value > 0
+    }
+
+    static private func escape(_ string: String) -> String {
+        string
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
 
