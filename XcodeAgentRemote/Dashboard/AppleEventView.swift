@@ -94,7 +94,6 @@ private struct AppleEventSection: View {
     }
 
     private func openAutomationSettings() {
-        print(#function)
         if let url = URL(string: XcodeAutomation.settingURL) {
             self.openURL(url)
         }
