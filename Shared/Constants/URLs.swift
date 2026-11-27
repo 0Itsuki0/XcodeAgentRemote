@@ -13,6 +13,7 @@ nonisolated extension String {
 
 nonisolated extension URL {
     static let gitHub: URL? = URL(string: .gitHub)
-    // TODO: - add privacy url
-    static let privacy: URL? = URL(string: "")
+    static let privacy: URL? = URL(
+        string: "https://0itsuki0.github.io/XcodeAgentRemote/privacy"
+    )
 }
