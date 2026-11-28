@@ -7,6 +7,13 @@
 ## Table of Contents
 
 - [Apps](#apps)
+    - [Download](#download)
+    - [Permissions Required](#permissions-required)
+    - [Requirements](#requirements)
+    - [Set up](#set-up)
+    - [Things to try on iOS](#things-to-try-on-ios)
+    - [Agent Support](#agent-support)
+    - [Demo Video](#demo-video)
 - [Basic Idea / Approach](#basic-idea--approach)
 - [Run Xcode Agent Programmatically](#run-xcode-agent-programmatically)
     - [Basic Idea](#basic-idea)
@@ -19,7 +26,9 @@
     - [Sample Send Message Calls](#sample-send-message-calls)
     - [Implement A New Agent Provider](#implement-a-new-agent-provider)
 - [Additional Notes / Discussions](#additional-notes--discussions)
-    - [Running From Terminal?](#running-from-terminal)
+    - [Ways to Drive an Xcode Chat](#ways-to-drive-an-xcode-chat)
+        - [Running From Terminal?](#running-from-terminal)
+        - [Accessibility (UI scripting) details](#accessibility-ui-scripting-details)
 
 ## Apps
 
@@ -97,7 +106,7 @@ https://github.com/user-attachments/assets/9c97d557-b1a3-4884-b324-e8c0c2df6a86
     - no unified server to avoid unnecessary hosting on itsuki's side which includes cloud hosting, authorization, database and etc.
     - each user is responsible for starting their own tunnel, for example, with ngrok. ([ngrok supports Static dev domains for all users](https://ngrok.com/blog/free-static-domains-ngrok-users))
     local server started from the mac app instead of a unified server
-    - not using iCloud/CloudKit sync because this needs real time instead of just on a best-effort base
+    - not using iCloud/CloudKit sync because this needs real time instead of just on a best-effort base, also to avoid overflowing user's iCloud storage.
 2. Run Xcode Agent Programmatically to process the message and get response
     - close the Xcode project (AppleScript) before running the agent: Xcode keeps the project's chats in memory and would write over the turns the app records ([Why not keep Xcode open](#why-not-keep-xcode-open))
 3. Send Push notification with CloudKit on watched conversations to notify iOS changes on (almost) real time.
@@ -494,6 +503,12 @@ We need to tell it apart from other tool user so that we can have the user to an
 - a question or a plan: always a request, whatever the settings
 - the check was matched against what Xcode did on 23 Bash commands and 4 other tool uses (Write in a read-only folder, Write and Edit in `/tmp`, ToolSearch): all the same
 
+**Why not use hooks for permission request / response received**
+
+- `PreToolCall` conflicts with Xcode registered ones (Xcode registered hook invoke after any ones set in `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/settings.json`)
+- hard (if no impossible) to control which chat to watch
+- have to inject for both Xcode-started sessions as well as every single message THIS app send.
+
 
 #### Different Permission request logic: Xcode Hook vs agent build in
 
@@ -522,6 +537,9 @@ Evidence:
 - `conversation.plist` after we send a new message from xcode UI
     - still 15 turns: the turn we sent from the app is gone, replaced by the one from Xcode UI
     - Conclusion: Xcode saved what it had in memory, without reading the file first
+
+**Xcode can't be made to reload the chat while it remains open**
+- nothing watches the chat files, no refresh button, switching tabs does nothing
 
 What that means for us:
 - close the project before we call the app's `sendMessage` function to avoid
@@ -568,18 +586,48 @@ What that means for us:
 ### Rejected Approaches
 
 - drive Xcode's chat UI with Accessibility
-    - the message box and the send button can't be focused or typed into from outside
+    - typing into the chat input does work, but it is still rejected: [Control Xcode with Accessibility API](#control-xcode-with-accessibility-api)
 - call into Xcode itself (the private method that sends a message)
     - needs SIP or library validation turned off. not something every Mac can do
-- `MCP_XCODE_SESSION_ID`, `xcrun mcpbridge` tools
-    - these are for the agent calling Xcode (build, run, read files…), not for sending a message to a chat
-- make Xcode reload the chat while it remains open
-    - nothing watches the chat files, no refresh button, switching tabs does nothing
-- use hooks for permission request / response received
-    - `PreToolCall` conflicts with Xcode registered ones (Xcode registered hook invoke after any ones set in `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/settings.json`)
-    - hard (if no impossible) to control which chat to watch
-    - have to inject for both Xcode-started sessions as well as every single message THIS app send.
 
+#### Control Xcode with Accessibility API
+
+Typing a prompt into Xcode's chat window with the Accessibility API works: find the chat, click the input, paste, Submit (how, tree, constraints, script: [Accessibility (UI scripting) details](#accessibility-ui-scripting-details)).
+Still not used, neither to send messages nor to answer Xcode's own requests.
+
+**What it would give**
+
+- Xcode runs the chat itself: no need to write the turn into Xcode's chat files (`conversation.plist`, `metadata.plist`, `CodingAssistantManifest.plist`, `Snapshots/`), no need to modify the provider's history (Claude's `.jsonl`)
+- no need to close the project before a turn
+
+**Why not: sending a message**
+
+- foreground only
+    - the input can only be focused by a real click, the click and ⌘V go to the frontmost app. Xcode must be frontmost, with the project window open, on the current Space (on another Space, Xcode reports 0 windows)
+    - one chat at a time: several chats at once (easily happens with several remote clients) means taking turns on the one foreground window
+    - the Mac can't be used while being controlled
+    - a locked or sleeping Mac: synthetic clicks and keys don't reach Xcode. that is the normal state of a Mac in real remote use
+- no way to stream the response
+    - no stdout: the agent is Xcode's process, not the app's
+    - polling the window: only the chat in the foreground is in the tree, so that chat has to stay in the foreground for the whole turn, and when the turn ends is hard to tell from the UI
+    - watching the session file (`.jsonl`): when the turn **actually** ends isn't known, and passing the changes from a file watcher to the API's open stream is messy
+    - with `xcrun mcpbridge run-agent`: stream-json gives every event and the exact end of the turn (`result`)
+- breaks if Apple changes the chat UI (found on a beta build, Xcode 27C5020n). the chat files can change too, but that can be checked and tested
+- can't be mixed with the `xcrun` approach for the same project: Accessibility needs the project open, `xcrun` needs it closed ([Why not keep Xcode open](#why-not-keep-xcode-open))
+
+**Why not: answering a request initiated by Xcode**
+
+The idea: keep deciding whether it is Xcode's request as today ([If initiated by Xcode](#if-initiated-by-xcode)), but answer with Xcode's own Yes / No buttons instead of closing the project and resuming the chat. No close, no `Exit code 137` / `cancelled` / `user-rejected` cleanup, no repeat, nothing runs twice.
+
+- no guarantee the chat is the one in the foreground: only the visible chat is in the tree
+- several chats can be waiting for a permission at the same time: each has to be brought to the foreground, one by one
+- pressing Yes / No in the background (`AXPress`) wouldn't help: getting to the chat (window, tab) already needs the foreground
+- no response after answering: Xcode's agent continues the turn, the app gets no stream of it, and the same problems as above (no stdout, turn end unknown from the `.jsonl`)
+
+**Conclusion**
+
+- keep `xcrun mcpbridge run-agent` + writing Xcode's chat files, for every turn
+- keep answering Xcode's requests by closing the project and resuming the chat
 
 ### Sample Send Message Calls
 
@@ -754,18 +802,24 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 
 ## Additional Notes / Discussions
 
-### Running From Terminal?
+### Ways to Drive an Xcode Chat
+
+1. **Drive Xcode's chat UI with the Accessibility API** ([details](#accessibility-ui-scripting-details)). Xcode runs the chat itself, so history and snapshots stay correct. Breaks if Apple changes the UI; Xcode must be open.
+2. **Write Xcode's chat files yourself**: create `<UUID>/conversation.plist` + `metadata.plist`, add an entry to `CodingAssistantManifest.plist`, and set `assistantConfiguration` to base64 of `{"agent":{"_0":{"sessionID":"…"}}}`; run the session from the CLI with `--session-id`. The chat would show up as a record only, without snapshots, and Xcode may need a restart to notice it.
+3. **Reverse engineer the private frameworks** (`class-dump` / disassembler on `IDEIntelligenceChat`) and call into Xcode via code injection. Lots of work, fragile, needs SIP / library-validation workarounds.
+
+#### Running From Terminal?
 
 **Short answer: no public way to drive an Xcode chat from the terminal.** A session started with `xcrun agent claude` is a plain CLI session and never shows up in Xcode's chat list.
 
-#### Why CLI sessions don't show up in Xcode
+##### Why CLI sessions don't show up in Xcode
 
 - `xcrun agent claude` (= `xcrun mcpbridge run-agent claude`) launches Xcode's bundled `claude` (`~/Library/Developer/Xcode/CodingAssistant/Agents/XcodeVersions/<build>/claude/claude`) with Xcode's config (`ClaudeAgentConfig`).
 - Both CLI and Xcode sessions write their transcript to `ClaudeAgentConfig/projects/<cwd-with-dashes>/<sessionID>.jsonl`.
 - Only Xcode also writes its own chat record (`UserData/CodingAssistant/<Project>-<hash>/<chat-UUID>/conversation.plist`, `metadata.plist`, `Snapshots/`, `CodingAssistantManifest.plist`). Xcode's chat list reads **only** from there, so CLI sessions never appear in Xcode. The link is one-way: Xcode chat → Claude session.
 - Sessions are tagged by `entrypoint` in the `.jsonl`: CLI = `"cli"`, Xcode = `"sdk-cli"` (Xcode runs it through the SDK).
 
-#### Resuming an Xcode chat from the terminal
+##### Resuming an Xcode chat from the terminal
 
 - `/resume` in the CLI does **not** list Xcode chats. Claude Code deliberately filters out sessions whose `entrypoint` is `sdk-cli` / `sdk-ts` / `sdk-py` when the current session is a CLI one (`Session … filtered from /resume: entrypoint=sdk-cli`).
 - Resuming by ID works:
@@ -777,7 +831,7 @@ xcrun agent claude --resume <sessionID>   # sessionID from conversation.plist �
 
 - Anything added this way goes into the `.jsonl` only. Xcode's `conversation.plist` is not updated, so the chat shown in Xcode will stop matching the transcript.
 
-#### What doesn't work
+##### What doesn't work
 
 - `MCP_XCODE_PID` / `MCP_XCODE_SESSION_ID`: these pick which Xcode (and which tool session) the MCP bridge talks to. They are for the agent calling Xcode, not for sending a chat into Xcode.
 - `xcrun mcpbridge` tools (`BuildProject`, `XcodeRead`, `RunProject`, `RenderPreview`, …): agent → Xcode only. None of them creates or sends a chat.
@@ -785,13 +839,7 @@ xcrun agent claude --resume <sessionID>   # sessionID from conversation.plist �
 - Xcode URL schemes (`xcode`, `xcdevice`, `xcdoc`, …): nothing chat-related.
 - Private frameworks (`Xcode.app/Contents/PlugIns/IDEIntelligenceChat.framework`, `IDEIntelligenceAgents.framework`, `IDEIntelligenceACP.framework`): the only service-like name found is `com.apple.dt.internal.genAIAgentProxyService`, which looks internal to Xcode. No external XPC service, URL handler or App Intent was found for sending a prompt.
 
-#### Unofficial options
-
-1. **Drive Xcode's chat UI with the Accessibility API** (details below). Xcode runs the chat itself, so history and snapshots stay correct. Breaks if Apple changes the UI; Xcode must be open.
-2. **Write Xcode's chat files yourself**: create `<UUID>/conversation.plist` + `metadata.plist`, add an entry to `CodingAssistantManifest.plist`, and set `assistantConfiguration` to base64 of `{"agent":{"_0":{"sessionID":"…"}}}`; run the session from the CLI with `--session-id`. The chat would show up as a record only, without snapshots, and Xcode may need a restart to notice it.
-3. **Reverse engineer the private frameworks** (`class-dump` / disassembler on `IDEIntelligenceChat`) and call into Xcode via code injection. Lots of work, fragile, needs SIP / library-validation workarounds.
-
-#### Option 1: Accessibility (UI scripting) details
+#### Accessibility (UI scripting) details
 
 Requirement: the app running the script (e.g. Terminal) needs **System Settings → Privacy & Security → Accessibility**. Without it: `osascript is not allowed assistive access. (-1728)`. Restart the app after enabling.
 
@@ -802,48 +850,212 @@ AXWindow  id=Xcode.WorkspaceWindow
 └ … AXGroup  id="editor context"  desc="New Conversation"
     └ AXSplitGroup / AXSplitGroup
         └ AXGroup  sub=AXHostingView                     ← chat view (SwiftUI)
-            ├ [0] AXScrollArea → AXOpaqueProviderGroup   ← transcript; messages are AXStaticText values
-            ├ [1] AXScrollArea → AXUnknown               ← prompt input
-            ├ [2] AXMenuButton  id=paperclip  title=Attachments
-            ├ [3] AXMenuButton  help=Model   title=<model, e.g. Opus 5.5>
-            ├ [4] AXMenuButton  help=Mode    title=<e.g. Manual Mode>
-            └ [5] AXButton      id=arrow.up  desc=Submit  (AXPress; disabled while input is empty)
+            ├ AXScrollArea → AXOpaqueProviderGroup       ← transcript; messages are AXStaticText values
+            ├ (AXStaticText + AXButton "Yes" / "No")     ← only while the agent is asking a question
+            ├ AXScrollArea → AXUnknown                   ← prompt input
+            ├ AXMenuButton  id=paperclip  title=Attachments
+            ├ AXMenuButton  help=Model   title=<model, e.g. Opus 5.5>
+            ├ AXMenuButton  help=Mode    title=<e.g. Manual Mode>
+            └ AXButton      id=arrow.up  desc=Submit  (AXPress; disabled while input is empty)
 ```
 
-Findings:
+What works (tested on Xcode 27C5020n):
 
-- **Prompt input** is an `AXUnknown` with **no `AXValue`**, so text can't be set directly. Its `AXFocused` is settable, and it has a custom action named `Submit`. To enter text: focus it, then type with key events or paste (clipboard + ⌘V).
-- **Send**: `AXPress` on the button with `AXIdentifier = "arrow.up"` (enabled only once the input has text), or perform the input's `Submit` action.
-- **Read replies**: the transcript is `AXStaticText` elements under the first `AXScrollArea`. Poll it, or read `conversation.plist` / the session `.jsonl` instead (more reliable).
-- **New chat**: menu item `File → New → Conversation` (`AXIdentifier = newCodingAssistant:`). Also `Conversation in New Tab` (`newCodingAssistantWithAlternate:`) and `Conversation in Editor Pane` (`newCodingAssistantWithShiftPlusAlternate:`).
+- **Find the chat**: search the window for the button with `AXIdentifier = "arrow.up"`; its `AXParent` is the chat view.
+- **Find the input**: the `AXUnknown` inside an `AXScrollArea` of the chat view. Find it by role, not index: a pending Yes/No question inserts extra children before it.
+- **Focus the input**: a real mouse click at the input's position. Setting `AXFocused = true` reports success but does **not** move keyboard focus (Xcode's focused element stays elsewhere).
+- **Enter text**: clipboard + ⌘V after the click. Confirmed by the Submit button switching from disabled to enabled.
+- **New chat**: `AXPress` on the menu item `File → New → Conversation` (`AXIdentifier = newCodingAssistant:`). Also `Conversation in New Tab` (`newCodingAssistantWithAlternate:`) and `Conversation in Editor Pane` (`newCodingAssistantWithShiftPlusAlternate:`).
 - **Switch chat**: the editor tab bar has an `AXRadioButton` (`sub=AXTabButton`) per open chat, titled with the chat name; `Window` menu has `<Project> — <chat name>` items.
-- Find elements by `AXIdentifier` (`arrow.up`, `paperclip`, `editor context`) rather than child indexes, since indexes change with the layout.
+- **Read replies**: the transcript is `AXStaticText` elements under the first `AXScrollArea`. Reading `conversation.plist` / the session `.jsonl` is more reliable.
 
-Sketch (AppleScript; finds the chat via the Submit button, pastes the prompt, presses Submit). **Not yet run end to end**:
+Constraints:
+
+- **Xcode must have a project window with a chat open** and be frontmost. The click and paste are real mouse/keyboard events, so don't use the Mac while the script runs (~4 s).
+- **The input has no `AXValue`**: text can't be set directly, only typed or pasted. The script temporarily replaces the clipboard (restored afterwards).
+- **Element references go stale** after typing: SwiftUI rebuilds the chat view, so look the Submit button up again before using it.
+- **Can't send while a question is pending**: Submit stays disabled until the Yes/No question is answered.
+- **Two Xcode installs** (e.g. Xcode + Xcode-beta) both have the process name `Xcode`, so `process "Xcode"` may pick the wrong one.
+- **Sending works** (tested, besides `--dry-run`): either click the Submit button, or simulate a Return key press in the input.
+- In AppleScript, store `entire contents of front window` in a variable before looping: `repeat with b in (entire contents …)` re-evaluates the expression every pass and finds nothing.
+- **Speed: AppleScript vs Accessibility API.** The AppleScript below takes ~4.4 s per send; the Swift version takes ~0.3 s (both measured with `--dry-run`). The Accessibility API itself is fast: finding the Submit button takes 7–10 ms (79 elements), the input < 1 ms, the `File → New → Conversation` menu item ~60 ms. The AppleScript time is ~1.3 s of fixed `delay`s plus one System Events round trip per element checked while searching `entire contents` (done twice). The Swift version polls for the expected state instead of sleeping.
+- **Foreground vs background.** Reading the tree (transcript, input, Submit and its enabled state) works with Xcode in the background, but not when the window is on another Space (Xcode then reports 0 windows). Sending needs Xcode frontmost: the input can only be focused by a real click, and the click and ⌘V are synthetic events that go to the frontmost app. Posting keys to Xcode's process (`CGEvent.postToPid`) wouldn't avoid this, since the keys still go to whatever has focus inside Xcode, and focusing needs the click. So the whole send happens in the foreground; background access only helps for reading, and replies are better read from the `.jsonl` / `conversation.plist` anyway.
+- **Bringing Xcode to the front from a CLI tool**: `NSRunningApplication.activate()`, `NSWorkspace.openApplication` and setting `AXFrontmost` did not work; AppleScript `activate` (via `NSAppleScript`) did, in ~200 ms. Check the result with the app's `AXFrontmost` attribute: `NSWorkspace.frontmostApplication` doesn't update without a run loop.
+
+Script (AppleScript). `--dry-run` checks that the text reached the input, then clears it without sending:
 
 ```applescript
+-- usage: osascript send-to-xcode.applescript "<prompt>" [--dry-run]
+on findSubmitButton()
+    tell application "System Events" to tell process "Xcode"
+        -- fetch once: `repeat with b in (entire contents …)` re-evaluates the expression every pass
+        set allElements to entire contents of front window
+        repeat with b in allElements
+            try
+                if value of attribute "AXIdentifier" of b is "arrow.up" then return contents of b
+            end try
+        end repeat
+    end tell
+    error "No open chat found"
+end findSubmitButton
+
 on run argv
     set prompt to item 1 of argv
-    set the clipboard to prompt
+    set dryRun to (count of argv) > 1 and item 2 of argv is "--dry-run"
     tell application "Xcode" to activate
+    delay 0.5
+    set submitButton to findSubmitButton()
     tell application "System Events" to tell process "Xcode"
-        set submitButton to missing value
-        repeat with b in (every button of entire contents of front window)
-            if value of attribute "AXIdentifier" of b is "arrow.up" then
-                set submitButton to b
-                exit repeat
-            end if
+        -- prompt input = the AXUnknown inside an AXScrollArea of the chat view
+        -- (found by role: child indexes shift, e.g. when a Yes/No question is pending)
+        set chatView to value of attribute "AXParent" of submitButton
+        set inputField to missing value
+        set scrollAreas to scroll areas of chatView
+        repeat with s in scrollAreas
+            set children to UI elements of s
+            repeat with e in children
+                if role of e is "AXUnknown" then set inputField to contents of e
+            end repeat
         end repeat
-        set chatView to parent of submitButton -- AXHostingView
-        set inputField to UI element 1 of UI element 2 of chatView -- AXScrollArea → AXUnknown
-        set value of attribute "AXFocused" of inputField to true
-        keystroke "v" using command down
+        if inputField is missing value then error "Prompt input not found"
+
+        -- focus with a real click (setting AXFocused does not move keyboard focus)
+        set {x, y} to position of inputField
+        set {w, h} to size of inputField
+        click at {x + w / 2, y + h / 2}
         delay 0.3
+
+        -- paste the prompt, then restore the clipboard
+        set savedClipboard to the clipboard
+        set the clipboard to prompt
+        keystroke "v" using command down
+        delay 0.5
+        set the clipboard to savedClipboard
+    end tell
+
+    -- the chat view is rebuilt after typing, so old references go stale: look the button up again
+    set submitButton to my findSubmitButton()
+    tell application "System Events" to tell process "Xcode"
+        if not (enabled of submitButton) then error "Text did not reach the input (or a question is pending)"
+        if dryRun then
+            keystroke "a" using command down
+            key code 51 -- delete
+            return "dry run OK: text reached the input; cleared without sending"
+        end if
         click submitButton
     end tell
+    return "sent"
 end run
 ```
 
 ```bash
 osascript send-to-xcode.applescript "echo back what i said"
+osascript send-to-xcode.applescript "test" --dry-run
+```
+
+Swift version (Accessibility API directly, ~0.3 s). Same steps and `--dry-run` flag:
+
+```swift
+// usage: swiftc -O SendToXcode.swift -o send-to-xcode && ./send-to-xcode "<prompt>" [--dry-run]
+import Cocoa
+
+func attr(_ e: AXUIElement, _ name: String) -> AnyObject? {
+    var v: AnyObject?
+    return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil
+}
+func children(_ e: AXUIElement) -> [AXUIElement] { (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] }
+func role(_ e: AXUIElement) -> String { (attr(e, kAXRoleAttribute) as? String) ?? "" }
+
+func findSubmitButton(_ e: AXUIElement, depth: Int = 0) -> AXUIElement? {
+    if depth > 60 { return nil }
+    if role(e) == "AXButton", (attr(e, kAXIdentifierAttribute) as? String) == "arrow.up" { return e }
+    for c in children(e) { if let f = findSubmitButton(c, depth: depth + 1) { return f } }
+    return nil
+}
+// Submit button of the first chat found in any Xcode window
+func findChat() -> (NSRunningApplication, AXUIElement)? {
+    for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dt.Xcode") {
+        let windows = (attr(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        for w in windows { if let s = findSubmitButton(w) { return (app, s) } }
+    }
+    return nil
+}
+func isEnabled(_ e: AXUIElement) -> Bool { (attr(e, kAXEnabledAttribute) as? Bool) ?? false }
+func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+    let end = Date().addingTimeInterval(timeout)
+    while Date() < end { if condition() { return true }; usleep(20_000) }
+    return condition()
+}
+func postKey(_ key: CGKeyCode, flags: CGEventFlags = []) {
+    for down in [true, false] {
+        let e = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: down)!
+        e.flags = flags
+        e.post(tap: .cghidEventTap)
+    }
+}
+func fail(_ msg: String) -> Never { FileHandle.standardError.write((msg + "\n").data(using: .utf8)!); exit(1) }
+
+let args = CommandLine.arguments
+guard args.count >= 2 else { fail("usage: send-to-xcode <prompt> [--dry-run]") }
+let prompt = args[1]
+let dryRun = args.contains("--dry-run")
+guard AXIsProcessTrusted() else { fail("Accessibility permission missing for this process") }
+let start = Date()
+
+// 1. find the chat (works with Xcode in the background, but not on another Space)
+guard var (xcode, submit) = findChat() else { fail("No open chat found") }
+guard let chatView = attr(submit, kAXParentAttribute).map({ $0 as! AXUIElement }) else { fail("Chat view not found") }
+// 2. prompt input = AXUnknown inside an AXScrollArea of the chat view (by role, not index)
+guard let input = children(chatView).filter({ role($0) == "AXScrollArea" }).flatMap(children).first(where: { role($0) == "AXUnknown" })
+else { fail("Prompt input not found") }
+
+// 3. click and paste are real events: Xcode must be frontmost.
+//    From a CLI tool, NSRunningApplication.activate(), NSWorkspace.openApplication and setting
+//    AXFrontmost did not bring Xcode forward; AppleScript `activate` did. Target it by bundle path:
+//    with Xcode + Xcode-beta installed, "Xcode" is ambiguous.
+var scriptError: NSDictionary?
+NSAppleScript(source: "tell application \"\(xcode.bundleURL!.path)\" to activate")!.executeAndReturnError(&scriptError)
+// (check via AX: NSWorkspace.frontmostApplication doesn't update without a run loop)
+guard waitUntil(timeout: 2, { (attr(AXUIElementCreateApplication(xcode.processIdentifier), "AXFrontmost") as? Bool) == true }) else { fail("Could not bring Xcode to the front") }
+
+// 4. focus with a real click (setting AXFocused does not move keyboard focus)
+var origin = CGPoint.zero, size = CGSize.zero
+AXValueGetValue(attr(input, kAXPositionAttribute) as! AXValue, .cgPoint, &origin)
+AXValueGetValue(attr(input, kAXSizeAttribute) as! AXValue, .cgSize, &size)
+let point = CGPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
+for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+    CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)!.post(tap: .cghidEventTap)
+}
+_ = waitUntil(timeout: 1) { attr(AXUIElementCreateApplication(xcode.processIdentifier), kAXFocusedUIElementAttribute).map { role($0 as! AXUIElement) } == "AXTextArea" }
+
+// 5. paste the prompt, then restore the clipboard
+let pasteboard = NSPasteboard.general
+let saved = pasteboard.string(forType: .string)
+pasteboard.clearContents()
+pasteboard.setString(prompt, forType: .string)
+postKey(9, flags: .maskCommand) // ⌘V
+
+// 6. Submit becomes enabled once the text is in. Re-find it each poll: the chat view is rebuilt after typing.
+let landed = waitUntil(timeout: 2) {
+    guard let (_, s) = findChat() else { return false }
+    submit = s
+    return isEnabled(s)
+}
+if let saved { pasteboard.clearContents(); pasteboard.setString(saved, forType: .string) }
+guard landed else { fail("Text did not reach the input (or a question is pending)") }
+
+if dryRun {
+    postKey(0, flags: .maskCommand) // ⌘A
+    postKey(51)                      // delete
+    print(String(format: "dry run OK in %.2f s: text reached the input; cleared without sending", Date().timeIntervalSince(start)))
+} else {
+    guard AXUIElementPerformAction(submit, kAXPressAction as CFString) == .success else { fail("Submit press failed") }
+    print(String(format: "sent in %.2f s", Date().timeIntervalSince(start)))
+}
+```
+
+```bash
+swiftc -O SendToXcode.swift -o send-to-xcode
+./send-to-xcode "echo back what i said"
+./send-to-xcode "test" --dry-run
 ```
