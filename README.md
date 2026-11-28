@@ -37,7 +37,7 @@
 - MacOS: [GitHub Release](https://github.com/0Itsuki0/XcodeAgentRemote/releases)
 - iOS: Under review
 
-Matching version: MacOS 1.0.0 + iOS 1.0.0
+Matching version: MacOS `1.0.0` + iOS `1.0.0`.
 
 ### Permissions Required
 
@@ -67,7 +67,7 @@ Matching version: MacOS 1.0.0 + iOS 1.0.0
 2. Start a tunnel of your choice to expose local endpoint to https.
     - if using ngrok, you can also start it directly from the app given that you have `ngrok` cli installed and signed in, as well as obtained a URL for forwarding.
 3. Under "Permission" tab, grant permission for Apple Event (Automation). It only uses this to close the
-project's window before it sends a message. For more details, refer to the [Why not keep Xcode open section](#why-not-keep-xcode-open).
+project's window before it sends a message. For more details, refer to the [Why not keep Xcode open section](#why-not-keep-Xcode-open).
 4. Optionally under "Chat Watcher" tab, watch specific conversations to receive real time push notifications on iOS when conversation updates (new messages, permission requests, and etc.).
 
 **iOS**
@@ -106,11 +106,14 @@ https://github.com/user-attachments/assets/9c97d557-b1a3-4884-b324-e8c0c2df6a86
     - no unified server to avoid unnecessary hosting on itsuki's side which includes cloud hosting, authorization, database and etc.
     - each user is responsible for starting their own tunnel, for example, with ngrok. ([ngrok supports Static dev domains for all users](https://ngrok.com/blog/free-static-domains-ngrok-users))
     local server started from the mac app instead of a unified server
-    - not using iCloud/CloudKit sync because this needs real time instead of just on a best-effort base, also to avoid overflowing user's iCloud storage.
-2. Run Xcode Agent Programmatically to process the message and get response
-    - close the Xcode project (AppleScript) before running the agent: Xcode keeps the project's chats in memory and would write over the turns the app records ([Why not keep Xcode open](#why-not-keep-xcode-open))
+    - not using iCloud/CloudKit to
+        - sync chat data to avoid overflowing user's iCloud storage.
+        - send request from iOS to MacOS as silent push notifications because this needs real time instead of just on a best-effort base.
+2. [Run Xcode Agent Programmatically](#run-xcode-agent-programmatically) to process the message and get response
+    - close the Xcode project (AppleScript) before running the agent: Xcode keeps the project's chats in memory and would write over the turns the app records ([Why not keep Xcode open](#why-not-keep-Xcode-open))
 3. Send Push notification with CloudKit on watched conversations to notify iOS changes on (almost) real time.
-    - using CloudKit to avoid hosting a unified server for all users or bundling itsuki's own developer certificate within the app
+    - using CloudKit to avoid hosting a unified server for all users or bundling itsuki's own developer certificate within the app...
+    - the message (`CKRecord`) is deleted immediately after delivered to avoid taking unnecessary iCloud Storage. Tested against multiple iOS devices ruining under the same iCloud Account and the notification is delivered to ALL, without being effect by the deletion.
 
 
 ## Run Xcode Agent Programmatically
@@ -119,16 +122,16 @@ https://github.com/user-attachments/assets/9c97d557-b1a3-4884-b324-e8c0c2df6a86
 
 - use `xcrun mcpbridge run-agent <agent>`
     - Xcode's bundled binary, config dir, Xcode MCP tools.
-    - `+` the flags Xcode adds: stream-json, Xcode's system prompt (from its template inside Xcode), Xcode's skills plugin, allowed tools
-    - permission mode follows Xcode's Manual / Auto setting (`IDEChatAgentPermissionMode` in Xcode's preferences: `standard` = Manual, `auto` = Auto), can be overridden per message
-    - Each call to `xcrun mcpbridge run-agent` is single turn only. If the agent asks for user interaction (choices, permission requests), the turn wait until timeout
+    - Add in the flags Xcode adds: stream-json, Xcode's system prompt (from its template inside Xcode), Xcode's skills plugin, allowed tools
+    - permission mode follows Xcode's Manual / Auto setting (`IDEChatAgentPermissionMode` in Xcode's preferences: `standard` = Manual, `auto` = Auto), can be overridden per message. Set by the app. Not something comes together with the command.
+    - Each call to `xcrun mcpbridge run-agent` is single turn only. If the agent asks for user interaction (choices, permission requests), the turn wait until timeout. Decided by the App. Not a command constraint.
 - write the turn into Xcode's chat files, in Xcode's own format
     - `conversation.plist`, `metadata.plist`, `CodingAssistantManifest.plist`, `Snapshots/`
-    - needed so that the user can later continue the chat within xcode
+    - needed so that the user can later continue the chat within Xcode
 - when display chat history within the app, use provider specific chat history.
     - Xcode's chat files are only what Xcode displays. It is not necessarily the full history. It contains unnecessary styling / UI
-- Before sending a message from the app, close xcode programmatically (with apple script) for the corresponding project.
-    - This is needed to avoid doubled tool use, chat history overwrite. In addition, the entries we wrote into the Xcode's chat files needs a reopen on the project to load. (Xcode only read those when open a specific project. After that, it only writes to the file, but read from the session memory/cache.)
+- Before sending a message from the app, close Xcode programmatically (with apple script) for the corresponding project.
+    - This is needed to avoid doubled tool use, chat history overwrite. In addition, the entries we wrote into the Xcode's chat files needs a reopen on the project to load. (Xcode only read those when open a specific project. After that, it only writes to the file, but read from the session memory/cache.) [Why not keep Xcode open](#why-not-keep-Xcode-open)
 
 ### `xcrun` Command
 
@@ -156,7 +159,7 @@ DESCRIPTION:
 ENVIRONMENT VARIABLES:
     MCP_XCODE_PID         Optional. The process ID of the Xcode to connect to.
                           Overrides the default, which connects to the Xcode
-                          selected by xcode-select.
+                          selected by Xcode-select.
 
     MCP_XCODE_SESSION_ID  Optional. A UUID identifying an Xcode tool session.
 
@@ -176,7 +179,7 @@ EXAMPLES:
     # Launch Claude with additional user args
     xcrun mcpbridge run-agent claude --model opus -p "fix the bug"
 
-    # Export every available skill into ./xcode-skills
+    # Export every available skill into ./Xcode-skills
     xcrun agent skills export
 
     # Export to a chosen directory and overwrite anything already there
@@ -186,21 +189,54 @@ EXAMPLES:
     xcrun agent plugin path --plugin-format <name>
 ```
 
+**`xcrun mcpbridge run-agent` is just a wrapper around the agent executable.**
+
+`xcrun mcpbridge run-agent --dry-run claude` shows what it actually runs:
+
+```bash
+<Xcode's bundled claude> --verbose \
+  --mcp-config $TMPDIR/mcp-config-<UUID>.json \
+  --settings '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0","DISABLE_TELEMETRY":"1"},"hasCompletedOnboarding":true}'
+```
+
+with environment variables:
+
+```bash
+CLAUDE_AFK_TIMEOUT_MS=2147483647
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+CLAUDE_CODE_FORWARD_SUBAGENT_TEXT=1
+CLAUDE_CONFIG_DIR=~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig
+MCP_XCODE_PID=<Xcode's PID>
+```
+
+So a normal `claude` install can get the Xcode tools by adding the bridge as an MCP server:
+```bash
+claude mcp add --transport stdio Xcode -- xcrun mcpbridge
+```
+
+Differences from `run-agent`:
+- Binary: your own `claude` install, not the copy Xcode downloads and signature-checks (version may differ).
+- Config dir: `~/.claude` instead of Xcode's `ClaudeAgentConfig` (separate login, settings, history).
+- The `CLAUDE_*` env vars and telemetry settings above are not applied unless you set them yourself.
+
+It only accepts a fixed set of agent names: `antigravity`, `claude`, `claude-ext`, `codex`, `copilot`, `mock-agent`. Custom ACP agents added in Xcode's UI (Settings → Intelligence → Add an ACP Agent) are not exposed through it.
+
+
 ### Important File locations
 - Agent Configuration:  `~/Library/Developer/Xcode/CodingAssistant/`
     - Xcode's agent binary (what `xcrun mcpbridge run-agent claude` runs): `Agents/XcodeVersions/<Xcode build>/claude/claude`
-    - per agent process, temporary: `$TMPDIR/mcp-config-<UUID>.json` (`--mcp-config`), `$TMPDIR/com.apple.dt.IDEIntelligenceAgents/plugins/<Xcode build>/xcode-integration/` (`--plugin-dir`)
-- Chat data (xcode copy): `~/Library/Developer/Xcode/UserData/CodingAssistant`, one folder per project: `<Project>-<hash>/`
+    - per agent process, temporary: `$TMPDIR/mcp-config-<UUID>.json` (`--mcp-config`), `$TMPDIR/com.apple.dt.IDEIntelligenceAgents/plugins/<Xcode build>/Xcode-integration/` (`--plugin-dir`)
+- Chat data (Xcode copy): `~/Library/Developer/Xcode/UserData/CodingAssistant`, one folder per project: `<Project>-<hash>/`
     - `CodingAssistantManifest.plist`: the project's chats (a folder with it is a project's store)
     - `CodingAssistantNavigator.plist`: the chat list Xcode shows
     - `<chat UUID>/conversation.plist`: turns, their cards, `assistantConfiguration`
     - `<chat UUID>/metadata.plist`: name, dates, provider
     - `Snapshots/<UUID>.plist`: git state before / after each turn
-- chat data (provider bundled by xcode)
+- chat data (provider bundled by Xcode)
     - claude session history: `~/Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/projects`, stored as `.jsonl` files.
     - The link: `CodingAssistant/projectName/<conversation_id>/conversation.plist` has a binary field: `assistantConfiguration`. Decoded, it contains: `{"agent":{"_0":{"sessionID":"2a561bc4-7ab8-4561-a88f-69e6a53ca073"}}}` where the `sessionID` is that under provider session history's `projects/projectName/sessionId`.
-    - `conversation_id` is xcode's own id. has nothing to do with `sessionId`.
-- Xcode's system prompt addition (template): `$(xcode-select -p)/../PlugIns/IDEIntelligenceChat.framework/Resources/AgentSystemPromptAddition.idechatprompttemplate`
+    - `conversation_id` is Xcode's own id. has nothing to do with `sessionId`.
+- Xcode's system prompt addition (template): `$(Xcode-select -p)/../PlugIns/IDEIntelligenceChat.framework/Resources/AgentSystemPromptAddition.idechatprompttemplate`
 - Xcode's permission settings (global, Settings → Intelligence; read by `XcodeChat/Permission.swift` on every check): `~/Library/Group Containers/group.com.apple.dt.Xcode.SecureSettingsContainer/CodingAssistant/AgentToolPermissionSettings/`
     - `permissions.json`: `toolRules` (Allowed Tools), `shellCommandRules` (Allowed Commands), `pathRules` (files and folders), `grantCommonLocations`, `dangerouslyAllowAllShellCommands`, `automaticallyManageCommands`, `pathRulesApplyTo`, `removedDefaultCommands`, `removedDefaultPaths`
     - `supervisor-settings.json`: `{"enabled": true}` = Control File & Folder Access on
@@ -442,7 +478,7 @@ We need to tell it apart from other tool user so that we can have the user to an
 - We **cannot** distinguish *a tool that is running* from `a tool waiting for permission` using the following.
     - `.jsonl`: both end with a tool use, no result
         ```json
-        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_012i2BhvPb5GLqqzncFXcaWD", "name": "Bash", "input": {"command": "touch /tmp/xcode-hook-order-test", "description": "Create empty test file in /tmp"}, "caller": {"type": "direct"}}]}}
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_012i2BhvPb5GLqqzncFXcaWD", "name": "Bash", "input": {"command": "touch /tmp/Xcode-hook-order-test", "description": "Create empty test file in /tmp"}, "caller": {"type": "direct"}}]}}
         ```
     - `conversation.plist`: both has a turn without `finishedDate`, no card UI for neither
     - `Snapshots/`. It only snapshot at the start and the end of a turn
@@ -510,7 +546,7 @@ We need to tell it apart from other tool user so that we can have the user to an
 - have to inject for both Xcode-started sessions as well as every single message THIS app send.
 
 
-#### Different Permission request logic: Xcode Hook vs agent build in
+#### Why different Permission request logic: Xcode Hook vs agent build in
 
 Xcode uses its own `PreToolUse` hook for permission request.
 We are using agent's built-in, in the case of claude, `--permission-prompt-tool stdio` + `can_use_tool` requests
@@ -525,27 +561,26 @@ Why are we not using it to reproduce what Xcode does? Does it matter?
 
 #### Why not keep Xcode open
 
-**Xcode use in memory cache for chat**
+**Xcode uses in memory cache for chat**
 
 Evidence:
-- Open the xcode and send some message
+- Open the Xcode and send some message
 - resume the same conversation by sending a message from THIS app's `sendMessage` function
     - `conversation.plist`: 15 turns, the last one is the turn from THIS app
     - Xcode UI is not updated to include the new turn
-- send a new message from xcode UI without reopen xcode, for example, "repeat the last message"
-    - the **agent** (not Xcode, not xcode UI, but the provider side such as claude, codex) will repeat the message we sent from the app (turn 15) → agent knew the message we sent from THIS app (turn 15) as the agent reads its own session history, In the case of claude, claude reads its own `jsonl`.
-- `conversation.plist` after we send a new message from xcode UI
+- send a new message from Xcode UI without reopen Xcode, for example, "repeat the last message"
+    - the **agent** (not Xcode, not Xcode UI, but the provider side such as claude, codex) will repeat the message we sent from the app (turn 15) → agent knew the message we sent from THIS app (turn 15) as the agent reads its own session history, In the case of claude, claude reads its own `jsonl`.
+- `conversation.plist` after we send a new message from Xcode UI
     - still 15 turns: the turn we sent from the app is gone, replaced by the one from Xcode UI
     - Conclusion: Xcode saved what it had in memory, without reading the file first
 
 **Xcode can't be made to reload the chat while it remains open**
 - nothing watches the chat files, no refresh button, switching tabs does nothing
 
-What that means for us:
+What that means for the app:
 - close the project before we call the app's `sendMessage` function to avoid
     - loosing the turns send from the app
     - avoid the user from answering the same permission request / choices twice.
-
 
 ### Current Testing State
 
@@ -586,7 +621,7 @@ What that means for us:
 ### Rejected Approaches
 
 - drive Xcode's chat UI with Accessibility
-    - typing into the chat input does work, but it is still rejected: [Control Xcode with Accessibility API](#control-xcode-with-accessibility-api)
+    - typing into the chat input does work, but it is still rejected: [Control Xcode with Accessibility API](#control-Xcode-with-accessibility-api)
 - call into Xcode itself (the private method that sends a message)
     - needs SIP or library validation turned off. not something every Mac can do
 
@@ -606,18 +641,21 @@ Still not used, neither to send messages nor to answer Xcode's own requests.
     - the input can only be focused by a real click, the click and ⌘V go to the frontmost app. Xcode must be frontmost, with the project window open, on the current Space (on another Space, Xcode reports 0 windows)
     - one chat at a time: several chats at once (easily happens with several remote clients) means taking turns on the one foreground window
     - the Mac can't be used while being controlled
-    - a locked or sleeping Mac: synthetic clicks and keys don't reach Xcode. that is the normal state of a Mac in real remote use
+    - a locked or sleeping Mac, the normal state of a Mac in real remote use
+        - locked screen: synthetic clicks and keys go to the lock screen, not Xcode. `xcrun mcpbridge run-agent` still works: a process and its stdout, no input events (closing the project with AppleScript is best effort, non blocking)
+        - display asleep, Mac awake: the same. `xcrun` works, Accessibility doesn't (the screen locks)
+        - Mac asleep: nothing runs (the server, the tunnel), for both approaches
 - no way to stream the response
     - no stdout: the agent is Xcode's process, not the app's
     - polling the window: only the chat in the foreground is in the tree, so that chat has to stay in the foreground for the whole turn, and when the turn ends is hard to tell from the UI
     - watching the session file (`.jsonl`): when the turn **actually** ends isn't known, and passing the changes from a file watcher to the API's open stream is messy
     - with `xcrun mcpbridge run-agent`: stream-json gives every event and the exact end of the turn (`result`)
 - breaks if Apple changes the chat UI (found on a beta build, Xcode 27C5020n). the chat files can change too, but that can be checked and tested
-- can't be mixed with the `xcrun` approach for the same project: Accessibility needs the project open, `xcrun` needs it closed ([Why not keep Xcode open](#why-not-keep-xcode-open))
+- can't be mixed with the `xcrun` approach for the same project: Accessibility needs the project open, `xcrun` needs it closed ([Why not keep Xcode open](#why-not-keep-Xcode-open))
 
 **Why not: answering a request initiated by Xcode**
 
-The idea: keep deciding whether it is Xcode's request as today ([If initiated by Xcode](#if-initiated-by-xcode)), but answer with Xcode's own Yes / No buttons instead of closing the project and resuming the chat. No close, no `Exit code 137` / `cancelled` / `user-rejected` cleanup, no repeat, nothing runs twice.
+The idea: keep deciding whether it is Xcode's request as today ([If initiated by Xcode](#if-initiated-by-Xcode)), but answer with Xcode's own Yes / No buttons instead of closing the project and resuming the chat. No close, no `Exit code 137` / `cancelled` / `user-rejected` cleanup, no repeat, nothing runs twice.
 
 - no guarantee the chat is the one in the foreground: only the visible chat is in the tree
 - several chats can be waiting for a permission at the same time: each has to be brought to the foreground, one by one
@@ -645,7 +683,7 @@ Calls to the server (JSON body, SSE response), from one chat: `POST /conversatio
 
 ```
 POST /conversations
-{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.xcodeproj","agent":"claude","name":"Sample calls","prompt":"Reply with only the word pong.","permissionModeOverride":"manual"}
+{"id":"7F58BC9E-9D95-4896-9FF2-F857662167F9","project":"file:\/\/\/Users\/itsuki\/Desktop\/XcodeAgentRemote\/XcodeAgentRemote.Xcodeproj","agent":"claude","name":"Sample calls","prompt":"Reply with only the word pong.","permissionModeOverride":"manual"}
 
 event: assistant_message
 data: {"text":"pong","type":"assistant_message"}
@@ -748,7 +786,7 @@ A provider is one type conforming to `AgentProvider` (`Providers/AgentProvider.s
 6. **Pending requests** (`pendingToolUse(sessionID:)`): the session's last tool use, when it waits for the user, both for the app's own turns and Xcode's ([How to determine whether there is a pending user request](#how-to-determine-whether-there-is-a-pending-user-request))
 7. **Resume and repeat**: `isSameCall(_:_:)`, `removeToolUse(_:sessionID:)`, `removeStoppedResult(of:sessionID:)`, `replaceResumeInterruption(with:prompt:sessionID:)`, for a request answered after its agent stopped
 8. **Cards** (`card(for:result:record:)`): what Xcode shows for each tool. copy Xcode's own cards field for field from turns Xcode wrote with that agent
-9. **Register it**: add it to `AgentProviders.all`, and its Xcode model cache id to `XcodeAgentConfiguration.xcodeAgentID(of:)` (`IDEChatGatewayModels.<id>` in `com.apple.dt.Xcode`) so `GET /providers` lists its models
+9. **Register it**: add it to `AgentProviders.all`, and its Xcode model cache id to `XcodeAgentConfiguration.XcodeAgentID(of:)` (`IDEChatGatewayModels.<id>` in `com.apple.dt.Xcode`) so `GET /providers` lists its models
 10. **Test against the real agent**: `SessionHistoryTests` with real session files, `SendMessageTests`, `ScenarioTests` (all of them, again after every change: a build passing proves nothing about the chat store paths or the agent's output)
 
 #### What to confirm (and what went wrong for Claude)
